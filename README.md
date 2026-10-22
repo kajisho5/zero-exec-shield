@@ -76,6 +76,11 @@ chmod +x zes-scan.sh
 
 リポジトリ直下の `index.html` をブラウザで開く（`file://` のままで可）だけで使えます。インストールもサーバーも不要です。
 
+**Web 版:** https://kajisho5.github.io/zero-exec-shield/ （GitHub Pages。main の `index.html` をそのまま配信）
+
+- **通信:** Web 版でも、ページを読み込んだ後の通信はゼロです。CSP の `connect-src 'none'` により、選んだフォルダの内容がブラウザの外に送られることはありません。
+- **配信される版:** 開いた時点の main の版です。特定の版に固定して使う場合や、ネットワークにつながない環境では、`index.html` をダウンロードして `file://` で開いてください。
+
 - **外部通信ゼロ**: JS / CSS / `rules/ioc.json` をすべて 1 ファイルにインライン化しています。CSP は `default-src 'none'; connect-src 'none'`、スクリプトとスタイルはビルド時に計算した SHA-256 だけを許可します（`unsafe-inline` なし）
 - **ファイル内容は判定にのみ使用**: 画面・JSON 出力に出すのはパス・ルール・固定文言・ハッシュだけです。例外は設計書 §13-4 で承認した設定値（MCP の command / args、Actions の `uses:`、拡張のパーミッション名、120 文字まで）
 - **投入方法**: フォルダのドラッグ＆ドロップ、または「フォルダを選択…」（`webkitdirectory`）。テキスト貼り付け判定もできます（内容は再表示しません）
