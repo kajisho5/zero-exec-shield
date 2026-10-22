@@ -21,7 +21,11 @@ function Scanner() {
   const busy = state.phase === 'reading' || state.phase === 'analyzing';
 
   const scan = async (picked: PickedFile[]) => {
-    if (!picked.length) return;
+    if (!picked.length) {
+      // 何も起きないと「安全」と誤認させるため、0 件であることを必ず知らせる（隠しファイルを渡さないブラウザがある）
+      toast({ tone: 'error', text: 'ファイルが 0 件でした。隠しファイル（.mcp.json 等）だけのフォルダはブラウザによって渡されません。ドラッグ＆ドロップか CLI で確認してください' });
+      return;
+    }
     const t0 = performance.now();
     dispatch({ type: 'SCAN_START', total: picked.length, startedAt: nowIso() });
     try {

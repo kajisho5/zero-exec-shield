@@ -117,3 +117,12 @@ test('findings.json の書き出し（ネットワーク不使用のダウンロ
   expect(doc.status).toBe('partial');
   expect(doc.findings[0].skillpact.divergence).toEqual(['exec']);
 });
+
+test('隠しファイルだけのフォルダでも無反応にならない（完了または 0 件の通知）', async ({ page }, info) => {
+  await open(page);
+  await page.getByTestId('dir-input').setInputFiles(FIX + 'mcp');
+  const done = page.getByTestId('scan-status').getByText('スキャン完了');
+  const none = page.getByRole('status').getByText('ファイルが 0 件でした');
+  await expect(done.or(none)).toBeVisible();
+  info.annotations.push({ type: 'dotfiles', description: (await none.isVisible()) ? '隠しファイルを渡さない' : '隠しファイルを渡す' });
+});
