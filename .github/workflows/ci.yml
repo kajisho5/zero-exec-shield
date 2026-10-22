@@ -1,0 +1,50 @@
+# ZES の回帰テスト。外部 Action はコミット SHA で固定（タグは書き換えられうるため）。
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  cli:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: strace（ゼロ実行検証に必須。無いと SKIP になり合格扱いにしない）
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq strace
+      - name: shellcheck
+        run: shellcheck -S warning -e SC2088,SC2066 zes-scan.sh
+      - name: run-tests
+        run: tests/run-tests.sh
+      - name: zero-exec
+        run: tests/zero-exec.sh
+  ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: npm ci（ui/.npmrc で ignore-scripts=true）
+        run: npm ci
+      - name: unit tests
+        run: npm test
+      - name: build（型検査・単一ファイル化・外部通信なしの静的検査を含む）
+        run: npm run build
+      - name: コミット済みの index.html がソースから再現できること
+        run: git diff --exit-code -- ../index.html
+      - name: e2e
+        run: npx playwright install --with-deps chromium && npm run test:e2e
