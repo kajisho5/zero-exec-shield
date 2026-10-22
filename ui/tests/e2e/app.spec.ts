@@ -83,7 +83,8 @@ test('SkillPact: prose 矛盾と差分異常の警告', async ({ page }) => {
 
 test('MCP / Actions / 拡張ビューアと CLI 案内', async ({ page }) => {
   await open(page);
-  await scan(page, 'mcp');
+  // 隠しファイル（.mcp.json）を渡さないブラウザがあるため、ビューアの確認は非隠しの設定ファイルで行う（隠しファイルの扱いは別テスト）
+  await scan(page, 'mcp-visible');
   await page.getByRole('tab', { name: /^MCP/ }).click();
   await expect(page.getByTestId('mcp-viewer').locator('[data-risk=high]')).toHaveCount(1);
   await page.getByRole('tab', { name: /^総合/ }).click();
