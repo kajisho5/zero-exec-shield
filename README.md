@@ -275,3 +275,7 @@ tests/zero-exec.sh            # strace で execve を監視し、フィクスチ
 6. リリース（`CHANGELOG.md`、`incident_bundle` バンプ）
 
 運用ルール: `campaign` 必須（孤立 IoC 禁止）、`bad_versions` / `safe_version` 両方記載、ネットワーク IoC は `[.]` 形式、ハッシュは SHA-256 のみ、`packages[]` は 1 エントリ 1 行。
+
+## ライセンス
+
+[Apache License 2.0](LICENSE)。脆弱性の報告は [SECURITY.md](SECURITY.md) を参照してください。
