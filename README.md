@@ -1,4 +1,6 @@
-# Zero-Exec Shield (ZES) v5.2
+# Zero-Exec Shield (ZES)
+
+バージョン 0.1.0（ZES v5.2 Master Specification 準拠）
 
 **incident_bundle: `ZES-2026-OCT-EMERGENCY-V5.2`**
 
