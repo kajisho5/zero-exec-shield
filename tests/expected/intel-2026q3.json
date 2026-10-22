@@ -31,6 +31,18 @@
       "path": "package-lock.json"
     },
     {
+      "campaign": "sigstore-fulcio-cve-2026-49478",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "go.sum"
+    },
+    {
+      "campaign": "sigstore-js-cve-2026-48815",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "package-lock.json"
+    },
+    {
       "campaign": "trinitite-7nohe-issue-comment-aug2026",
       "level": "HIGH",
       "module": "§15",
