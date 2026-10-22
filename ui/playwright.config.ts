@@ -8,7 +8,9 @@ const use = { headless: true, viewport: { width: 1440, height: 900 } };
 export default defineConfig({
   testDir: 'tests/e2e',
   timeout: 60_000,
-  use,
+  // CI は 3 エンジンを直列に実行し（並列の負荷による停止を切り分けるため）、失敗時の trace を残す
+  workers: all ? 1 : undefined,
+  use: { ...use, trace: all ? 'retain-on-failure' : 'off' },
   reporter: 'list',
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'], ...use } },
