@@ -243,3 +243,231 @@
 | Homebrew ca-certificates | 基準値の誤りが疑われるため、判定を HIGH → MEDIUM（要確認）に変更 | Homebrew 行 |
 
 `incident_bundle` は `ZES-2026-OCT-EMERGENCY-V5.2` のまま（findings.json スキーマの形式 `V<major>.<minor>` を維持するため）。
+
+## 5.2.2 で追加した収集インテル（2026-10-22）
+
+2026-06〜10 に公開された脅威情報を、各ベンダー・研究機関の一次情報（NVD / CISA KEV / GHSA / OSV / ベンダー公告・研究ブログ）から収集し、`rules/ioc.json` の `packages[]`・`infrastructures[]`・`intel` に取り込みました。`verification` が `secondary` のものは一次情報に到達できず二次報道で補ったものです（検知はしますが、値の確度は一次情報より低い）。
+
+取り込みの方針:
+
+- **誤検知の抑制:** 汎用的なファイル名（`index.js`・`build.rs`・`settings.json` など）、汎用的な文字列、正規サービスのドメイン単体（github.com・api.telegram.org など）は照合に使いません。正規サービス上の特定 URL は `legit_infra`（MEDIUM）として扱います。
+- **重大度:** 悪性パッケージは CRITICAL、脆弱版（悪性ではなく CVE の影響範囲）は `match: vulnerable_versions` で HIGH です。ローカルツールのバージョン判定はディストリビューションのバックポートを考慮して上限を HIGH にしています。
+- **未対応（静的に判定できないもの）:** GitHub Enterprise Server・Tekton Pipelines-as-Code・Docker Sandboxes・7-Zip・Git for Windows（イメージ名・バイナリから版を取れないか、Windows のみ）、sudo CVE-2026-82474（修正版不明）、Jenkins Script Security プラグイン（プラグイン版の取得手段なし）、Windows 版 Kiro。データとしては記録しています。
+
+### パッケージ（41 件）
+
+| 公開日 | 対象 | 重大度 | 確度 | 一次情報 |
+|---|---|---|---|---|
+| 2026-06-06 | hades-pypi-pth-jun2026 | HIGH | confirmed | https://orca.security/resources/blog/hades-pypi-supply-chain-attack/ |
+| 2026-06-06 | hades-pypi-pth-jun2026 | HIGH | confirmed | https://orca.security/resources/blog/hades-pypi-supply-chain-attack/ |
+| 2026-06-06 | hades-pypi-pth-jun2026 | HIGH | confirmed | https://orca.security/resources/blog/hades-pypi-supply-chain-attack/ |
+| 2026-06-17 | mastra-easy-day-js-jun2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/mastra-npm-packages-compromised-using-easy-day-js |
+| 2026-06-17 | mastra-easy-day-js-jun2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/mastra-npm-packages-compromised-using-easy-day-js |
+| 2026-06-17 | mastra-easy-day-js-jun2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/mastra-npm-packages-compromised-using-easy-day-js |
+| 2026-06-24 | leo-platform-phantom-gyp-jun2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/mass-npm-supply-chain-attack-20-leo-platform-packages-compromised |
+| 2026-06-24 | leo-platform-phantom-gyp-jun2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/mass-npm-supply-chain-attack-20-leo-platform-packages-compromised |
+| 2026-06-24 | leo-platform-phantom-gyp-jun2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/mass-npm-supply-chain-attack-20-leo-platform-packages-compromised |
+| 2026-07-19 | sleepergem-rubygems-jul2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/sleepergem-compromised-rubygems-drop-persistent-backdoor |
+| 2026-07-19 | sleepergem-rubygems-jul2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/sleepergem-compromised-rubygems-drop-persistent-backdoor |
+| 2026-07-19 | sleepergem-rubygems-jul2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/sleepergem-compromised-rubygems-drop-persistent-backdoor |
+| 2026-07-24 | mrmustard-pth-stealer-jul2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/compromised-pypi-mrmustard-0-7-4-credential-stealer |
+| 2026-07-28 | joyfill-import-rat-jul2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/joyfill-npm-supply-chain-compromise |
+| 2026-07-28 | joyfill-import-rat-jul2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/joyfill-npm-supply-chain-compromise |
+| 2026-07-28 | alibaba-aone-rat-jul2026 | HIGH | confirmed | https://socket.dev/blog/npm-rat-targets-alibaba |
+| 2026-07-28 | alibaba-aone-rat-jul2026 | HIGH | confirmed | https://socket.dev/blog/npm-rat-targets-alibaba |
+| 2026-08-04 | chaindrop-shai-hulud-aug2026 | CRITICAL | confirmed | https://www.microsoft.com/en-us/security/blog/2026/08/04/chaindrop-supply-chain-compromise-anatomy-self-propagating-worm/ |
+| 2026-08-04 | chaindrop-shai-hulud-aug2026 | CRITICAL | confirmed | https://www.microsoft.com/en-us/security/blog/2026/08/04/chaindrop-supply-chain-compromise-anatomy-self-propagating-worm/ |
+| 2026-08-16 | stubmaker-rubygems-aug2026 | HIGH | confirmed | https://opensourcemalware.com/blog/stubmaker-rubygems-windows-infostealer |
+| 2026-08-16 | stubmaker-rubygems-aug2026 | HIGH | confirmed | https://opensourcemalware.com/blog/stubmaker-rubygems-windows-infostealer |
+| 2026-08-20 | proc-macro1-rust-dropper-aug2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/arrayref-rust-crate-supply-chain-attack |
+| 2026-08-20 | proc-macro1-rust-dropper-aug2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/arrayref-rust-crate-supply-chain-attack |
+| 2026-08-20 | proc-macro1-rust-dropper-aug2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/arrayref-rust-crate-supply-chain-attack |
+| 2026-08-20 | proc-macro1-rust-dropper-aug2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/arrayref-rust-crate-supply-chain-attack |
+| 2026-08-28 | shai-hulud-trinitite-aug2026 | CRITICAL | confirmed | https://socket.dev/blog/openapi-react-query-codegen-npm-compromise |
+| 2026-09-07 | shai-hulud-resurface-sep2026 | HIGH | confirmed | https://www.aikido.dev/blog/shai-hulud-npm-resurfaces |
+| 2026-09-07 | shai-hulud-resurface-sep2026 | HIGH | confirmed | https://www.aikido.dev/blog/shai-hulud-npm-resurfaces |
+| 2026-09-17 | polinrider-packagist-sep2026 | HIGH | confirmed | https://socket.dev/blog/polinrider-github-packagist |
+| 2026-09-22 | graphalgo-go-terraform-sep2026 | HIGH | confirmed | https://www.aikido.dev/blog/graphalgo-terraform-go-modules |
+| 2026-09-22 | graphalgo-go-terraform-sep2026 | HIGH | confirmed | https://www.aikido.dev/blog/graphalgo-terraform-go-modules |
+| 2026-09-23 | sckit-supplychain-local-worm-sep2026 | HIGH | confirmed | https://semgrep.dev/blog/2026/the-ai-ecosystem-has-worms-now-inside-the-memtensor-compromise |
+| 2026-09-23 | sckit-supplychain-local-worm-sep2026 | HIGH | confirmed | https://semgrep.dev/blog/2026/the-ai-ecosystem-has-worms-now-inside-the-memtensor-compromise |
+| 2026-10-04 | anthropic-sdk-typosquat-oct2026 | HIGH | confirmed | https://osv.dev/vulnerability/MAL-2026-17472 |
+| 2026-10-05 | subql-ci-artifact-backdoor-oct2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/subql-ecosystem-compromised |
+| 2026-10-05 | rubygems-crypto-extconf-oct2026 | MEDIUM | confirmed | https://osv.dev/vulnerability/MAL-2026-17583 |
+| 2026-10-12 | apex-accelerator-ref8801-oct2026 | HIGH | confirmed | https://www.elastic.co/security-labs/threat-command/apex-accelerator-malicious-npm-packages |
+| 2026-10-12 | apex-accelerator-ref8801-oct2026 | HIGH | confirmed | https://www.elastic.co/security-labs/threat-command/apex-accelerator-malicious-npm-packages |
+| 2026-10-20 | semver-typosquat-pypi-oct2026 | MEDIUM | confirmed | https://osv.dev/vulnerability/MAL-2026-18103 |
+| 2026-10-21 | litellm-pth-stealer-oct2026 | CRITICAL | confirmed | https://docs.litellm.ai/blog/security-incident-oct-21-2026 |
+| 2026-10-21 | litellm-pth-stealer-oct2026 | CRITICAL | confirmed | https://docs.litellm.ai/blog/security-incident-oct-21-2026 |
+
+### CI/CD（24 件）
+
+| 公開日 | 対象 | 重大度 | 確度 | 一次情報 |
+|---|---|---|---|---|
+| 2026-06-01 | redhat-miasma-oidc-jun2026 | CRITICAL | confirmed | https://www.aikido.dev/blog/red-hat-npm-packages-compromised-credential-stealing-worm |
+| 2026-06-01 | claude-code-action-issue-injection-jun2026 | HIGH | confirmed | https://flatt.tech/research/posts/poisoning-claude-code-one-github-issue-to-break-the-supply-chain/ |
+| 2026-06-05 | azure-durabletask-miasma-jun2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/miasma-worm-hits-microsoft-again-azure-functions-action-and-72-other-repositories-disabled-after-supply-chain-attack-targeting-ai-coding-agents |
+| 2026-06-08 | hades-pypi-runner-memory-jun2026 | CRITICAL | confirmed | https://stepsecurity.io/blog/the-hades-campaign-pypi-packages |
+| 2026-06-18 | checkout-v7-pwn-request-guard-jun2026 | HIGH | confirmed | https://github.blog/changelog/2026-06-18-safer-pull_request_target-defaults-for-github-actions-checkout/ |
+| 2026-06-24 | codfish-semantic-release-action-jun2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/supply-chain-compromise-codfish-semantic-release-action |
+| 2026-06-24 | mawesome-action-jun2026 | HIGH | confirmed | https://www.stepsecurity.io/blog/simonecorsi-mawesome-github-action-has-been-compromised |
+| 2026-06-25 | leo-platform-phantom-gyp-jun2026 | CRITICAL | confirmed | https://stepsecurity.io/blog/mass-npm-supply-chain-attack-20-leo-platform-packages-compromised |
+| 2026-07-14 | asyncapi-miasma-jul2026 | CRITICAL | confirmed | https://www.wiz.io/blog/m-red-team-asyncapi-supply-chain-compromise-via-github-actions |
+| 2026-07-16 | claude-code-action-mcp-json-jul2026 | HIGH | confirmed | https://osv.dev/vulnerability/CVE-2026-47751 |
+| 2026-07-22 | cpanel-actions-abuse-jul2026 | HIGH | confirmed | https://socket.dev/blog/github-actions-abuse-powers-cpanel-and-whm-exploitation |
+| 2026-08-04 | chaindrop-worm-aug2026 | CRITICAL | confirmed | https://www.microsoft.com/en-us/security/blog/2026/08/04/chaindrop-supply-chain-compromise-anatomy-self-propagating-worm/ |
+| 2026-08-28 | trinitite-7nohe-issue-comment-aug2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/7nohe-openapi-react-query-codegen-compromised-npm-publishing-workflow |
+| 2026-09-10 | actions-cache-readonly-and-cache-mode-2026 | HIGH | confirmed | https://github.blog/changelog/2026-06-26-read-only-actions-cache-for-untrusted-triggers/ |
+| 2026-09-11 | gitlab-cve-2026-85706-sep2026 | CRITICAL | secondary | https://www.wiz.io/vulnerability-database/cve/cve-2026-85706 |
+| 2026-09-17 | workflow-execution-protections-sep2026 | MEDIUM | confirmed | https://github.blog/changelog/2026-09-17-workflow-execution-protections-in-github-actions-generally-available/ |
+| 2026-09-23 | gitlab-incoming-email-token-sep2026 | HIGH | confirmed | https://www.aikido.dev/blog/gitlab-email-push-to-main |
+| 2026-09-23 | memtensor-sckit-sep2026 | HIGH | confirmed | https://www.aikido.dev/blog/supplychain-local-memtensor-npm-pypi |
+| 2026-09-24 | actions-cool-reactivation-sep2026 | CRITICAL | confirmed | https://socket.dev/blog/mini-shai-hulud-actions |
+| 2026-09-24 | actions-cool-reactivation-sep2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/actions-cool-issues-helper-github-action-compromised-all-tags-point-to-imposter-commit-that-exfiltrates-ci-cd-credentials |
+| 2026-10-05 | subql-publish-workflow-oct2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/subql-ecosystem-compromised |
+| 2026-10-08 | tensorlake-hostage-token-oct2026 | CRITICAL | confirmed | https://stepsecurity.io/blog/tensorlake-npm-compromised-hostage-token-worm |
+| 2026-10-09 | ghostaction-security-audit-wave-2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/ghostaction-returns |
+| 2026-10-21 | litellm-release-lookalike-oct2026 | CRITICAL | confirmed | https://docs.litellm.ai/blog/security-incident-oct-21-2026 |
+
+### 開発インフラ・ランタイム CVE（47 件）
+
+| 公開日 | 対象 | 重大度 | 確度 | 一次情報 |
+|---|---|---|---|---|
+| 2022-03-03 | linux-kernel CVE-2022-0492 | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2022-0492 |
+| 2026-06-09 | openssl CVE-2026-45447 | HIGH | confirmed | https://openssl-library.org/news/secadv/20260609.txt |
+| 2026-06-10 | jenkins CVE-2026-53435 | HIGH | confirmed | https://www.jenkins.io/security/advisory/2026-06-10/ |
+| 2026-06-19 | containerd CVE-2026-53488 | CRITICAL | confirmed | https://github.com/containerd/containerd/security/advisories/GHSA-xhf5-7wjv-pqxp |
+| 2026-06-23 | cpython CVE-2026-11940 | HIGH | confirmed | https://github.com/python/cpython/issues/151558 |
+| 2026-06-25 | linux-kernel CVE-2026-53266 | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-53266 |
+| 2026-06-26 | kestra CVE-2026-49869 | CRITICAL | confirmed | https://github.com/kestra-io/kestra/security/advisories/GHSA-5vc5-wxxq-3fjx |
+| 2026-06-30 | sigstore-fulcio CVE-2026-49478 | HIGH | confirmed | https://github.com/sigstore/fulcio/security/advisories/GHSA-f5mr-q85p-6hh6 |
+| 2026-07-01 | sigstore-js CVE-2026-48815 | HIGH | confirmed | https://github.com/sigstore/sigstore-js/security/advisories/GHSA-52v5-jr5w-gjxr |
+| 2026-07-03 | gitea CVE-2026-20896 | CRITICAL | confirmed | https://github.com/go-gitea/gitea/security/advisories/GHSA-f75j-4cw6-rmx4 |
+| 2026-07-04 | linux-kernel CVE-2026-53362 | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-53362 |
+| 2026-07-08 | openssh CVE-2026-60002 | CRITICAL | confirmed | https://www.openssh.org/releasenotes.html |
+| 2026-07-21 | buildkit CVE-2026-15793 | HIGH | confirmed | https://github.com/moby/buildkit/security/advisories/GHSA-hw3h-2gp9-cxpv |
+| 2026-07-21 | openjdk CVE-2026-41254 | HIGH | secondary | https://openjdk.org/groups/vulnerability/advisories/2026-07-21 |
+| 2026-07-27 | artifactory CVE-2026-42016 | HIGH | confirmed | https://docs.jfrog.com/releases/docs/jfrog-security-advisories |
+| 2026-07-29 | nodejs CVE-2026-56848 | HIGH | confirmed | https://nodejs.org/en/blog/vulnerability/july-2026-security-releases |
+| 2026-07-29 | 7-zip CVE-2026-14266 | HIGH | confirmed | https://www.7-zip.org/history.txt |
+| 2026-07-30 | php CVE-2026-17543 | CRITICAL | confirmed | https://github.com/php/php-src/security/advisories/GHSA-7qpv-r5mr-78m4 |
+| 2026-08-05 | jenkins CVE-2026-70426 | CRITICAL | confirmed | https://www.jenkins.io/security/advisory/2026-08-05/ |
+| 2026-08-05 | github-enterprise-server CVE-2026-17556 | CRITICAL | confirmed | https://docs.github.com/en/enterprise-server@3.21/admin/release-notes#3.21.4 |
+| 2026-08-07 | nexus-repository CVE-2026-17603 | HIGH | confirmed | https://help.sonatype.com/en/sonatype-nexus-repository-3-95-0-release-notes.html |
+| 2026-08-12 | artifactory CVE-2026-42018 | HIGH | confirmed | https://docs.jfrog.com/releases/docs/jfrog-security-advisories |
+| 2026-08-12 | artifactory CVE-2026-66384 | HIGH | confirmed | https://docs.jfrog.com/releases/docs/jfrog-security-advisories |
+| 2026-08-13 | go CVE-2026-56865 | HIGH | confirmed | https://pkg.go.dev/vuln/GO-2026-6179 |
+| 2026-08-17 | gitlab CVE-2026-19478 | CRITICAL | confirmed | https://docs.gitlab.com/releases/patches/patch-release-gitlab-19-2-4-released/ |
+| 2026-08-18 | docker CVE-2026-17106 | HIGH | confirmed | https://docs.docker.com/security/security-announcements/ |
+| 2026-08-21 | git-for-windows CVE-2026-62960 | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-62960 |
+| 2026-08-25 | gitea CVE-2026-60004 | CRITICAL | confirmed | https://github.com/go-gitea/gitea/security/advisories/GHSA-rcr6-4jqh-j84m |
+| 2026-08-29 | sudo CVE-2026-82474 | HIGH | secondary | https://nvd.nist.gov/vuln/detail/CVE-2026-82474 |
+| 2026-09-02 | jenkins CVE-2026-84645 | HIGH | confirmed | https://www.jenkins.io/security/advisory/2026-09-02/ |
+| 2026-09-10 | gitlab CVE-2026-85706 | CRITICAL | confirmed | https://docs.gitlab.com/releases/patches/patch-release-gitlab-19-3-2-released/ |
+| 2026-09-10 | forgejo CVE-2026-89094 | CRITICAL | confirmed | https://codeberg.org/forgejo/forgejo/milestone/139655 |
+| 2026-09-15 | tekton-pipelines-as-code CVE-2026-54167 | HIGH | confirmed | https://github.com/tektoncd/pipelines-as-code/releases/tag/v0.48.0 |
+| 2026-09-15 | docker-sandboxes CVE-2026-77179 | CRITICAL | confirmed | https://docs.docker.com/security/security-announcements/ |
+| 2026-09-16 | jenkins-plugin-script-security CVE-2026-92123 | HIGH | confirmed | https://www.jenkins.io/security/advisory/2026-09-16/ |
+| 2026-09-22 | github-enterprise-server CVE-2026-77987 | CRITICAL | confirmed | https://docs.github.com/en/enterprise-server@3.22/admin/release-notes#3.22.1 |
+| 2026-09-29 | openssl CVE-2026-84782 | HIGH | confirmed | https://openssl-library.org/news/secadv/20260929.txt |
+| 2026-10-05 | bitbucket CVE-2026-21589 | CRITICAL | confirmed | https://confluence.atlassian.com/security/cve-2026-21589-arbitrary-file-access-vulnerability-impacts-multiple-products-1870495748.html |
+| 2026-10-06 | teamcity CVE-2026-106218 | CRITICAL | confirmed | https://www.jetbrains.com/privacy-security/issues-fixed/ |
+| 2026-10-07 | openssh CVE-2026-106583 | HIGH | confirmed | https://www.openssh.org/releasenotes.html |
+| 2026-10-12 | containerd CVE-2026-95837 | HIGH | confirmed | https://github.com/containerd/containerd/security/advisories/GHSA-p7v4-vr35-mj6f |
+| 2026-10-13 | argo-cd CVE-2026-77459 | CRITICAL | confirmed | https://github.com/argoproj/argo-cd/security/advisories/GHSA-fmxq-cgp8-87wp |
+| 2026-10-13 | podman CVE-2026-94603 | CRITICAL | confirmed | https://github.com/podman-container-tools/podman/releases/tag/v5.8.8 |
+| 2026-10-14 | curl CVE-2026-92392 | HIGH | confirmed | https://curl.se/docs/CVE-2026-92392.html |
+| 2026-10-15 | teamcity CVE-2026-111094 | CRITICAL | confirmed | https://www.jetbrains.com/privacy-security/issues-fixed/ |
+| 2026-10-21 | gitlab CVE-2026-110264 | CRITICAL | confirmed | https://docs.gitlab.com/releases/patches/patch-release-gitlab-19-5-1-released/ |
+| 2026-10-21 | nodejs CVE-2026-111497 | HIGH | confirmed | https://nodejs.org/en/blog/vulnerability/october-2026-security-releases |
+
+### ホスト（インフォスティーラー・永続化）（29 件）
+
+| 公開日 | 対象 | 重大度 | 確度 | 一次情報 |
+|---|---|---|---|---|
+| 2026-06-17 | mastra-npm-easy-day-js | CRITICAL | confirmed | https://www.microsoft.com/en-us/security/blog/2026/06/17/postinstall-payload-inside-mastra-npm-supply-chain-compromise/ |
+| 2026-06-23 | macos-gaslight-flatroof | HIGH | confirmed | https://www.sentinelone.com/labs/macos-gaslight-rust-backdoor-turns-prompt-injection-on-the-analyst-not-the-sandbox/ |
+| 2026-06-23 | atomic-arch-aur-scales-ebpf | HIGH | confirmed | https://sandflysecurity.com/blog/linux-scales-ebpf-rootkit-detection-and-analysis |
+| 2026-07-01 | polinrider-vscode-folderopen-woff2 | HIGH | confirmed | https://socket.dev/blog/polinrider-north-korea-linked-supply-chain-campaign-expands |
+| 2026-07-02 | pamstealer-maccy-rust | HIGH | confirmed | https://www.jamf.com/blog/pamstealer-macos-infostealer-applescript-rust/ |
+| 2026-07-13 | crashstealer-werkbit-fake-meeting-app | HIGH | confirmed | https://www.jamf.com/blog/crashstealer-macos-infostealer-analysis/ |
+| 2026-07-14 | asyncapi-npm-compromise | CRITICAL | confirmed | https://securitylabs.datadoghq.com/articles/compromised-asyncapi-npm-packages/ |
+| 2026-07-16 | clicklock-stealer-gsocket | HIGH | confirmed | https://www.group-ib.com/blog/clicklock-stealer-macos-malware/ |
+| 2026-07-18 | contagious-interview-svg-steganography | HIGH | confirmed | https://www.elastic.co/security-labs/threat-command/contagious-interview-malware-svg-steganography |
+| 2026-07-30 | xmrig-pam-rootok-smokescreen | MEDIUM | confirmed | https://www.group-ib.com/blog/xmrig-covert-linux-pam-abuse/ |
+| 2026-07-31 | xcsset-v40-xcode | HIGH | confirmed | https://unit42.paloaltonetworks.com/xcsset-v40-malware-analysis/ |
+| 2026-08-04 | openvsx-evil-twin-mangorbit | MEDIUM | secondary | https://thehackernews.com/2026/08/open-vsx-removes-77-malicious-evil-twin.html |
+| 2026-08-05 | ms-macos-clickfix-cloaked-gate | MEDIUM | confirmed | https://www.microsoft.com/en-us/security/blog/2026/08/05/macos-clickfix-campaign-learned-hide/ |
+| 2026-08-06 | overlord-fake-zoom-dotnet | HIGH | confirmed | https://www.jamf.com/blog/fake-zoom-installer-delivers-overlord-rat-macos/ |
+| 2026-08-13 | amnesiastealer-clickfix-github | CRITICAL | confirmed | https://www.jamf.com/blog/amnesia-stealer-macos-infostealer-clickfix/ |
+| 2026-08-20 | redc2-redshell-npm-streak | CRITICAL | confirmed | https://www.trendaisecurity.com/en-us/resources-insights/trendai-security-blog/redc2-ai-powered-linux-implant |
+| 2026-08-20 | arrayref-proc-macro1-rust | CRITICAL | confirmed | https://www.wiz.io/blog/rust-supply-chain-attack-on-arrayref-significant-overlap-with-dprk-campaigns |
+| 2026-08-20 | n4d-mesh-controller-go-titan | HIGH | confirmed | https://securitylabs.datadoghq.com/articles/n4d-mesh-controller-go-titan-new-infrastructure-hunting/ |
+| 2026-09-01 | mirage-kitten-noderabbit-pollcat | HIGH | confirmed | https://securelist.com/mirage-kitten-new-backdoors-noderabbit-pollcat/121244/ |
+| 2026-09-13 | red-heron-gitea-jitterly-sixzut | HIGH | confirmed | https://www.acronis.com/en/tru/posts/red-heron-exploits-gitea-n-day-flaw-in-multinational-campaign-exposing-new-linux-rootkit/ |
+| 2026-09-17 | weaselbiscuit-npm-biz44 | MEDIUM | secondary | https://opensourcemalware.com/blog/introducing-weaselbiscuit |
+| 2026-09-18 | tradertraitor-terraform-lockfile-flatroof-roofdeck | CRITICAL | confirmed | https://www.sentinelone.com/labs/dont-call-us-well-call-your-apis-tradertraitor-backdoors-resurface-on-victim-with-no-crypto-ties/ |
+| 2026-09-22 | pamstealer-wavel-wallet | HIGH | confirmed | https://www.jamf.com/blog/pamstealer-wavel-macos-infostealer/ |
+| 2026-09-24 | macsync-icloud-calendar-finder-backdoor | HIGH | confirmed | https://securelist.com/macsync-new-version/121383/ |
+| 2026-09-30 | cloudsyncd-fake-zoom | HIGH | confirmed | https://www.jamf.com/blog/cloudsyncd-macos-backdoor-fake-zoom-installer/ |
+| 2026-10-12 | apex-accelerator-npm-cloudsyncd | HIGH | confirmed | https://www.elastic.co/security-labs/threat-command/apex-accelerator-malicious-npm-packages |
+| 2026-10-12 | icmacos-glowcoma-maas | HIGH | confirmed | https://socradar.io/blog/icmacos-infostealer-rat/ |
+| 2026-10-15 | cl-unk-1211-sysgorat | HIGH | confirmed | https://unit42.paloaltonetworks.com/ai-campaign-targets-linux-infrastructure/ |
+| 2026-10-21 | litellm-1-107-0-cook-pth | CRITICAL | confirmed | https://www.wiz.io/blog/litellm-compromised-steals-credentials |
+
+### AI ツール・MCP・拡張（40 件）
+
+| 公開日 | 対象 | 重大度 | 確度 | 一次情報 |
+|---|---|---|---|---|
+| 2026-06-01 | mini-shai-hulud-redhat-mcp | CRITICAL | confirmed | https://osv.dev/vulnerability/MAL-2026-5129 |
+| 2026-06-02 | kiro-file-write-autoexec | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-10591 |
+| 2026-06-05 | miasma-ai-config-injection | CRITICAL | confirmed | https://safedep.io/miasma-worm-ai-coding-agent-config-injection/ |
+| 2026-06-09 | vscode-copilot-chat-2026-patches | HIGH | confirmed | https://msrc.microsoft.com/update-guide/vulnerability/CVE-2026-45482 |
+| 2026-06-09 | mcp-server-name-squat-canary | HIGH | confirmed | https://osv.dev/vulnerability/MAL-2026-5479 |
+| 2026-06-10 | claude-code-action-pr-mcpjson | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-47751 |
+| 2026-06-13 | promptsnatcher-adblockers | HIGH | secondary | https://gbhackers.com/promptsnatcher-browser-extensions-abuse-ai/ |
+| 2026-06-15 | cursor-claude-hooks-autoexec | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-48124 |
+| 2026-06-15 | glasswasm-openvsx | HIGH | confirmed | https://socket.dev/blog/glasswasm-malware-open-vsx-extensions |
+| 2026-06-16 | mcp-credential-stealer-npm | CRITICAL | confirmed | https://osv.dev/vulnerability/MAL-2026-10693 |
+| 2026-06-17 | claude-code-webfetch-hf-exfil | CRITICAL | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-54316 |
+| 2026-06-24 | gemini-cli-env-override | CRITICAL | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-12537 |
+| 2026-06-25 | cursor-sandbox-symlink-write | CRITICAL | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-50549 |
+| 2026-06-29 | fastmcp-ssrf-cmdinj | HIGH | confirmed | https://osv.dev/vulnerability/PYSEC-2026-338 |
+| 2026-07-08 | cline-websocket-hijack | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-59723 |
+| 2026-07-09 | ruflo-mcp-bridge-unauth | CRITICAL | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-59726 |
+| 2026-07-16 | mcp-python-sdk-jul-2026 | HIGH | confirmed | https://osv.dev/vulnerability/GHSA-vj7q-gjh5-988w |
+| 2026-07-24 | claude-code-worktree-sandbox-escape | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-55607 |
+| 2026-08-04 | kiro-windows-search-path | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-18656 |
+| 2026-08-04 | shai-hulud-here-we-go-again-mcp | CRITICAL | confirmed | https://osv.dev/vulnerability/MAL-2026-11829 |
+| 2026-08-04 | openvsx-evil-twin-mangorbit | HIGH | confirmed | https://www.manifold.security/blog/open-vsx-evil-twin-extensions |
+| 2026-08-05 | claude-base-url-hijack-npm | CRITICAL | confirmed | https://osv.dev/vulnerability/MAL-2026-12510 |
+| 2026-08-05 | copilot-mcp-apex-dropper | CRITICAL | confirmed | https://osv.dev/vulnerability/MAL-2026-12314 |
+| 2026-08-11 | cursor-macos-autorun-sandbox-escape | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-73217 |
+| 2026-08-12 | cc-skills-helper-dropper | CRITICAL | confirmed | https://osv.dev/vulnerability/MAL-2026-13933 |
+| 2026-08-27 | superior-wallet-drainer-extensions | CRITICAL | confirmed | https://socket.dev/blog/chrome-edge-extension-wallet-drainer |
+| 2026-09-01 | codex-git-config-exec | CRITICAL | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-19590 |
+| 2026-09-01 | codex-powershell-stop-parsing-bypass | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-19591 |
+| 2026-09-03 | vscode-edrtester-domain-fronting | HIGH | confirmed | https://osv.dev/vulnerability/MAL-2026-16010 |
+| 2026-09-04 | ai-cli-relay-campaign | HIGH | confirmed | https://osv.dev/vulnerability/MAL-2026-16013 |
+| 2026-09-09 | axiom-padre-trader-extensions | HIGH | confirmed | https://socket.dev/blog/chrome-firefox-crypto-data-theft |
+| 2026-09-16 | rmcp-oauth-session-2026 | HIGH | confirmed | https://osv.dev/vulnerability/GHSA-33f5-2c5q-wgwj |
+| 2026-09-21 | gemini-computer-use-tunnel | CRITICAL | confirmed | https://osv.dev/vulnerability/MAL-2026-16355 |
+| 2026-09-23 | memtensor-sckit-openclaw-plugin | CRITICAL | confirmed | https://osv.dev/vulnerability/MAL-2026-16476 |
+| 2026-09-30 | jetbrains-ai-skill-autoupdate | MEDIUM | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-100265 |
+| 2026-10-07 | claude-code-toctou-symlink-write | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-103435 |
+| 2026-10-12 | continue-cli-bash-prefix-bypass | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-109560 |
+| 2026-10-13 | claude-code-plugin-hash-pin-bypass | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-86063 |
+| 2026-10-16 | claude-agent-sdk-resume-flag-injection | CRITICAL | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-96620 |
+| 2026-10-20 | mcp-ts-sdk-oct-2026 | HIGH | confirmed | https://osv.dev/vulnerability/GHSA-46jr-4wx8-v453 |
+
+### 情報源間の食い違い（収集時に判明したもの）
+
+- **GitLab CVE-2026-85706:** 2026-09-10 の初回修正は 19.3.2 / 19.2.6 / 19.1.8 のみで、19.0.9 / 18.11.12 は 09-23 に追加。
+- **CVSS の乖離:** Atlassian CVE-2026-21589（CNA 9.3 / NVD 7.5）、TeamCity CVE-2026-111094（8.1 / 9.8）・CVE-2026-106218（8.8 / 10.0）、PHP CVE-2026-17543（8.1 / 9.8）、containerd CVE-2026-53488（9.4 / 8.8）、Gemini CLI CVE-2026-12537（10.0 / 7.8）。
+- **Gitea CVE-2026-60004:** KEV は書込権限が必要とし、NVD の CVSS は認証不要（PR:N）。
+- **Argo CD CVE-2026-113672:** NVD の影響範囲「<3.3.1」が説明文の 3.3.15 と不一致。
+- **7-Zip CVE-2026-14266:** NVD は 26.01 のみを影響版とするが、公式履歴では 26.02 で修正。
+- **OpenJDK CVE-2026-41254:** lcms2 の CVE。OpenJDK の修正版は次期アップデート版からの導出（8u は不明のため未記載）。
+- **arrayref 0.3.10 のハッシュ:** 二次情報と Wiz で不一致。Wiz の値を採用。
+- **Superior（ブラウザ拡張）の ID:** THN の 31 文字表記ではなく Socket の 32 文字表記を採用。
+- **PamStealer（Wavel 亜種）と MacSync 新版:** インフラ・LaunchAgent・文字列が一致（同一ファミリーの別名の可能性）。両方を別キャンペーンとして収録。

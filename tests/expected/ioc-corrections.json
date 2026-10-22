@@ -13,6 +13,12 @@
       "path": "package-lock.json"
     },
     {
+      "campaign": "mcp-python-sdk-jul-2026",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "py/requirements.txt"
+    },
+    {
       "campaign": "chaindrop-keyv",
       "level": "CRITICAL",
       "module": "§18",

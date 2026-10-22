@@ -104,6 +104,10 @@ chmod +x zes-scan.sh
 | コンテナエスケープ | CVE-2026-80521/64564 | カーネル更新、seccompプロファイル、特権コンテナ監査 |
 | Djinn/OmniStealer | 開発者・AI認証情報窃取 | 認証情報ローテーション、不審プロセス監査 |
 | OVHcloud CLI 2026-10-19 | GlassWorm経由でGitHubキー窃取 | 再インストール、GitHubトークンローテーション |
+| GitLab CVE-2026-110264 | 未認証 RCE（CVSS 10.0、7.0 以降の全版） | 18.11.13 / 19.0.10 / 19.1.9 / 19.2.9 / 19.3.6 / 19.4.3 / 19.5.1 以上へ更新（18.10 以前は 18.11.13 以降へ移行） |
+| PHP2Shell | CVE-2026-109618/109619（認証不要 RCE、悪用試行あり） | 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12 以上。8.1 以前はサポート版へ移行 |
+| eMudhra 中間 CA 侵害 | 危殆化 CA を OS・ランタイム・pip/Go/Rust 等が信頼 | ca-certificates・certifi・Node.js・Java・Docker Desktop 等を修正版へ、`emSign ECC Root CA G3` の除去確認 |
+| 2026-06〜10 収集インテル | 悪性 npm/PyPI/crates/gems、侵害 Actions、インフォスティーラー、AI ツール/MCP/拡張 | 該当キャンペーンの一次情報に従う（docs/ioc-verification.md「5.2.2 で追加した収集インテル」） |
 | SkillPact未宣言 | 契約なしスキルの`exec`/`network`/`write` | 契約ファイルの追加、またはスキル無効化 |
 | SkillPact乖離 | 契約と実態の不一致 | スキル停止、契約の再作成、L2テスト実施 |
 | SkillPactアカウント侵害 | L3署名済みでも差分異常 | 作者への確認、前バージョンとの差分レビュー、必要ならスキル停止 |

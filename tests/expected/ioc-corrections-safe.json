@@ -1,6 +1,12 @@
 {
   "findings": [
     {
+      "campaign": "mcp-python-sdk-jul-2026",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "requirements.txt"
+    },
+    {
       "campaign": "mcp-poisoning",
       "level": "MEDIUM",
       "module": "§37",
