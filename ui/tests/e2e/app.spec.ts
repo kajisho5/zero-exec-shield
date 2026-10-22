@@ -81,9 +81,13 @@ test('SkillPact: prose 矛盾と差分異常の警告', async ({ page }) => {
   await expect(page.getByTestId('diff-alert')).toContainText('exec 新規追加');
 });
 
-test('MCP / Actions / 拡張ビューアと CLI 案内', async ({ page }) => {
+test('MCP / Actions / 拡張ビューアと CLI 案内', async ({ page, browserName }) => {
+  // Playwright の WebKit は、直下が隠しエントリだけのフォルダ（.github/ や .mcp.json のみ）で setInputFiles が返らない
+  // （隠しエントリを除外して 0 件になり change が発火しないとみられる。実 Safari での挙動は未確認）。PR #8 参照
+  test.skip(browserName === 'webkit', 'Playwright WebKit は隠しエントリだけのフォルダを setInputFiles できない');
   await open(page);
-  await scan(page, 'mcp');
+  // 隠しファイル（.mcp.json）を渡さないブラウザがあるため、ビューアの確認は非隠しの設定ファイルで行う（隠しファイルの扱いは別テスト）
+  await scan(page, 'mcp-visible');
   await page.getByRole('tab', { name: /^MCP/ }).click();
   await expect(page.getByTestId('mcp-viewer').locator('[data-risk=high]')).toHaveCount(1);
   await page.getByRole('tab', { name: /^総合/ }).click();
@@ -116,4 +120,16 @@ test('findings.json の書き出し（ネットワーク不使用のダウンロ
   expect(doc.schema_version).toBe('1.0');
   expect(doc.status).toBe('partial');
   expect(doc.findings[0].skillpact.divergence).toEqual(['exec']);
+});
+
+test('隠しファイルだけのフォルダでも無反応にならない（完了または 0 件の通知）', async ({ page, browserName }, info) => {
+  // Playwright の WebKit は、直下が隠しエントリだけのフォルダ（.github/ や .mcp.json のみ）で setInputFiles が返らない
+  // （隠しエントリを除外して 0 件になり change が発火しないとみられる。実 Safari での挙動は未確認）。PR #8 参照
+  test.skip(browserName === 'webkit', 'Playwright WebKit は隠しエントリだけのフォルダを setInputFiles できない');
+  await open(page);
+  await page.getByTestId('dir-input').setInputFiles(FIX + 'mcp');
+  const done = page.getByTestId('scan-status').getByText('スキャン完了');
+  const none = page.getByRole('status').getByText('ファイルが 0 件でした');
+  await expect(done.or(none)).toBeVisible();
+  info.annotations.push({ type: 'dotfiles', description: (await none.isVisible()) ? '隠しファイルを渡さない' : '隠しファイルを渡す' });
 });
