@@ -25,7 +25,7 @@
       "path": "site-packages/cook.py"
     },
     {
-      "campaign": null,
+      "campaign": "emudhra-ca-oct2026",
       "level": "HIGH",
       "module": "§6",
       "path": "site-packages/certifi-2026.9.1.dist-info"

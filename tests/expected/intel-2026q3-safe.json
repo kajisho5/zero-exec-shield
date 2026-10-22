@@ -1,0 +1,24 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "Dockerfile"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "MEDIUM",
+      "module": "§37",
+      "path": "package-lock.json"
+    },
+    {
+      "campaign": null,
+      "level": "INFO",
+      "module": "§4",
+      "path": "Dockerfile"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

@@ -1,0 +1,9 @@
+services:
+  gitlab:
+    image: gitlab/gitlab-ee:19.4.2-ee.0
+  jenkins:
+    image: jenkins/jenkins:2.560
+  gitea:
+    image: docker.gitea.com/gitea:1.26.1
+  nexus:
+    image: sonatype/nexus3:3.90.0

@@ -506,6 +506,16 @@ build_deps() {
     [ -n "$f" ] || continue
     awk -v src="$f" '/^    [A-Za-z0-9_.-]+ \([0-9][^)]*\)$/ { n=$1; v=$2; gsub(/[()]/,"",v); print "gem\t" n "\t" v "\t" src }' "$f" >>"$DEPS_TSV"
   done < <(files_named '^Gemfile\.lock$')
+  # packagist: composer.lock
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if [ "$HAVE_JQ" -eq 1 ]; then
+      jq -r --arg src "$f" '((.packages // []) + (."packages-dev" // []))[] | ["packagist", .name, ((.version // "") | ltrimstr("v")), $src] | @tsv' "$f" 2>/dev/null >>"$DEPS_TSV" \
+        || record_error "§15" "lockfile_parse_failed:$f"
+    else
+      record_error "§15" "jq_unavailable:$f"
+    fi
+  done < <(files_named '^composer\.lock$')
   sort -u -o "$DEPS_TSV" "$DEPS_TSV"
 }
 
@@ -515,8 +525,8 @@ check_lockfile_versions() {
   local camp eco name match bads safev
   read_packages_tsv >"$TMP_DIR/packages.tsv"
   while IFS=$'\t' read -r camp eco name match bads safev; do
-    case "$eco" in npm|pypi) ;; *) continue ;; esac
-    case "$match" in versions|any_version|unknown_versions) ;; *) continue ;; esac
+    case "$eco" in npm|pypi|cargo|go|gem|packagist) ;; *) continue ;; esac
+    case "$match" in versions|vulnerable_versions|any_version|unknown_versions) ;; *) continue ;; esac
     local qname="$name"
     [ "$eco" = "pypi" ] && qname="$(norm_pypi "$name")"
     local deco dname dver dsrc
@@ -528,14 +538,16 @@ check_lockfile_versions() {
       esac
       local hit=0 spec
       if [ "$match" = "any_version" ]; then hit=1
-      elif [ "$match" = "versions" ]; then
+      elif [ "$match" = "versions" ] || [ "$match" = "vulnerable_versions" ]; then
         IFS=';' read -r -a specs <<<"$bads"
         for spec in "${specs[@]}"; do
           [ -n "$spec" ] || continue
           [ -n "$dver" ] && version_matches_spec "$dver" "$spec" && { hit=1; break; }
         done
       fi
-      if [ "$hit" -eq 1 ]; then
+      if [ "$hit" -eq 1 ] && [ "$match" = "vulnerable_versions" ]; then
+        high "$camp" "$dsrc" "脆弱なバージョン ${dname}@${dver:-?}（${eco}、悪性ではなく CVE の影響範囲）${safev:+。修正版: $safev 以上}"
+      elif [ "$hit" -eq 1 ]; then
         critical "$camp" "$dsrc" "侵害パッケージ ${dname}@${dver:-?} を検出（${eco}）${safev:+。安全版: $safev}"
       elif [ "$match" = "unknown_versions" ]; then
         medium "$camp" "$dsrc" "侵害報告のあるパッケージ ${dname}@${dver:-?}（侵害版の特定バージョン未定義のため要確認）"
@@ -565,6 +577,232 @@ infra_fixed() {
   else
     grep -o "\"$2\".*" "$IOC_FILE" | head -n1 | grep -o '"fixed": *\[[^]]*\]' | grep -o '"[0-9][^"]*"' | tr -d '"'
   fi
+}
+
+# =============================================================================
+# 収集脅威インテリジェンス（rules/ioc.json の intel セクション）
+#   各関数は対応する § から呼ばれる。データを足すだけで検出対象が増える。
+#   intel は jq 必須（無い場合は errors[] に記録し、0 件扱いしない）
+# =============================================================================
+intel_jq() { jq -r "$1" "$IOC_FILE" 2>/dev/null; }
+intel_ready() {
+  [ "$HAVE_JQ" -eq 1 ] || { record_error "$CURRENT_MODULE" "jq_unavailable:intel"; return 1; }
+  return 0
+}
+lvl_emit() { case "$1" in CRITICAL) critical "${@:2}" ;; HIGH) high "${@:2}" ;; MEDIUM) medium "${@:2}" ;; *) info "${@:2}" ;; esac; }
+
+# 悪性ファイル名・SHA-256（§15）
+intel_files() {
+  intel_ready || return 0
+  local camp sev name f h
+  # ハッシュは名前に依らず全ファイルと照合（同名の正規ファイルとの区別にもなる）
+  intel_jq '.intel.files[]? | .campaign as $c | (.severity // "CRITICAL") as $s | (.sha256 // [])[] | [$c, $s, .] | @tsv' >"$TMP_DIR/intel_sha.tsv"
+  if [ -s "$TMP_DIR/intel_sha.tsv" ] && ! command -v sha256sum >/dev/null 2>&1; then
+    record_error "$CURRENT_MODULE" "sha256sum_unavailable"
+  elif [ -s "$TMP_DIR/intel_sha.tsv" ]; then
+    cut -f3 "$TMP_DIR/intel_sha.tsv" | sort -u >"$TMP_DIR/intel_sha.lst"
+    # sha256sum に一括で渡し、既知ハッシュと一致した行だけを残す（ファイル内容は出力しない）
+    tr '\n' '\0' <"$FILES_LIST" | xargs -0 sha256sum -- 2>/dev/null \
+      | awk 'NR==FNR {want[$1]=1; next} ($1 in want) { h=$1; sub(/^[0-9a-f]+  /,""); print h "\t" $0 }' "$TMP_DIR/intel_sha.lst" - \
+      | while IFS=$'\t' read -r h f; do
+          IFS=$'\t' read -r camp sev _ < <(grep -F -- "$h" "$TMP_DIR/intel_sha.tsv" | head -n1)
+          critical "$camp" "$f" "既知の悪性ファイル（SHA-256 一致）"
+        done
+  fi
+  while IFS=$'\t' read -r camp sev name; do
+    [ -n "$name" ] || continue
+    while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知の悪性ファイル名（${name}）"; done \
+      < <(files_named "^$(printf '%s' "$name" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
+  done < <(intel_jq '.intel.files[]? | .campaign as $c | (.name_severity // "HIGH") as $s | (.names // [])[] | [$c, $s, .] | @tsv')
+}
+
+# ネットワーク IoC（§18 で network_iocs に合流）
+intel_network_iocs() {
+  [ "$HAVE_JQ" -eq 1 ] || return 0
+  intel_jq '.intel.network[]? | .campaign as $c | ((.domains // []) + (.ips // []) + (.urls // []) + (.contracts // []))[] | [$c, .] | @tsv' \
+    | while IFS=$'\t' read -r c i; do [ -n "$i" ] && printf '%s\t%s\t%s\n' "$(refang "$i")" "$c" "malicious"; done
+  intel_jq '.intel.network[]? | .campaign as $c | (.legit_infra // [])[] | [$c, .] | @tsv' \
+    | while IFS=$'\t' read -r c i; do [ -n "$i" ] && printf '%s\t%s\t%s\n' "$(refang "$i")" "$c" "legit"; done
+  return 0
+}
+
+# 侵害された GitHub Actions（§22）
+intel_actions() {
+  intel_ready || return 0
+  local camp act sev bad safe f line ref
+  while IFS=$'\t' read -r camp act sev bad safe; do
+    [ -n "$act" ] || continue
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      grep -E -o "uses:[[:space:]]*[\"']?$(printf '%s' "$act" | sed 's/[.[\*^$+?(){}|]/\\&/g')@[^\"'[:space:]#]+" "$f" 2>/dev/null | sed -E 's/.*@//' | sort -u | while IFS= read -r ref; do
+        if printf '%s\n' "$bad" | tr ',' '\n' | grep -q -x -F -- "$ref"; then
+          critical "$camp" "$f" "侵害が報告されたアクション ${act}@${ref}"
+        elif [ -n "$safe" ] && ! printf '%s\n' "$safe" | tr ',' '\n' | grep -q -x -F -- "$ref" && ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+          lvl_emit "$sev" "$camp" "$f" "侵害が報告されたアクション ${act} を安全版（${safe}）以外のタグで参照（${ref}）"
+        fi
+      done
+    done < <(workflow_files; files_path '/action\.ya?ml$')
+  done < <(intel_jq '.intel.actions[]? | [.campaign, .action, (.severity // "HIGH"), ((.bad_refs // []) | join(",")), ((.safe_refs // []) | join(","))] | @tsv')
+}
+
+# ワークフロー・スクリプト内の悪性文字列（§38）
+intel_workflow_strings() {
+  intel_ready || return 0
+  local camp sev str f
+  while IFS=$'\t' read -r camp sev str; do
+    [ -n "$str" ] || continue
+    files_path '(/\.github/workflows/[^/]+\.ya?ml|\.gitlab-ci\.ya?ml|/\.circleci/config\.ya?ml|/Jenkinsfile|/action\.ya?ml)$' | grep_lF "$str" | while IFS= read -r f; do
+      [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "CI 設定に既知の悪性パターン（${camp}）"
+    done
+  done < <(intel_jq '.intel.workflow_strings[]? | .campaign as $c | (.severity // "HIGH") as $s | (.strings // [])[] | [$c, $s, .] | @tsv')
+}
+
+# 悪性・侵害された拡張（§42）: Chrome/Edge は Extensions/<id>/<ver>、VS Code/Open VSX は extensions/<publisher.name>-<ver>
+intel_extensions() {
+  intel_ready || return 0
+  local camp eco sev id bads d ver hit
+  while IFS=$'\t' read -r camp eco sev id bads; do
+    [ -n "$id" ] || continue
+    case "$eco" in
+      chrome|edge|chromium|brave)
+        while IFS= read -r d; do
+          [ -n "$d" ] || continue
+          ver="${d##*/}"; [ -f "$d/manifest.json" ] || ver=""
+          hit=1
+          if [ -n "$bads" ] && [ -n "$ver" ]; then
+            hit=0; local b; for b in ${bads//,/ }; do version_matches_spec "${ver%%_*}" "$b" && hit=1; done
+          fi
+          [ "$hit" -eq 1 ] && lvl_emit "$sev" "$camp" "$d" "悪性・侵害が報告されたブラウザ拡張（${id}${ver:+ ${ver}}）"
+        done < <({ extension_manifests | sed -E 's#/manifest\.json$##'; files_path "/Extensions/${id}/" | sed -E "s#(/Extensions/${id})/.*#\1#"; } | grep -E "/Extensions/${id}(/[^/]+)?$" | sort -u)
+        ;;
+      vscode|openvsx|cursor|windsurf)
+        for d in "$HOME_DIR"/.vscode/extensions/"$id"-[0-9]* "$HOME_DIR"/.vscode-server/extensions/"$id"-[0-9]* "$HOME_DIR"/.cursor/extensions/"$id"-[0-9]* "$HOME_DIR"/.windsurf/extensions/"$id"-[0-9]* $(files_path "/extensions/${id}-[0-9][^/]*/package\.json$" | sed -E 's#/package\.json$##' | tr '\n' ' '); do
+          [ -d "$d" ] || continue
+          ver="${d##*/${id}-}"; ver="${ver%%-*}"
+          hit=1
+          if [ -n "$bads" ]; then hit=0; local b; for b in ${bads//,/ }; do version_matches_spec "$ver" "$b" && hit=1; done; fi
+          [ "$hit" -eq 1 ] && lvl_emit "$sev" "$camp" "$d" "悪性・侵害が報告された IDE 拡張（${id} ${ver}）"
+        done
+        ;;
+    esac
+  done < <(intel_jq '.intel.extensions[]? | .campaign as $c | .eco as $e | (.severity // "HIGH") as $s | ((.bad_versions // []) | join(",")) as $b | (.ids // [])[] | [$c, $e, $s, ., $b] | @tsv')
+}
+
+# ホスト IoC: パス・ファイル名・LaunchAgent Label・systemd ユニット（§30/§31）、プロセス名（§1）
+intel_host_files() {
+  intel_ready || return 0
+  local camp sev kind val e f
+  while IFS=$'\t' read -r camp sev kind val; do
+    [ -n "$val" ] || continue
+    case "$kind" in
+      path)
+        e="$(expand_home "$val")"
+        for f in $e; do [ -e "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス"; done
+        local rel="${val#\~/}"; rel="${rel#/}"
+        while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス（検査ルート内）"; done < <(files_path "/$(printf '%s' "$rel" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
+        ;;
+      file_name)
+        while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェアのファイル名（${val}）"; done < <(files_named "^$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
+        ;;
+      launch_label)
+        while IFS= read -r f; do
+          [ -n "$f" ] && [ "$(plist_label "$f")" = "$val" ] && critical "$camp" "$f" "既知のマルウェアの LaunchAgent/Daemon（${val}）"
+        done < <(files_path '/LaunchAgents/[^/]+\.plist$|/LaunchDaemons/[^/]+\.plist$'; ls "$HOME_DIR"/Library/LaunchAgents/*.plist 2>/dev/null; host_enabled && ls /Library/LaunchAgents/*.plist /Library/LaunchDaemons/*.plist 2>/dev/null)
+        ;;
+      systemd_unit)
+        for f in "$HOME_DIR/.config/systemd/user/$val" /etc/systemd/system/"$val" /usr/lib/systemd/system/"$val"; do
+          case "$f" in /etc/*|/usr/*) host_enabled || continue ;; esac
+          [ -e "$f" ] && critical "$camp" "$f" "既知のマルウェアの systemd ユニット（${val}）"
+        done
+        while IFS= read -r f; do [ -n "$f" ] && critical "$camp" "$f" "既知のマルウェアの systemd ユニット（${val}）"; done < <(files_path "/systemd/(user|system)/$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
+        ;;
+    esac
+  done < <(intel_jq '.intel.host[]? | .campaign as $c | (.severity // "HIGH") as $s |
+            (((.paths // [])[] | [$c,$s,"path",.]), ((.file_names // [])[] | [$c,$s,"file_name",.]),
+             ((.launch_labels // [])[] | [$c,$s,"launch_label",.]), ((.systemd_units // [])[] | [$c,$s,"systemd_unit",.]))) | @tsv')
+}
+intel_host_processes() {
+  intel_ready || return 0
+  [ -f "$TMP_DIR/ps.txt" ] || return 0
+  local camp name
+  while IFS=$'\t' read -r camp name; do
+    [ -n "$name" ] || continue
+    awk -v n="$name" '{c=$2; sub(/.*\//,"",c); if (c==n) print $1}' "$TMP_DIR/ps.txt" | while IFS= read -r pid; do
+      critical "$camp" "/proc/$pid" "既知のマルウェアのプロセス名（${name}、pid ${pid}）"
+    done
+  done < <(intel_jq '.intel.host[]? | .campaign as $c | (.process_names // [])[] | [$c, .] | @tsv')
+}
+
+# 開発インフラ CVE（§16 で汎用判定。image_patterns と fixed を持つ infrastructures[] を対象）
+intel_infra() {
+  intel_ready || return 0
+  local iid pat cve fixed sev cvss ver f
+  while IFS=$'\t' read -r iid pat cve fixed sev cvss; do
+    [ -n "$pat" ] && [ -n "$fixed" ] || continue
+    pat="${pat//\\\\/\\}"  # @tsv のエスケープを戻す
+    local -a fx; IFS=',' read -r -a fx <<<"$fixed"
+    while IFS=$'\t' read -r ver f; do
+      [ -n "$ver" ] || continue
+      [[ "${ver#v}" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { [ "$ver" = "latest" ] && medium "" "$f" "${iid} が浮動タグ（latest）。${cve} の修正版（${fixed//,/ }）以上か確認"; continue; }
+      version_branch_vulnerable "${ver#v}" "${fx[@]}" && lvl_emit "$sev" "" "$f" "${iid} ${ver} は ${cve}${cvss:+（CVSS ${cvss}）}の影響範囲（修正版: ${fixed//,/ }）"
+    done < <(detect_service_version "$pat")
+  done < <(intel_jq '.infrastructures[] | select(.generic == true) | .id as $i | (.image_patterns // []) as $p | .cves[] | select((.fixed // []) | length > 0) |
+            [$i, ($p | join("|")), .id, (.fixed | join(",")), (.severity // (if (.cvss // 0) >= 9 or .kev then "CRITICAL" else "HIGH" end)), ((.cvss // "") | tostring)] | @tsv')
+}
+
+# ローカルツールのバージョン（§23）。起動してよいのはここに列挙したツールとバージョン引数だけ（データから任意コマンドを起動させない）
+intel_tool_versions() {
+  intel_ready || return 0
+  host_enabled || return 0
+  local iid bin cve fixed sev v out
+  while IFS=$'\t' read -r iid bin cve fixed sev; do
+    case "$bin" in
+      git) out="$(safe_probe git --version)" ;;
+      ssh) out="$(safe_probe ssh -V 2>&1)" ;;
+      curl) out="$(safe_probe curl --version | head -n1)" ;;
+      openssl) out="$(safe_probe openssl version)" ;;
+      sudo) out="$(safe_probe sudo -V | head -n1)" ;;
+      runc) out="$(safe_probe runc --version | head -n1)" ;;
+      containerd) out="$(safe_probe containerd --version)" ;;
+      kubectl) out="$(safe_probe kubectl version --client=true -o yaml | grep -m1 gitVersion)" ;;
+      helm) out="$(safe_probe helm version --short)" ;;
+      *) continue ;;
+    esac
+    v="$(printf '%s' "$out" | grep -o -E '[0-9]+\.[0-9]+(\.[0-9]+)?(p[0-9]+)?' | head -n1)"; v="${v//p/.}"
+    [ -n "$v" ] || continue
+    local -a fx; IFS=',' read -r -a fx <<<"$fixed"
+    # ディストリビューション版はバックポートで修正済みのことが多いため、上限を HIGH とする
+    [ "$sev" = "CRITICAL" ] && sev=HIGH
+    version_branch_vulnerable "$v" "${fx[@]}" && lvl_emit "$sev" "" "$(command -v "$bin")" "${bin} ${v} は ${cve} の影響範囲（修正版: ${fixed//,/ }）。ディストリビューションのバックポート有無を確認"
+  done < <(intel_jq '.infrastructures[] | select(.binary != null) | .id as $i | .binary as $b | .cves[] | select((.fixed // []) | length > 0) |
+            [$i, $b, .id, (.fixed | join(",")), (.severity // (if (.cvss // 0) >= 9 or .kev then "CRITICAL" else "HIGH" end))] | @tsv')
+}
+
+# 脆弱な AI エディタ（§7）: macOS のアプリバンドルの Info.plist からバージョンを読む（起動しない）
+intel_apps() {
+  intel_ready || return 0
+  host_enabled || return 0
+  local camp bundle cve sev fixed f v
+  while IFS=$'\t' read -r camp bundle cve sev fixed; do
+    for f in "/Applications/$bundle/Contents/Info.plist" "$HOME_DIR/Applications/$bundle/Contents/Info.plist"; do
+      [ -f "$f" ] || continue
+      v="$(grep -A1 'CFBundleShortVersionString' "$f" | grep -o -E '[0-9]+(\.[0-9]+)+' | head -n1)"
+      [ -n "$v" ] && version_lt "$v" "$fixed" && lvl_emit "$sev" "$camp" "$f" "${bundle%.app} ${v} は ${cve} の影響範囲（修正版 ${fixed}）"
+    done
+  done < <(intel_jq '.intel.apps[]? | [.campaign, .bundle, .cve, (.severity // "HIGH"), .fixed] | @tsv')
+}
+
+# 任意ファイルの悪性文字列（§7 AI 指示ファイル・§20 MCP 定義など）。file_regex でファイルパスを絞る
+intel_strings() {
+  intel_ready || return 0
+  local camp sev rx str f
+  while IFS=$'\t' read -r camp sev rx str; do
+    [ -n "$str" ] || continue
+    rx="${rx//\\\\/\\}"  # @tsv が \ を二重にエスケープするため戻す
+    files_path "$rx" | grep_lF "$str" -i | while IFS= read -r f; do
+      [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知の攻撃キャンペーンの文字列（${camp}）"
+    done
+  done < <(intel_jq ".intel.strings[]? | select(.module == \"$CURRENT_MODULE\") | .campaign as \$c | (.severity // \"HIGH\") as \$s | (.file_regex // \".\") as \$r | (.strings // [])[] | [\$c, \$s, \$r, .] | @tsv")
 }
 
 HOME_RC_FILES=( .bashrc .bash_profile .profile .zshrc .zprofile .zshenv .zlogin .bash_login )
@@ -621,6 +859,7 @@ check_s1() {
       fi
     done
   fi
+  intel_host_processes
   return 0
 }
 
@@ -680,14 +919,26 @@ check_s2() {
 check_s3() {
   log_section "§3" "GitLab"
   local ver f found=0
+  # 判定する CVE は ioc の infrastructures[gitlab].cves（修正版があるもの）。jq が無い場合は既知の 3 件
+  local -a gcves; local -A gcvss=()
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    local c v
+    while IFS=$'\t' read -r c v; do gcves+=("$c"); [ -n "$v" ] && gcvss[$c]="CVSS $v"; done \
+      < <(jq -r '.infrastructures[] | select(.id=="gitlab") | .cves[] | select((.fixed // []) | length > 0) | [.id, ((.cvss // "") | tostring)] | @tsv' "$IOC_FILE")
+  else
+    gcves=(CVE-2026-110264 CVE-2026-85706 CVE-2026-19478)
+  fi
   while IFS=$'\t' read -r ver f; do
     [ -n "$ver" ] || continue
     found=1
-    local -a gfix; mapfile -t gfix < <(infra_fixed gitlab CVE-2026-85706)
-    if [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "${#gfix[@]}" -gt 0 ] && version_branch_vulnerable "$ver" "${gfix[@]}"; then
-      critical "" "$f" "GitLab ${ver} は CVE-2026-85706（CVSS 10.0, KEV）の影響範囲（修正版: ${gfix[*]}）"
-    fi
-    high "" "$f" "GitLab ${ver} を検出。CVE-2026-110264（10.0、2026-10-21 修正）/CVE-2026-19478 は系列ごとの修正版が ioc 未定義のため公式アドバイザリで確認してください"
+    local cve
+    for cve in "${gcves[@]}"; do
+      local -a gfix; mapfile -t gfix < <(infra_fixed gitlab "$cve")
+      if [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "${#gfix[@]}" -gt 0 ] && version_branch_vulnerable "$ver" "${gfix[@]}"; then
+        critical "" "$f" "GitLab ${ver} は ${cve}（${gcvss[$cve]:-CVSS 9 以上}）の影響範囲（修正版: ${gfix[*]}。系列に修正版が無い場合は ${gfix[0]} 以降へ移行）"
+      fi
+    done
+    [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || high "" "$f" "GitLab のバージョンを特定できません（${ver}）。${gcves[*]} の修正版を確認してください"
   done < <(detect_service_version 'gitlab/gitlab-(ee|ce)')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -706,11 +957,36 @@ check_s3() {
 check_s4() {
   log_section "§4" "PHP"
   local f
+  local -a pfix; mapfile -t pfix < <(infra_fixed php CVE-2026-109618)
+  php_judge() {  # php_judge VERSION PATH SOURCE(upstream|distro)
+    local ver="$1" path="$2" src="$3" core
+    core="$(printf '%s' "$ver" | grep -o -E '^[0-9]+\.[0-9]+\.[0-9]+')"
+    [ -n "$core" ] && [ "${#pfix[@]}" -gt 0 ] || return 0
+    version_branch_vulnerable "$core" "${pfix[@]}" || return 0
+    local eol=""; version_lt "$core" "8.2.0" && eol="（8.1 以前は公式の修正リリースなし。サポート版へ移行）"
+    if [ "$src" = "distro" ]; then
+      high "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の upstream 修正版（${pfix[*]}）未満${eol}。ディストリビューションのバックポート有無を確認"
+    else
+      critical "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の影響範囲（修正版: ${pfix[*]}）${eol}"
+    fi
+  }
   if host_enabled; then
     local v
     v="$(safe_probe php -n -v | head -n1 | awk '{print $2}')"
-    [ -n "$v" ] && info "" "" "PHP ${v} がインストールされています"
+    if [ -n "$v" ]; then
+      info "" "" "PHP ${v} がインストールされています"
+      case "$v" in *ubuntu*|*deb*|*el[0-9]*|*fc[0-9]*|*-[0-9]*) php_judge "$v" "$(command -v php)" distro ;; *) php_judge "$v" "$(command -v php)" upstream ;; esac
+    fi
   fi
+  local ver
+  while IFS=$'\t' read -r ver f; do
+    [ -n "$ver" ] && php_judge "$ver" "$f" upstream
+  done < <(detect_service_version '(^|[[:space:]/"=])php' | sed -E 's/^[^0-9]*//')
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    ver="$(grep -E '^php[[:space:]]+[0-9]' "$f" | head -n1 | awk '{print $2}')"
+    [ -n "$ver" ] && php_judge "$ver" "$f" upstream
+  done < <(files_named '^\.tool-versions$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     grep -E -i -o '^[[:space:]]*FROM[[:space:]]+([^ ]*/)?php(:[^ ]+)?' "$f" 2>/dev/null | while IFS= read -r line; do
@@ -768,32 +1044,37 @@ check_s5() {
 # §6 eMudhra（認証局危殆化）
 check_s6() {
   log_section "§6" "eMudhra"
-  local host
-  host="$(refang "$(read_ioc '.emudhra.probe_host')")"
+  local host camp="emudhra-ca-oct2026"
   if [ "$OFFLINE" = "1" ] || ! host_enabled; then
     record_error "§6" "skipped_offline"
   elif ! command -v curl >/dev/null 2>&1; then
     record_error "§6" "curl_unavailable"
   else
-    curl -sI --connect-timeout 5 --max-time 10 --proto '=https' -o /dev/null -- "https://$host/" 2>/dev/null
-    local rc=$?
-    case "$rc" in
-      0) critical "" "https://$host/" "危殆化した eMudhra 認証局をシステムが信頼しています（接続成功）" ;;
-      35|51|53|54|58|59|60|77|80|83|90|91) safe "eMudhra テスト接続は SSL エラー（信頼ストア更新済み）" ;;
-      *) record_error "§6" "network_timeout" ;;
-    esac
+    while IFS= read -r host; do
+      [ -n "$host" ] || continue
+      host="$(refang "$host")"
+      curl -sI --connect-timeout 5 --max-time 10 --proto '=https' -o /dev/null -- "https://$host/" 2>/dev/null
+      local rc=$?
+      case "$rc" in
+        0) critical "$camp" "https://$host/" "危殆化した eMudhra 中間 CA をシステムの curl が信頼しています（接続成功）" ;;
+        35|51|53|54|58|59|60|77|80|83|90|91) safe "eMudhra テスト接続は SSL エラー（$host、信頼ストア更新済み）" ;;
+        *) record_error "§6" "network_timeout" ;;
+      esac
+    done < <(read_ioc '.emudhra.probe_hosts')
   fi
+  emudhra_os_packages
+  emudhra_runtimes
   local d v min
   min="$(read_ioc '.runtime_minimums.homebrew_ca_certificates')"
   for d in /opt/homebrew/Cellar/ca-certificates /usr/local/Cellar/ca-certificates "$HOME_DIR/.linuxbrew/Cellar/ca-certificates"; do
     [ -d "$d" ] || continue
     v="$(ls -1 "$d" 2>/dev/null | sort | tail -n1)"
-    [ -n "$v" ] && [[ "$v" < "$min" ]] && medium "" "$d/$v" "Homebrew ca-certificates ${v} は仕様上の基準 ${min} 未満（基準値は一次情報未確認・誤りの疑いあり。最新版への更新と emSign ECC Root CA G3 の除去を確認）"
+    [ -n "$v" ] && [[ "$v" < "$min" ]] && high "$camp" "$d/$v" "Homebrew ca-certificates ${v} は ${min} 未満（eMudhra 侵害 CA が未除去）"
   done
   min="$(read_ioc '.runtime_minimums.certifi')"
   build_deps
   awk -F'\t' '$1=="pypi" && $2=="certifi" {print $3"\t"$4}' "$DEPS_TSV" | while IFS=$'\t' read -r v d; do
-    version_lt "$v" "$min" && high "" "$d" "certifi ${v} は ${min} 未満（eMudhra 失効が未反映）"
+    version_lt "$v" "$min" && high "$camp" "$d" "certifi ${v} は ${min} 未満（eMudhra 失効が未反映）"
   done
   local -a gmins; mapfile -t gmins < <(read_ioc '.runtime_minimums.go')
   if host_enabled; then
@@ -812,6 +1093,86 @@ check_s6() {
     [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]] && v="$v.0"
     version_branch_vulnerable "$v" "${gmins[@]}" && medium "" "$d" "go.mod の Go ${v} は ${gmins[*]} 未満（証明書ストア更新を含む修正版を使用）"
   done < <(files_named '^go\.mod$')
+  return 0
+}
+
+# eMudhra: OS の ca-certificates パッケージ（パッケージ DB を静的に読む。パッケージマネージャは起動しない）
+debian_ca_fixed() {  # debian_ca_fixed VERSION → 0(修正済) / 1(未修正)
+  local v="$1" date rest
+  date="$(printf '%s' "$v" | grep -o -E '^[0-9]{8}')"; rest="${v#"$date"}"
+  [ -n "$date" ] || return 1
+  [ "$date" -ge 20260816 ] && return 0
+  if [ "$date" = "20250419" ]; then
+    [[ "$rest" =~ deb12u([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -ge 2 ] && return 0
+    [[ "$rest" =~ deb13u([0-9]+) ]] && [ "${BASH_REMATCH[1]}" -ge 1 ] && return 0
+  fi
+  return 1
+}
+emudhra_os_packages() {
+  local camp="emudhra-ca-oct2026" f v
+  # dpkg（Debian / Ubuntu / Devuan）: /var/lib/dpkg/status。ROOT 内の同名ファイル（コンテナイメージ展開物）も対象
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    v="$(awk '/^Package: ca-certificates$/ {p=1; next} p && /^Version:/ {print $2; exit} /^$/ {p=0}' "$f")"
+    [ -n "$v" ] || continue
+    local min_ub; min_ub="$(read_ioc '.emudhra.os_ca_certificates.ubuntu_min_upstream')"
+    if [[ "$v" == *ubuntu* ]]; then
+      [ "${v:0:8}" -lt "${min_ub:-20260816}" ] 2>/dev/null && high "$camp" "$f" "ca-certificates ${v}（Ubuntu）は eMudhra 侵害 CA を含む（修正版 ${min_ub}ubuntu0.*）"
+    elif ! debian_ca_fixed "$v"; then
+      high "$camp" "$f" "ca-certificates ${v}（Debian 系）は eMudhra 侵害 CA を含む（修正版 20250419~deb12u2 / 20250419+deb13u1 / 20260816+nmu1）"
+    fi
+  done < <(host_enabled && echo /var/lib/dpkg/status; files_path '/var/lib/dpkg/status$')
+  # apk（Alpine / Wolfi / Chainguard）: /lib/apk/db/installed
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    v="$(awk '/^P:ca-certificates$/ {p=1; next} p && /^V:/ {sub(/^V:/,""); print; exit} /^$/ {p=0}' "$f")"
+    [ -n "$v" ] || continue
+    local amin; amin="$(read_ioc '.emudhra.os_ca_certificates.alpine')"
+    [[ "${v%%-r*}" < "${amin%%-r*}" ]] && high "$camp" "$f" "ca-certificates ${v}（apk）は eMudhra 侵害 CA を含む（Alpine 修正版 ${amin}、Chainguard 20260909-r3）"
+  done < <(host_enabled && echo /lib/apk/db/installed; files_path '/lib/apk/db/installed$')
+  # pacman（Arch）: /var/lib/pacman/local/ca-certificates-mozilla-<ver>/
+  local d
+  for d in /var/lib/pacman/local/ca-certificates-mozilla-*; do
+    host_enabled && [ -d "$d" ] || continue
+    v="${d##*/ca-certificates-mozilla-}"
+    version_lt "${v%-*}" "3.131.1" && high "$camp" "$d" "ca-certificates-mozilla ${v} は eMudhra 侵害 CA を含む（修正版 3.131.1-1）"
+  done
+  return 0
+}
+
+# eMudhra: リポジトリで固定されたランタイム（Node.js / Java / Deno）と、ホストのツール（Docker Desktop / mise / rustup）
+emudhra_runtimes() {
+  local camp="emudhra-ca-oct2026" f v
+  local -a nfix jfix dfix; mapfile -t nfix < <(read_ioc '.emudhra.fixed.node'); mapfile -t jfix < <(read_ioc '.emudhra.fixed.java'); mapfile -t dfix < <(read_ioc '.emudhra.fixed.deno')
+  judge() {  # judge NAME VERSION PATH FIXED...
+    local name="$1" ver="$2" path="$3"; shift 3
+    [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 0
+    version_branch_vulnerable "$ver" "$@" && high "$camp" "$path" "${name} ${ver} は eMudhra 侵害 CA を信頼（修正版: $*）"
+  }
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    v="$(head -n1 "$f" | tr -d '[:space:]' | sed -E 's/^v//')"; judge "Node.js" "$v" "$f" "${nfix[@]}"
+  done < <(files_named '^(\.nvmrc|\.node-version)$')
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    v="$(grep -E '^nodejs[[:space:]]+' "$f" | awk '{print $2}' | head -n1)"; [ -n "$v" ] && judge "Node.js" "$v" "$f" "${nfix[@]}"
+    v="$(grep -E '^deno[[:space:]]+' "$f" | awk '{print $2}' | head -n1)"; [ -n "$v" ] && judge "Deno" "$v" "$f" "${dfix[@]}"
+  done < <(files_named '^\.tool-versions$')
+  while IFS=$'\t' read -r v f; do judge "Node.js" "${v#v}" "$f" "${nfix[@]}"; done < <(detect_service_version '(^|[[:space:]/"=])node')
+  while IFS=$'\t' read -r v f; do judge "Deno" "${v#v}" "$f" "${dfix[@]}"; done < <(detect_service_version 'denoland/deno')
+  while IFS=$'\t' read -r v f; do
+    v="${v%%_*}"; v="${v%%+*}"
+    [[ "$v" =~ ^8u?([0-9]+) ]] && { [ "${BASH_REMATCH[1]}" -lt "$(read_ioc '.emudhra.fixed.java8_update')" ] && high "$camp" "$f" "Java 8u${BASH_REMATCH[1]} は eMudhra 侵害 CA を信頼（修正版 8u511）"; continue; }
+    judge "Java" "$v" "$f" "${jfix[@]}"
+  done < <(detect_service_version '(eclipse-temurin|amazoncorretto|openjdk|bellsoft/liberica-openjdk-[a-z]+|azul/zulu-openjdk)')
+  # ホスト: Docker Desktop（macOS の Info.plist）、mise、rustup（バージョン情報はファイルから読む）
+  if host_enabled; then
+    for f in /Applications/Docker.app/Contents/Info.plist "$HOME_DIR/Applications/Docker.app/Contents/Info.plist"; do
+      [ -f "$f" ] || continue
+      v="$(grep -A1 'CFBundleShortVersionString' "$f" | grep -o -E '[0-9]+(\.[0-9]+)+' | head -n1)"
+      [ -n "$v" ] && version_lt "$v" "$(read_ioc '.emudhra.fixed.docker_desktop')" && high "$camp" "$f" "Docker Desktop ${v} は eMudhra 侵害 CA を信頼（修正版 $(read_ioc '.emudhra.fixed.docker_desktop')）"
+    done
+  fi
   return 0
 }
 
@@ -844,6 +1205,8 @@ check_s7() {
     [ -n "$f" ] || continue
     fgrep_q '"runOn"[[:space:]]*:[[:space:]]*"folderOpen"' "$f" && high "mcp-poisoning" "$f" "フォルダを開くだけで自動実行されるタスク（runOn: folderOpen）"
   done < <(files_path '/\.(vscode|claude|cursor)/tasks\.json$')
+  intel_strings
+  intel_apps
   return 0
 }
 
@@ -1044,6 +1407,7 @@ check_s15() {
     [ -n "$n" ] || continue
     while IFS= read -r f; do [ -n "$f" ] && critical "post-shaihulud" "$f" "後続ワームのバイナリ名（${n}）"; done < <(files_named "^$(printf '%s' "$n" | sed 's/\./\\./g')\$")
   done < <(read_ioc '.worm_iocs.post_shaihulud.binaries')
+  intel_files
   return 0
 }
 
@@ -1080,6 +1444,7 @@ check_s16() {
   files_path '\.(sh|bash|ya?ml|mk|Makefile|py|js|ts)$|/Makefile$|/Dockerfile[^/]*$' | grep_l 'docker[[:space:]]+(container[[:space:]]+)?cp[[:space:]]' | while IFS= read -r f; do
     [ -n "$f" ] && [ "$f" != /dev/null ] && medium "" "$f" "docker cp の使用（CVE-2026-17106 CopyEscape: 信頼できないコンテナからのコピーでホスト上書き）"
   done
+  intel_infra
   return 0
 }
 
@@ -1151,6 +1516,7 @@ network_iocs() {
     kind="malicious"; [[ "$s" == *legit_infra* ]] && kind="legit"
     read_ioc "$s" | while IFS= read -r i; do [ -n "$i" ] && printf '%s\t%s\t%s\n' "$(refang "$i")" "$camp" "$kind"; done
   done
+  if [ "${1:-}" = "all" ]; then intel_network_iocs; else intel_network_iocs | awk -F'\t' '$3=="malicious"'; fi
 }
 check_s18() {
   log_section "§18" "ネットワークIoC"
@@ -1218,6 +1584,7 @@ check_s20() {
     grep -q -E '"(host|bind|listen)"[[:space:]]*:[[:space:]]*"0\.0\.0\.0"|--host[ =]0\.0\.0\.0' "$f" 2>/dev/null \
       && medium "mcp-poisoning" "$f" "MCP サーバーが 0.0.0.0 で待ち受け（同一ネットワークから到達可能）"
   done < <(mcp_config_files | sort -u)
+  intel_strings
   return 0
 }
 
@@ -1285,6 +1652,7 @@ check_s22() {
   while IFS=$'\t' read -r ver f; do
     [ "${ver#v}" = "0.69.4" ] && critical "ghostaction-oct2026" "$f" "Trivy 本体の悪性版イメージ（aquasec/trivy:0.69.4）"
   done < <(detect_service_version 'aquasec/trivy')
+  intel_actions
   return 0
 }
 
@@ -1294,12 +1662,20 @@ check_s23() {
   if host_enabled; then
     local dv kv
     dv="$(safe_probe docker version --format '{{.Client.Version}}')"
-    [ -n "$dv" ] && medium "" "$(command -v docker)" "Docker ${dv}: CVE-2026-17106（CopyEscape）の修正版を公式で確認してください（ioc に修正版未定義）"
+    if [ -n "$dv" ]; then
+      local dfix; dfix="$(infra_fixed docker CVE-2026-17106 | head -n1)"
+      if [ -z "$dfix" ]; then medium "" "$(command -v docker)" "Docker ${dv}: CVE-2026-17106（CopyEscape）の修正版を公式で確認してください（ioc に修正版未定義）"
+      elif version_lt "${dv%%-*}" "$dfix"; then high "" "$(command -v docker)" "Docker ${dv} は CVE-2026-17106（CopyEscape、moby/go-archive）の影響範囲（修正版: Engine/CLI ${dfix}）"
+      fi
+    fi
     kv="$(uname -r 2>/dev/null)"
     if [ -n "$kv" ] && [ "$OS_NAME" = "Linux" ]; then
       local kver cve; kver="$(printf '%s' "$kv" | grep -o -E '^[0-9]+\.[0-9]+(\.[0-9]+)?')"
       [[ "$kver" =~ ^[0-9]+\.[0-9]+$ ]] && kver="$kver.0"
-      for cve in CVE-2026-31431 CVE-2026-80521 CVE-2026-64564; do
+      local -a kcves
+      if [ "$HAVE_JQ" -eq 1 ]; then mapfile -t kcves < <(jq -r '.infrastructures[] | select(.id=="kernel") | .cves[].id' "$IOC_FILE")
+      else kcves=(CVE-2026-31431 CVE-2026-80521 CVE-2026-64564); fi
+      for cve in "${kcves[@]}"; do
         local -a kfix; mapfile -t kfix < <(infra_fixed kernel "$cve")
         [ "${#kfix[@]}" -gt 0 ] && [ -n "$kver" ] || continue
         if version_branch_vulnerable "$kver" "${kfix[@]}"; then
@@ -1315,6 +1691,7 @@ check_s23() {
   files_named '\.(ya?ml)$' | grep_l '(cap_add:|add:)[^#]*(SYS_ADMIN|ALL)|- (SYS_ADMIN|ALL)$' | while IFS= read -r f; do
     [ -n "$f" ] && high "" "$f" "危険なケーパビリティ（SYS_ADMIN/ALL）付与"
   done
+  intel_tool_versions
   return 0
 }
 
@@ -1528,6 +1905,7 @@ check_s30() {
     [ -n "$li" ] && info "" "loginitems" "ログイン項目: $li"
     safe_probe profiles show -type configuration | grep -q -i 'attribute' && medium "" "profiles" "構成プロファイルがインストールされています（profiles show で確認）"
   fi
+  intel_host_files
   return 0
 }
 
@@ -1767,6 +2145,7 @@ check_s38() {
   files_path '/\.github/' | grep -E '\.(ttf|otf|woff2?)$' | while IFS= read -r f; do
     medium "ghostaction-oct2026" "$f" ".github/ 配下にフォントファイル（GhostAction の隠蔽手口）"
   done
+  intel_workflow_strings
   return 0
 }
 
@@ -1908,6 +2287,7 @@ check_s42() {
       prev="$cur"; first=0
     done < <(ls -1 "$idd" 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n)
   done
+  intel_extensions
   return 0
 }
 

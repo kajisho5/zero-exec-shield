@@ -1,0 +1,174 @@
+{
+  "findings": [
+    {
+      "campaign": "mcp-server-name-squat-canary",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "package-lock.json"
+    },
+    {
+      "campaign": "proc-macro1-rust-dropper-aug2026",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "Cargo.lock"
+    },
+    {
+      "campaign": "emudhra-ca-oct2026",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "Cargo.lock"
+    },
+    {
+      "campaign": "emudhra-ca-oct2026",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "composer.lock"
+    },
+    {
+      "campaign": "mcp-ts-sdk-oct-2026",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "package-lock.json"
+    },
+    {
+      "campaign": "trinitite-7nohe-issue-comment-aug2026",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "scripts/sysvinit-detect-fash.sh"
+    },
+    {
+      "campaign": null,
+      "level": "CRITICAL",
+      "module": "§16",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": null,
+      "level": "CRITICAL",
+      "module": "§16",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": null,
+      "level": "CRITICAL",
+      "module": "§16",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§16",
+      "path": "Dockerfile"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§16",
+      "path": "Dockerfile"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§16",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§16",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§16",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": "macsync-icloud-calendar-finder-backdoor",
+      "level": "CRITICAL",
+      "module": "§18",
+      "path": "src/beacon.js"
+    },
+    {
+      "campaign": "codfish-semantic-release-action-jun2026",
+      "level": "CRITICAL",
+      "module": "§22",
+      "path": ".github/workflows/release.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "HIGH",
+      "module": "§22",
+      "path": ".github/workflows/release.yml"
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "Dockerfile"
+    },
+    {
+      "campaign": null,
+      "level": "CRITICAL",
+      "module": "§3",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "MEDIUM",
+      "module": "§37",
+      "path": "package-lock.json"
+    },
+    {
+      "campaign": "codfish-semantic-release-action-jun2026",
+      "level": "CRITICAL",
+      "module": "§38",
+      "path": ".github/workflows/release.yml"
+    },
+    {
+      "campaign": null,
+      "level": "CRITICAL",
+      "module": "§4",
+      "path": "Dockerfile"
+    },
+    {
+      "campaign": null,
+      "level": "INFO",
+      "module": "§4",
+      "path": "Dockerfile"
+    },
+    {
+      "campaign": "emudhra-ca-oct2026",
+      "level": "HIGH",
+      "module": "§6",
+      "path": ".nvmrc"
+    },
+    {
+      "campaign": "emudhra-ca-oct2026",
+      "level": "HIGH",
+      "module": "§6",
+      "path": "Dockerfile"
+    },
+    {
+      "campaign": "emudhra-ca-oct2026",
+      "level": "HIGH",
+      "module": "§6",
+      "path": "lib/apk/db/installed"
+    },
+    {
+      "campaign": "emudhra-ca-oct2026",
+      "level": "HIGH",
+      "module": "§6",
+      "path": "var/lib/dpkg/status"
+    },
+    {
+      "campaign": "actions-cool-reactivation-sep2026",
+      "level": "HIGH",
+      "module": "§7",
+      "path": ".claude/settings.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}
