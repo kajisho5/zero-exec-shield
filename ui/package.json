@@ -1,0 +1,29 @@
+{
+  "name": "zes-ui",
+  "private": true,
+  "version": "5.2.0",
+  "description": "Zero-Exec Shield v5.2 Web Scanner UI（ビルド成果物はリポジトリ直下の index.html 1 ファイル）",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json && vite build && node scripts/inline-build.mjs && node scripts/verify-no-network.mjs ../index.html",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "verify": "node scripts/verify-no-network.mjs ../index.html"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "6.1.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.3",
+    "vitest": "5.0.3"
+  }
+}

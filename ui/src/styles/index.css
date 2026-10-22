@@ -1,0 +1,60 @@
+@import 'tailwindcss';
+
+/* デザイントークン（docs/design/ui-design.md §2 / ui-components.svg と同一値） */
+@theme {
+  --color-bg: #0a0a0a;
+  --color-surface: #141414;
+  --color-surface-2: #1c1c1c;
+  --color-border: #2a2a2a;
+  --color-border-strong: #3a3a3a;
+  --color-text: #ededed;
+  --color-muted: #a3a3a3;
+  --color-subtle: #8a8a8a;
+  --color-accent: #38bdf8;
+  --color-critical: #ef4444;
+  --color-critical-bg: #2a0f0f;
+  --color-high: #f97316;
+  --color-high-bg: #2a170a;
+  --color-medium: #eab308;
+  --color-medium-bg: #262008;
+  --color-low: #3b82f6;
+  --color-low-bg: #0d1a30;
+  --color-info: #a3a3a3;
+  --color-info-bg: #1c1c1c;
+  --color-safe: #22c55e;
+  --color-safe-bg: #0c2214;
+  --color-signed: #a78bfa;
+  --color-signed-bg: #1b1430;
+  --font-sans: system-ui, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
