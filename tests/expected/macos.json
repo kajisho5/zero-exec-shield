@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§30",
+      "path": "LaunchAgents/com.xyz.plist"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§30",
+      "path": "LaunchAgents/com.xyz.plist"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

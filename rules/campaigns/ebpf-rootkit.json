@@ -1,0 +1,47 @@
+{
+  "campaign": "ebpf-rootkit",
+  "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
+  "source": "rules/ioc.json（本ファイルは複製。正はioc.json）",
+  "campaigns": [
+    "ebpf-rootkit"
+  ],
+  "packages": [],
+  "iocs": {
+    "worm_iocs.quasar_linux": {
+      "campaign": "ebpf-rootkit",
+      "alias": "QLNX",
+      "persistence": [
+        "LD_PRELOAD",
+        "systemd",
+        "crontab",
+        "init.d",
+        "XDG autostart",
+        ".bashrc"
+      ],
+      "rootkit": [
+        "userland LD_PRELOAD",
+        "kernel eBPF"
+      ]
+    },
+    "worm_iocs.linkpro": {
+      "campaign": "ebpf-rootkit",
+      "type": "eBPFベースGNU/Linuxバックドア",
+      "fallback": "LD_PRELOAD"
+    },
+    "worm_iocs.voidlink": {
+      "campaign": "ebpf-rootkit",
+      "rootkit": [
+        "LD_PRELOAD",
+        "LKM",
+        "eBPF"
+      ],
+      "type": "クラウドネイティブLinuxマルウェア"
+    },
+    "persistence.ebpf_rootkit": [
+      "Quasar Linux (QLNX): userland LD_PRELOAD + kernel eBPF",
+      "LinkPro: eBPF + LD_PRELOAD + systemd名前偽装",
+      "VoidLink: LD_PRELOAD / LKM / eBPF"
+    ]
+  },
+  "malicious_files": []
+}

@@ -1,0 +1,435 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1440" height="900" viewBox="0 0 1440 900" font-family="system-ui, 'Hiragino Sans', 'Noto Sans JP', sans-serif">
+  <title>ZES v5.2 Web Scanner — 総合タブ（1440×900）</title>
+  <desc>Step 2 デザイン。ヘッダ、18タブの横スクロールタブバー、入力（D&amp;D／貼り付け）、重大度サマリ、重大度フィルタ、検出一覧、Blast Radius パネル。トークンは docs/design/ui-design.md §2 と一致。</desc>
+  <defs>
+    <style>
+      .bg{fill:#0a0a0a}
+      .surface{fill:#141414;stroke:#2a2a2a;stroke-width:1}
+      .surface2{fill:#1c1c1c}
+      .line{stroke:#2a2a2a;stroke-width:1}
+      .t-brand{font-size:18px;font-weight:600;fill:#ededed}
+      .t-h2{font-size:16px;font-weight:600;fill:#ededed}
+      .t-h3{font-size:14px;font-weight:600;fill:#ededed}
+      .t-body{font-size:14px;fill:#ededed}
+      .t-tab{font-size:14px;fill:#a3a3a3}
+      .t-tab-active{font-size:14px;font-weight:600;fill:#ededed}
+      .t-sm{font-size:13px;fill:#ededed}
+      .t-muted{font-size:13px;fill:#a3a3a3}
+      .t-cap{font-size:12px;fill:#8a8a8a}
+      .t-cap-muted{font-size:12px;fill:#a3a3a3}
+      .t-badge{font-size:12px;font-weight:600}
+      .t-th{font-size:12px;font-weight:600;fill:#8a8a8a;letter-spacing:.04em}
+      .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+      .t-num{font-size:32px;font-weight:700}
+      .btn{fill:#1c1c1c;stroke:#3a3a3a;stroke-width:1}
+      .btn-primary{fill:#38bdf8}
+      .t-btn{font-size:13px;font-weight:600;fill:#ededed}
+      .t-btn-primary{font-size:13px;font-weight:600;fill:#0a0a0a}
+    </style>
+    <!-- 重大度アイコン（12×12、fill は use 側で指定） -->
+    <polygon id="ico-crit" points="3.5,0 8.5,0 12,3.5 12,8.5 8.5,12 3.5,12 0,8.5 0,3.5"/>
+    <polygon id="ico-high" points="6,0.5 12,11.5 0,11.5"/>
+    <circle id="ico-med" cx="6" cy="6" r="5.5"/>
+    <polygon id="ico-low" points="6,0 12,6 6,12 0,6"/>
+    <path id="ico-info" fill-rule="evenodd" d="M6 0a6 6 0 1 1 0 12A6 6 0 1 1 6 0zM6 2.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z"/>
+    <path id="ico-safe" d="M0.8 6.4L4.4 10L11.2 2.6L9.8 1.3L4.4 7.2L2.2 5z"/>
+    <!-- コピー（16×16、stroke は use 側） -->
+    <g id="ico-copy" fill="none" stroke-width="1.5" stroke-linejoin="round">
+      <rect x="5" y="5" width="9" height="9" rx="2"/>
+      <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2H3.5A1.5 1.5 0 0 0 2 3.5V9.5A1.5 1.5 0 0 0 3.5 11H5"/>
+    </g>
+    <!-- 鍵（16×16） -->
+    <g id="ico-key" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="5" cy="11" r="3"/>
+      <path d="M7.2 8.8L14 2M11 5l2 2M12.5 3.5l1.5 1.5"/>
+    </g>
+    <!-- フォルダ（32×32） -->
+    <g id="ico-folder" fill="none" stroke-width="2" stroke-linejoin="round">
+      <path d="M3 8a2 2 0 0 1 2-2h7l3 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+      <path d="M16 14v8M12.5 18.5L16 22l3.5-3.5"/>
+    </g>
+    <!-- 端末（16×16） -->
+    <g id="ico-term" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="1" y="2" width="14" height="12" rx="2"/>
+      <path d="M4 6l2.5 2L4 10M8 10.5h4"/>
+    </g>
+    <!-- 山括弧 -->
+    <path id="ico-chev-l" d="M9.5 3L5 8l4.5 5" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="ico-chev-r" d="M6.5 3L11 8l-4.5 5" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="ico-chev-d" d="M3 6l5 4.5L13 6" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- 検索 -->
+    <g id="ico-search" fill="none" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></g>
+    <!-- タブバー右端フェード -->
+    <linearGradient id="fade-r" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#0a0a0a" stop-opacity="0"/>
+      <stop offset="1" stop-color="#0a0a0a" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景 -->
+  <rect class="bg" x="0" y="0" width="1440" height="900"/>
+
+  <!-- ===== Header (0–64) ===== -->
+  <g id="header">
+    <line class="line" x1="0" y1="64.5" x2="1440" y2="64.5"/>
+    <!-- 盾ロゴ -->
+    <g transform="translate(32,18)">
+      <path d="M14 0L28 5v9c0 8-6 13.5-14 15C6 27.5 0 22 0 14V5z" fill="#141414" stroke="#38bdf8" stroke-width="2"/>
+      <path d="M8 14.5l4 4 8-8.5" fill="none" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <text class="t-brand" x="72" y="38">Zero-Exec Shield</text>
+    <rect x="228" y="22" width="44" height="22" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <text class="t-badge" x="250" y="37" text-anchor="middle" fill="#a3a3a3">v5.2</text>
+    <text class="t-cap" x="292" y="30">incident_bundle</text>
+    <text class="t-cap-muted mono" x="292" y="46">ZES-2026-OCT-EMERGENCY-V5.2</text>
+
+    <!-- オフライン表示 -->
+    <rect x="1000" y="20" width="196" height="26" rx="13" fill="#0c2214" stroke="#22c55e" stroke-opacity=".5"/>
+    <circle cx="1016" cy="33" r="4" fill="#22c55e"/>
+    <text class="t-badge" x="1028" y="37" fill="#22c55e">オフライン・外部通信ゼロ</text>
+
+    <!-- アクション -->
+    <rect class="btn" x="1212" y="16" width="108" height="34" rx="8"/>
+    <text class="t-btn" x="1266" y="38" text-anchor="middle">JSON 出力</text>
+    <rect class="btn" x="1332" y="16" width="76" height="34" rx="8"/>
+    <text class="t-btn" x="1370" y="38" text-anchor="middle">クリア</text>
+  </g>
+
+  <!-- ===== TabBar (64–112) ===== -->
+  <g id="tabbar">
+    <line class="line" x1="0" y1="112.5" x2="1440" y2="112.5"/>
+    <!-- 左スクロール（無効状態） -->
+    <rect x="32" y="74" width="28" height="28" rx="6" fill="#141414" stroke="#2a2a2a"/>
+    <use xlink:href="#ico-chev-l" x="38" y="80" stroke="#3a3a3a"/>
+
+    <!-- 1 総合（active） -->
+    <text class="t-tab-active" x="88" y="93">総合</text>
+    <rect x="124" y="79" width="26" height="18" rx="9" fill="#2a0f0f"/>
+    <text class="t-badge" x="137" y="92" text-anchor="middle" fill="#ef4444">20</text>
+    <rect x="72" y="109" width="92" height="3" fill="#38bdf8"/>
+    <!-- 2 SkillPact -->
+    <text class="t-tab" x="180" y="93">SkillPact</text>
+    <rect x="256" y="79" width="26" height="18" rx="9" fill="#2a0f0f"/>
+    <text class="t-badge" x="269" y="92" text-anchor="middle" fill="#ef4444">8</text>
+    <!-- 3 TeamPCP -->
+    <text class="t-tab" x="312" y="93">TeamPCP</text>
+    <rect x="378" y="79" width="26" height="18" rx="9" fill="#2a170a"/>
+    <text class="t-badge" x="391" y="92" text-anchor="middle" fill="#f97316">2</text>
+    <!-- 4 ChainDrop -->
+    <text class="t-tab" x="432" y="93">ChainDrop</text>
+    <rect x="510" y="79" width="26" height="18" rx="9" fill="#2a0f0f"/>
+    <text class="t-badge" x="523" y="92" text-anchor="middle" fill="#ef4444">3</text>
+    <!-- 5 PyPI -->
+    <text class="t-tab" x="564" y="93">PyPI</text>
+    <rect x="602" y="79" width="26" height="18" rx="9" fill="#2a0f0f"/>
+    <text class="t-badge" x="615" y="92" text-anchor="middle" fill="#ef4444">1</text>
+    <!-- 6 Solana（0件） -->
+    <text class="t-tab" x="656" y="93">Solana</text>
+    <!-- 7 Post-ShaiHulud -->
+    <text class="t-tab" x="732" y="93">Post-ShaiHulud</text>
+    <!-- 8 MCP -->
+    <text class="t-tab" x="868" y="93">MCP</text>
+    <rect x="906" y="79" width="26" height="18" rx="9" fill="#2a170a"/>
+    <text class="t-badge" x="919" y="92" text-anchor="middle" fill="#f97316">1</text>
+    <!-- 9 GitHub Actions -->
+    <text class="t-tab" x="960" y="93">GitHub Actions</text>
+    <rect x="1074" y="79" width="26" height="18" rx="9" fill="#2a170a"/>
+    <text class="t-badge" x="1087" y="92" text-anchor="middle" fill="#f97316">1</text>
+    <!-- 10 ブラウザ拡張（フェードで見切れ） -->
+    <text class="t-tab" x="1128" y="93">ブラウザ拡張</text>
+    <rect x="1216" y="79" width="26" height="18" rx="9" fill="#262008"/>
+    <text class="t-badge" x="1229" y="92" text-anchor="middle" fill="#eab308">1</text>
+    <rect x="1150" y="66" width="120" height="45" fill="url(#fade-r)"/>
+
+    <!-- 右スクロール -->
+    <rect x="1240" y="74" width="28" height="28" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <use xlink:href="#ico-chev-r" x="1246" y="80" stroke="#ededed"/>
+    <!-- すべてのタブ -->
+    <rect class="btn" x="1276" y="74" width="132" height="28" rx="6"/>
+    <text class="t-btn" x="1288" y="93">すべてのタブ</text>
+    <text class="t-cap-muted" x="1372" y="93">18</text>
+    <use xlink:href="#ico-chev-d" x="1386" y="80" stroke="#a3a3a3"/>
+  </g>
+
+  <!-- ===== Left column ===== -->
+  <!-- InputArea card (136–296) -->
+  <g id="input-area">
+    <rect class="surface" x="32.5" y="136.5" width="904" height="160" rx="12"/>
+    <!-- DropZone -->
+    <rect x="48.5" y="152.5" width="472" height="128" rx="10" fill="#101010" stroke="#3a3a3a" stroke-width="1.5" stroke-dasharray="6 5"/>
+    <use xlink:href="#ico-folder" x="68" y="172" stroke="#38bdf8"/>
+    <text class="t-h2" x="116" y="186">フォルダをドラッグ＆ドロップ</text>
+    <text class="t-muted" x="116" y="208">または</text>
+    <rect x="164" y="193" width="140" height="24" rx="6" fill="#1c1c1c" stroke="#38bdf8" stroke-opacity=".6"/>
+    <text class="t-badge" x="234" y="209" text-anchor="middle" fill="#38bdf8">フォルダを選択…</text>
+    <text class="t-cap" x="312" y="209">webkitdirectory</text>
+    <line class="line" x1="68" y1="232.5" x2="500" y2="232.5"/>
+    <text class="t-cap" x="68" y="254">ファイル内容は判定にのみ使用し、画面表示・保存・送信を行いません。</text>
+    <text class="t-cap" x="68" y="270">1 ファイル 2 MiB 超は未判定として計上（0 件扱いしない）。</text>
+
+    <!-- PasteBox -->
+    <text class="t-h3" x="536" y="168">テキスト貼り付け判定</text>
+    <text class="t-cap" x="700" y="168">C2 ドメイン/IP・base64・exec(・curl</text>
+    <rect x="536.5" y="178.5" width="384" height="64" rx="8" fill="#101010" stroke="#3a3a3a"/>
+    <text class="t-muted mono" x="550" y="200">ログ・コマンド履歴・設定断片を貼り付け</text>
+    <text class="t-cap mono" x="550" y="220">（貼り付け内容は再表示しません）</text>
+    <text class="t-cap" x="536" y="270">0 / 1,000,000 文字</text>
+    <rect class="btn-primary" x="828" y="252" width="92" height="30" rx="8"/>
+    <text class="t-btn-primary" x="874" y="272" text-anchor="middle">判定する</text>
+  </g>
+
+  <!-- ScanProgress -->
+  <use xlink:href="#ico-safe" x="34" y="306" fill="#22c55e"/>
+  <text class="t-muted" x="54" y="317">スキャン完了 · 1,284 ファイル · 0.9 秒</text>
+  <text class="t-cap" x="336" y="317">未判定 16 件（サイズ超過 3 / バイナリ 12 / リンク先不明 1）→ 右パネル参照</text>
+
+  <!-- SummaryCards (328–424) -->
+  <g id="summary">
+    <!-- CRITICAL -->
+    <rect x="32.5" y="328.5" width="214" height="96" rx="12" fill="#141414" stroke="#ef4444" stroke-opacity=".55"/>
+    <rect x="33" y="340" width="4" height="72" rx="2" fill="#ef4444"/>
+    <use xlink:href="#ico-crit" x="52" y="345" fill="#ef4444"/>
+    <text class="t-badge" x="70" y="356" fill="#ef4444">CRITICAL</text>
+    <text class="t-num" x="52" y="398" fill="#ededed">6</text>
+    <text class="t-cap" x="52" y="414">クリックで絞込（選択中）</text>
+    <!-- HIGH -->
+    <rect x="262.5" y="328.5" width="214" height="96" rx="12" fill="#141414" stroke="#f97316" stroke-opacity=".55"/>
+    <rect x="263" y="340" width="4" height="72" rx="2" fill="#f97316"/>
+    <use xlink:href="#ico-high" x="282" y="345" fill="#f97316"/>
+    <text class="t-badge" x="300" y="356" fill="#f97316">HIGH</text>
+    <text class="t-num" x="282" y="398" fill="#ededed">11</text>
+    <text class="t-cap" x="282" y="414">クリックで絞込（選択中）</text>
+    <!-- MEDIUM -->
+    <rect x="492.5" y="328.5" width="214" height="96" rx="12" fill="#141414" stroke="#eab308" stroke-opacity=".55"/>
+    <rect x="493" y="340" width="4" height="72" rx="2" fill="#eab308"/>
+    <use xlink:href="#ico-med" x="512" y="345" fill="#eab308"/>
+    <text class="t-badge" x="530" y="356" fill="#eab308">MEDIUM</text>
+    <text class="t-num" x="512" y="398" fill="#ededed">2</text>
+    <text class="t-cap" x="512" y="414">LOW 0 · INFO 1 を含まず</text>
+    <!-- SAFE -->
+    <rect x="722.5" y="328.5" width="214" height="96" rx="12" fill="#141414" stroke="#2a2a2a"/>
+    <rect x="723" y="340" width="4" height="72" rx="2" fill="#22c55e"/>
+    <use xlink:href="#ico-safe" x="742" y="345" fill="#22c55e"/>
+    <text class="t-badge" x="760" y="356" fill="#22c55e">SAFE</text>
+    <text class="t-num" x="742" y="398" fill="#ededed">31</text>
+    <text class="t-cap" x="790" y="398">/ 49 チェック非該当</text>
+    <text class="t-cap" x="742" y="414">ブラウザ判定範囲のみ</text>
+  </g>
+
+  <!-- FindingsToolbar (440–480) -->
+  <g id="toolbar">
+    <text class="t-cap-muted" x="32" y="465">重大度</text>
+    <!-- chip CRITICAL on -->
+    <rect x="80.5" y="446.5" width="108" height="28" rx="14" fill="#2a0f0f" stroke="#ef4444"/>
+    <use xlink:href="#ico-crit" x="92" y="455" fill="#ef4444"/>
+    <text class="t-badge" x="110" y="465" fill="#ef4444">CRITICAL 6</text>
+    <!-- HIGH on -->
+    <rect x="196.5" y="446.5" width="88" height="28" rx="14" fill="#2a170a" stroke="#f97316"/>
+    <use xlink:href="#ico-high" x="208" y="455" fill="#f97316"/>
+    <text class="t-badge" x="226" y="465" fill="#f97316">HIGH 11</text>
+    <!-- MEDIUM on -->
+    <rect x="292.5" y="446.5" width="98" height="28" rx="14" fill="#262008" stroke="#eab308"/>
+    <use xlink:href="#ico-med" x="304" y="455" fill="#eab308"/>
+    <text class="t-badge" x="322" y="465" fill="#eab308">MEDIUM 2</text>
+    <!-- LOW off -->
+    <rect x="398.5" y="446.5" width="72" height="28" rx="14" fill="none" stroke="#3a3a3a"/>
+    <use xlink:href="#ico-low" x="410" y="455" fill="#8a8a8a"/>
+    <text class="t-badge" x="428" y="465" fill="#8a8a8a">LOW 0</text>
+    <!-- INFO on -->
+    <rect x="478.5" y="446.5" width="76" height="28" rx="14" fill="#1c1c1c" stroke="#a3a3a3"/>
+    <use xlink:href="#ico-info" x="490" y="455" fill="#a3a3a3"/>
+    <text class="t-badge" x="508" y="465" fill="#a3a3a3">INFO 1</text>
+    <!-- search -->
+    <rect x="568.5" y="446.5" width="208" height="28" rx="8" fill="#101010" stroke="#3a3a3a"/>
+    <use xlink:href="#ico-search" x="578" y="452" stroke="#8a8a8a"/>
+    <text class="t-cap" x="600" y="465">パス・キャンペーンで検索</text>
+    <!-- module select -->
+    <rect x="784.5" y="446.5" width="152" height="28" rx="8" fill="#101010" stroke="#3a3a3a"/>
+    <text class="t-cap-muted" x="796" y="465">モジュール: すべて</text>
+    <use xlink:href="#ico-chev-d" x="912" y="452" stroke="#8a8a8a"/>
+  </g>
+
+  <!-- FindingsTable (492–884) -->
+  <g id="findings-table">
+    <rect class="surface" x="32.5" y="492.5" width="904" height="392" rx="12"/>
+    <path d="M33 528 H936 V504.5 A12 12 0 0 0 924 493 H45 A12 12 0 0 0 33 505 Z" fill="#1c1c1c"/>
+    <line class="line" x1="33" y1="528.5" x2="936" y2="528.5"/>
+    <text class="t-th" x="48" y="515">重大度</text>
+    <text class="t-th" x="168" y="515">モジュール</text>
+    <text class="t-th" x="248" y="515">キャンペーン</text>
+    <text class="t-th" x="440" y="515">パス ／ 詳細</text>
+    <text class="t-th" x="884" y="515">コピー</text>
+
+    <!-- row 1 (528–578) CRITICAL -->
+    <rect x="48" y="541" width="92" height="22" rx="6" fill="#2a0f0f" stroke="#ef4444" stroke-opacity=".6"/>
+    <use xlink:href="#ico-crit" x="56" y="546" fill="#ef4444"/>
+    <text class="t-badge" x="74" y="556" fill="#ef4444">CRITICAL</text>
+    <text class="t-sm mono" x="168" y="556">§49</text>
+    <text class="t-sm" x="248" y="556">skillpact-divergence</text>
+    <text class="t-sm mono" x="440" y="550">skills/repo-helper/scripts/run.sh</text>
+    <text class="t-cap-muted" x="440" y="568">契約に network 未宣言、実態に network を検出</text>
+    <rect x="884" y="539" width="32" height="28" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <use xlink:href="#ico-copy" x="892" y="545" stroke="#a3a3a3"/>
+    <line class="line" x1="48" y1="578.5" x2="920" y2="578.5"/>
+
+    <!-- row 2 (578–628) CRITICAL -->
+    <rect x="48" y="591" width="92" height="22" rx="6" fill="#2a0f0f" stroke="#ef4444" stroke-opacity=".6"/>
+    <use xlink:href="#ico-crit" x="56" y="596" fill="#ef4444"/>
+    <text class="t-badge" x="74" y="606" fill="#ef4444">CRITICAL</text>
+    <text class="t-sm mono" x="168" y="606">§15</text>
+    <text class="t-sm" x="248" y="606">chaindrop-keyv</text>
+    <text class="t-sm mono" x="440" y="600">node_modules/keyv/setup.mjs</text>
+    <text class="t-cap-muted" x="440" y="618">悪性ファイル名かつ SHA-256 一致</text>
+    <rect x="884" y="589" width="32" height="28" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <use xlink:href="#ico-copy" x="892" y="595" stroke="#a3a3a3"/>
+    <line class="line" x1="48" y1="628.5" x2="920" y2="628.5"/>
+
+    <!-- row 3 (628–678) CRITICAL, hover state -->
+    <rect x="33" y="629" width="903" height="49" fill="#1c1c1c"/>
+    <rect x="48" y="641" width="92" height="22" rx="6" fill="#2a0f0f" stroke="#ef4444" stroke-opacity=".6"/>
+    <use xlink:href="#ico-crit" x="56" y="646" fill="#ef4444"/>
+    <text class="t-badge" x="74" y="656" fill="#ef4444">CRITICAL</text>
+    <text class="t-sm mono" x="168" y="656">§2</text>
+    <text class="t-sm" x="248" y="656">litellm-oct2026</text>
+    <text class="t-sm mono" x="440" y="650">venv/site-packages/cook.pth</text>
+    <text class="t-cap-muted" x="440" y="668">既知悪性 .pth フック（起動時自動実行）</text>
+    <rect x="884" y="639" width="32" height="28" rx="6" fill="#0a0a0a" stroke="#38bdf8"/>
+    <use xlink:href="#ico-copy" x="892" y="645" stroke="#38bdf8"/>
+    <!-- tooltip -->
+    <rect x="756" y="640" width="112" height="26" rx="6" fill="#ededed"/>
+    <path d="M868 648l6 5-6 5z" fill="#ededed"/>
+    <text class="t-badge" x="812" y="657" text-anchor="middle" fill="#0a0a0a">パスをコピー</text>
+    <line class="line" x1="48" y1="678.5" x2="920" y2="678.5"/>
+
+    <!-- row 4 (678–728) HIGH -->
+    <rect x="48" y="691" width="60" height="22" rx="6" fill="#2a170a" stroke="#f97316" stroke-opacity=".6"/>
+    <use xlink:href="#ico-high" x="56" y="696" fill="#f97316"/>
+    <text class="t-badge" x="74" y="706" fill="#f97316">HIGH</text>
+    <text class="t-sm mono" x="168" y="706">§22</text>
+    <text class="t-muted" x="248" y="706">—</text>
+    <text class="t-sm mono" x="440" y="700">.github/workflows/release.yml</text>
+    <text class="t-cap-muted" x="440" y="718">uses: がタグ参照（SHA 固定でない）</text>
+    <rect x="884" y="689" width="32" height="28" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <use xlink:href="#ico-copy" x="892" y="695" stroke="#a3a3a3"/>
+    <line class="line" x1="48" y1="728.5" x2="920" y2="728.5"/>
+
+    <!-- row 5 (728–778) HIGH -->
+    <rect x="48" y="741" width="60" height="22" rx="6" fill="#2a170a" stroke="#f97316" stroke-opacity=".6"/>
+    <use xlink:href="#ico-high" x="56" y="746" fill="#f97316"/>
+    <text class="t-badge" x="74" y="756" fill="#f97316">HIGH</text>
+    <text class="t-sm mono" x="168" y="756">§49</text>
+    <text class="t-sm" x="248" y="756">skillpact-account-comp…</text>
+    <text class="t-sm mono" x="440" y="750">skills/repo-helper/skill.contract.json</text>
+    <text class="t-cap-muted" x="440" y="768">L3 署名済みファイルだが前版から exec を新規追加</text>
+    <rect x="884" y="739" width="32" height="28" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <use xlink:href="#ico-copy" x="892" y="745" stroke="#a3a3a3"/>
+    <line class="line" x1="48" y1="778.5" x2="920" y2="778.5"/>
+
+    <!-- row 6 (778–828) HIGH -->
+    <rect x="48" y="791" width="60" height="22" rx="6" fill="#2a170a" stroke="#f97316" stroke-opacity=".6"/>
+    <use xlink:href="#ico-high" x="56" y="796" fill="#f97316"/>
+    <text class="t-badge" x="74" y="806" fill="#f97316">HIGH</text>
+    <text class="t-sm mono" x="168" y="806">§17</text>
+    <text class="t-sm" x="248" y="806">symjack</text>
+    <text class="t-sm mono" x="440" y="800">docs/vid-settings.mp4</text>
+    <text class="t-cap-muted" x="440" y="818">デコイ名かつ 0 バイト：要手動確認（CLI で readlink）</text>
+    <rect x="884" y="789" width="32" height="28" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <use xlink:href="#ico-copy" x="892" y="795" stroke="#a3a3a3"/>
+    <line class="line" x1="48" y1="828.5" x2="920" y2="828.5"/>
+
+    <!-- row 7 (828–878) MEDIUM -->
+    <rect x="48" y="841" width="80" height="22" rx="6" fill="#262008" stroke="#eab308" stroke-opacity=".6"/>
+    <use xlink:href="#ico-med" x="56" y="846" fill="#eab308"/>
+    <text class="t-badge" x="74" y="856" fill="#eab308">MEDIUM</text>
+    <text class="t-sm mono" x="168" y="856">§24</text>
+    <text class="t-muted" x="248" y="856">—</text>
+    <text class="t-sm mono" x="440" y="850">ext/abcd/manifest.json</text>
+    <text class="t-cap-muted" x="440" y="868">危険なホスト権限 &lt;all_urls&gt;</text>
+    <rect x="884" y="839" width="32" height="28" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <use xlink:href="#ico-copy" x="892" y="845" stroke="#a3a3a3"/>
+  </g>
+
+  <!-- ===== Right column (960–1408) ===== -->
+  <!-- Blast Radius (136–560) -->
+  <g id="blast-radius">
+    <rect class="surface" x="960.5" y="136.5" width="448" height="424" rx="12"/>
+    <use xlink:href="#ico-key" x="980" y="154" stroke="#f97316"/>
+    <text class="t-h2" x="1004" y="168">Blast Radius</text>
+    <rect x="1120" y="153" width="132" height="20" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <text class="t-badge" x="1186" y="167" text-anchor="middle" fill="#a3a3a3">存在のみ・内容非表示</text>
+    <text class="t-cap" x="980" y="192">ローテーション対象となるシークレットのパス一覧（§14 / §19 / §9.5）</text>
+    <line class="line" x1="976" y1="206.5" x2="1392" y2="206.5"/>
+
+    <text class="t-th" x="980" y="226">パス</text>
+    <text class="t-th" x="1300" y="226">サイズ</text>
+
+    <use xlink:href="#ico-key" x="980" y="240" stroke="#8a8a8a"/>
+    <text class="t-sm mono" x="1004" y="253">.env</text>
+    <text class="t-cap" x="1300" y="253">412 B</text>
+    <line class="line" x1="976" y1="266.5" x2="1392" y2="266.5"/>
+
+    <use xlink:href="#ico-key" x="980" y="276" stroke="#8a8a8a"/>
+    <text class="t-sm mono" x="1004" y="289">deploy/id_ed25519</text>
+    <text class="t-cap" x="1300" y="289">411 B</text>
+    <line class="line" x1="976" y1="302.5" x2="1392" y2="302.5"/>
+
+    <use xlink:href="#ico-key" x="980" y="312" stroke="#8a8a8a"/>
+    <text class="t-sm mono" x="1004" y="325">config/.npmrc</text>
+    <text class="t-cap" x="1300" y="325">96 B</text>
+    <line class="line" x1="976" y1="338.5" x2="1392" y2="338.5"/>
+
+    <use xlink:href="#ico-key" x="980" y="348" stroke="#8a8a8a"/>
+    <text class="t-sm mono" x="1004" y="361">.aws/credentials</text>
+    <text class="t-cap" x="1300" y="361">229 B</text>
+    <line class="line" x1="976" y1="374.5" x2="1392" y2="374.5"/>
+
+    <use xlink:href="#ico-key" x="980" y="384" stroke="#8a8a8a"/>
+    <text class="t-sm mono" x="1004" y="397">.kube/config</text>
+    <text class="t-cap" x="1300" y="397">5.1 KB</text>
+    <line class="line" x1="976" y1="410.5" x2="1392" y2="410.5"/>
+
+    <use xlink:href="#ico-key" x="980" y="420" stroke="#8a8a8a"/>
+    <text class="t-sm mono" x="1004" y="433">.git-credentials</text>
+    <text class="t-cap" x="1300" y="433">58 B</text>
+    <line class="line" x1="976" y1="446.5" x2="1392" y2="446.5"/>
+
+    <use xlink:href="#ico-key" x="980" y="456" stroke="#8a8a8a"/>
+    <text class="t-sm mono" x="1004" y="469">.netrc</text>
+    <text class="t-cap" x="1300" y="469">74 B</text>
+
+    <line class="line" x1="976" y1="490.5" x2="1392" y2="490.5"/>
+    <text class="t-cap-muted" x="980" y="520">7 件 · 内容は読み取り・表示しません</text>
+    <rect class="btn" x="1236" y="500" width="156" height="30" rx="8"/>
+    <use xlink:href="#ico-copy" x="1250" y="507" stroke="#ededed"/>
+    <text class="t-btn" x="1274" y="520">パス一覧をコピー</text>
+    <text class="t-cap" x="980" y="546">手順: 検出 → 一覧提示 → ローテーション → 再構築</text>
+  </g>
+
+  <!-- CLI only notice (576–708) -->
+  <g id="cli-only">
+    <rect class="surface" x="960.5" y="576.5" width="448" height="132" rx="12"/>
+    <use xlink:href="#ico-term" x="980" y="594" stroke="#38bdf8"/>
+    <text class="t-h3" x="1004" y="607">ホスト検査は CLI で実施</text>
+    <text class="t-cap-muted" x="980" y="632">プロセス・ネットワーク接続・カーネル・eBPF・マウント状態は</text>
+    <text class="t-cap-muted" x="980" y="650">ブラウザから確認できないため、0 件＝安全と表示しません。</text>
+    <rect x="980" y="664" width="408" height="30" rx="6" fill="#101010" stroke="#2a2a2a"/>
+    <text class="t-sm mono" x="992" y="684">./zes-scan.sh --full --json</text>
+    <use xlink:href="#ico-copy" x="1362" y="671" stroke="#a3a3a3"/>
+  </g>
+
+  <!-- Undetermined (724–884) -->
+  <g id="undetermined">
+    <rect class="surface" x="960.5" y="724.5" width="448" height="160" rx="12"/>
+    <use xlink:href="#ico-info" x="982" y="744" fill="#a3a3a3"/>
+    <text class="t-h3" x="1004" y="755">未判定（0 件扱いしない）</text>
+    <text class="t-sm" x="980" y="786">サイズ超過（2 MiB 超）</text>
+    <text class="t-sm" x="1360" y="786" text-anchor="end">3</text>
+    <line class="line" x1="976" y1="800.5" x2="1392" y2="800.5"/>
+    <text class="t-sm" x="980" y="824">バイナリ（判定対象外）</text>
+    <text class="t-sm" x="1360" y="824" text-anchor="end">12</text>
+    <line class="line" x1="976" y1="838.5" x2="1392" y2="838.5"/>
+    <text class="t-sm" x="980" y="862">シンボリックリンク先 不明</text>
+    <text class="t-sm" x="1360" y="862" text-anchor="end">1</text>
+  </g>
+</svg>

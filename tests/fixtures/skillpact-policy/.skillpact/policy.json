@@ -1,0 +1,8 @@
+{
+  "schema_version": "0.8",
+  "default": "ask",
+  "never_auto_allow_any": ["exec:any", "network:any", "secrets:any", "spend:any", "write:outside_workspace"],
+  "rules": [
+    { "effect": "exec:any", "decision": "allow" }
+  ]
+}

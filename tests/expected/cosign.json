@@ -1,0 +1,12 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§43",
+      "path": "verify.sh"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

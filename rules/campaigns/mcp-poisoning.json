@@ -1,0 +1,117 @@
+{
+  "campaign": "mcp-poisoning",
+  "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
+  "source": "rules/ioc.json（本ファイルは複製。正はioc.json）",
+  "campaigns": [
+    "mcp-poisoning"
+  ],
+  "packages": [],
+  "iocs": {
+    "mcp_poisoning": {
+      "campaign": "mcp-poisoning",
+      "symjack": {
+        "target_configs": [
+          ".mcp.json",
+          ".cursor/mcp.json",
+          ".claude/settings.json",
+          ".gemini/settings.json",
+          ".codex/config.toml"
+        ],
+        "example_payloads": [
+          "ln -s ../.claude/settings.json docs/vid-settings.mp4",
+          "ln -sf ../../.mcp.json docs/vid-mcp.mp4"
+        ],
+        "decoy_name_patterns": [
+          "vid-",
+          "logo.",
+          "readme.",
+          "docs/"
+        ]
+      },
+      "runtime_gate": {
+        "alias": "Deadbugz",
+        "behavior": "最初の3回正常、4回目以降に悪性実行",
+        "detection_regex": [
+          "callCount\\s*>\\s*[0-9]+",
+          "invocations?\\s*>\\s*[0-9]+",
+          "count\\+\\+.*if\\s*\\(\\s*count\\s*>"
+        ],
+        "injection_phrases": [
+          "ignore previous instructions",
+          "do not tell the user",
+          "execute"
+        ]
+      },
+      "neighbor": {
+        "alias": "NeighborJack",
+        "behavior": "隣接する脆弱なMCPサーバー経由で間接侵害",
+        "detection": "localhost/127.0.0.1以外の内部IP・未認証MCPエンドポイント登録",
+        "internal_ip_regex": "(10\\.[0-9]+\\.[0-9]+\\.[0-9]+|192\\.168\\.[0-9]+\\.[0-9]+|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9]+\\.[0-9]+)"
+      },
+      "registry_supply_chain": {
+        "tool": "SPECTER MCP-POISON",
+        "cves": [
+          {
+            "id": "CVE-2026-52869",
+            "cvss": 7.6
+          },
+          {
+            "id": "CVE-2026-58500",
+            "title": "MCP Appium XSS-to-RCE"
+          }
+        ]
+      },
+      "mcp_cves": [
+        {
+          "id": "CVE-2026-104850",
+          "title": "MCP TS SDK OAuth偽装"
+        },
+        {
+          "id": "CVE-2026-104120",
+          "title": "mcp-server-fetch/everything fetch_url"
+        },
+        {
+          "id": "CVE-2026-111767",
+          "title": "InMemoryTaskStore アクセス制御不備"
+        },
+        {
+          "id": "CVE-2026-59951",
+          "title": "FastMCP セッション蓄積"
+        },
+        {
+          "id": "CVE-2026-61559",
+          "title": "gitlab-mcp サーバーサイド"
+        }
+      ],
+      "toolhive_ssrf": {
+        "cves": [
+          "GO-2026-5996",
+          "GO-2026-6002"
+        ],
+        "description": "IPv6 NAT64レンジ見逃し、host.docker.internal経由で横移動",
+        "patterns": [
+          "host.docker.internal",
+          "64:ff9b::",
+          "64:ff9b:1:"
+        ]
+      },
+      "config_paths": [
+        "~/.cursor/mcp.json",
+        "~/.claude/mcp.json",
+        ".vscode/settings.json",
+        "~/.config/github-copilot/"
+      ],
+      "suspicious_commands": [
+        "curl",
+        "wget",
+        "npx",
+        "uvx",
+        "node -e",
+        "bash -c",
+        "powershell -enc"
+      ],
+      "ide_hook": ".vscode/tasks.json / .claude/tasks.json の runOn: folderOpen"
+    }
+  },
+  "malicious_files": []
+}

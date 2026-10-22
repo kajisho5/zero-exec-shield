@@ -1,0 +1,12 @@
+{
+  "findings": [
+    {
+      "campaign": "skillpact-account-compromise",
+      "level": "HIGH",
+      "module": "§49",
+      "path": "v2/skill.contract.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "skillpact"
+}

@@ -1,0 +1,17 @@
+name: pr-target
+on:
+  pull_request_target:
+    types: [opened]
+permissions: write-all
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+      - uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9
+        with:
+          path: ~/.npm
+          key: npm-${{ github.event.pull_request.number }}
+      - run: npm test
+        env:
+          TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,42 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "Dockerfile"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§4",
+      "path": "php.ini"
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§4",
+      "path": "Dockerfile"
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§4",
+      "path": "php.ini"
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "Dockerfile"
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "Dockerfile"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

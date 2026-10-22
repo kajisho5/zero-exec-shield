@@ -1,0 +1,24 @@
+{
+  "findings": [
+    {
+      "campaign": "skillpact-divergence",
+      "level": "CRITICAL",
+      "module": "§49",
+      "path": "."
+    },
+    {
+      "campaign": "skillpact-divergence",
+      "level": "CRITICAL",
+      "module": "§49",
+      "path": "."
+    },
+    {
+      "campaign": "skillpact-divergence",
+      "level": "CRITICAL",
+      "module": "§49",
+      "path": "."
+    }
+  ],
+  "home": "_home",
+  "mode": "skillpact"
+}

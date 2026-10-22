@@ -1,0 +1,36 @@
+{
+  "findings": [
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/pr-target.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "HIGH",
+      "module": "§21",
+      "path": ".github/workflows/pr-target.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "HIGH",
+      "module": "§21",
+      "path": ".github/workflows/pr-target.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§22",
+      "path": ".github/workflows/tag-ref.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "HIGH",
+      "module": "§22",
+      "path": ".github/workflows/tag-ref.yml"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

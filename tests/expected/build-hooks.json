@@ -1,0 +1,24 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§27",
+      "path": "build.rs"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§27",
+      "path": "pyproject.toml"
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§27",
+      "path": "pyproject.toml"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

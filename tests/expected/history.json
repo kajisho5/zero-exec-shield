@@ -1,0 +1,36 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§12",
+      "path": null
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§12",
+      "path": null
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§12",
+      "path": ".npmrc"
+    },
+    {
+      "campaign": null,
+      "level": "CRITICAL",
+      "module": "§18",
+      "path": ".zsh_history"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§18",
+      "path": ".zsh_history"
+    }
+  ],
+  "home": "self",
+  "mode": "full"
+}

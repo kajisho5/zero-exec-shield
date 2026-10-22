@@ -1,0 +1,59 @@
+{
+  "campaign": "hf-supply-chain",
+  "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
+  "source": "rules/ioc.json（本ファイルは複製。正はioc.json）",
+  "campaigns": [
+    "hf-supply-chain",
+    "hf-dataset-poisoning",
+    "hf-lerobot-rce"
+  ],
+  "packages": [
+    {
+      "campaign": "hf-dataset-poisoning",
+      "eco": "huggingface",
+      "name": "datasets",
+      "match": "none",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "悪性データセット（2026-07-16）。§36で検査"
+    },
+    {
+      "campaign": "hf-lerobot-rce",
+      "eco": "pypi",
+      "name": "lerobot",
+      "match": "unknown_versions",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "<CVE-2026-25874修正版。CVSS 9.8。修正版番号未定義のため要確認"
+    }
+  ],
+  "iocs": {
+    "model_supply_chain": {
+      "campaign": "hf-supply-chain",
+      "risky_ext": [
+        ".pkl",
+        ".pickle",
+        ".pt",
+        ".bin"
+      ],
+      "risky_code": [
+        "torch.load(..., weights_only=False)",
+        "trust_remote_code=True"
+      ],
+      "risky_code_regex": [
+        "weights_only\\s*=\\s*False",
+        "trust_remote_code\\s*=\\s*True"
+      ],
+      "preferred": ".safetensors",
+      "pip_confusion": "requirements.txt 内の --extra-index-url が PyPI 以外",
+      "hf_2026_07": [
+        "悪性データセット→2つのコード実行経路→クラスタ認証情報窃取",
+        "リモートコードデータセットローダー ＋ データセット設定テンプレートインジェクション",
+        "2026 Q1で9件の悪性モデルアップロード、3件が本番パイプラインに到達",
+        "悪性モデルの約95%がPyTorch pickleシリアライゼーション",
+        "データセット汚染: 少量の敵対的サンプル混入"
+      ]
+    }
+  },
+  "malicious_files": []
+}

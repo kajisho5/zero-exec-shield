@@ -1,0 +1,47 @@
+{
+  "campaign": "pypi-oct2026",
+  "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
+  "source": "rules/ioc.json（本ファイルは複製。正はioc.json）",
+  "campaigns": [
+    "pypi-oct2026"
+  ],
+  "packages": [
+    {
+      "campaign": "pypi-oct2026",
+      "eco": "pypi",
+      "name": "lightning",
+      "match": "versions",
+      "bad_versions": [
+        "2.6.2",
+        "2.6.3"
+      ],
+      "safe_version": "2.6.1",
+      "note": "_runtime/"
+    },
+    {
+      "campaign": "pypi-oct2026",
+      "eco": "pypi",
+      "name": "telnyx",
+      "match": "versions",
+      "bad_versions": [
+        "4.87.1",
+        "4.87.2"
+      ],
+      "safe_version": "4.87.0",
+      "note": "83[.]142[.]209[.]203:8080"
+    },
+    {
+      "campaign": "pypi-oct2026",
+      "eco": "pypi",
+      "name": "py2ops",
+      "match": "versions",
+      "bad_versions": [
+        "2.2"
+      ],
+      "safe_version": null,
+      "note": "PyPIインプラント"
+    }
+  ],
+  "iocs": {},
+  "malicious_files": []
+}

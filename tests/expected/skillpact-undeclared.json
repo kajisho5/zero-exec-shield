@@ -1,0 +1,12 @@
+{
+  "findings": [
+    {
+      "campaign": "skillpact-undeclared",
+      "level": "HIGH",
+      "module": "§49",
+      "path": "."
+    }
+  ],
+  "home": "_home",
+  "mode": "skillpact"
+}

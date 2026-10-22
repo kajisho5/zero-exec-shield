@@ -1,0 +1,7 @@
+services:
+  gitlab:
+    image: gitlab/gitlab-ee:17.0.0-ee.0
+  teamcity:
+    image: jetbrains/teamcity-server:2025.11.6
+  artifactory:
+    image: releases-docker.jfrog.io/jfrog/artifactory-pro:7.120.5

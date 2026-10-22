@@ -1,0 +1,24 @@
+{
+  "findings": [
+    {
+      "campaign": "skillpact-divergence",
+      "level": "HIGH",
+      "module": "§49",
+      "path": ".skillpact/policy.json"
+    },
+    {
+      "campaign": "skillpact-divergence",
+      "level": "HIGH",
+      "module": "§49",
+      "path": "skill.contract.json"
+    },
+    {
+      "campaign": "skillpact-divergence",
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skill.contract.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "skillpact"
+}

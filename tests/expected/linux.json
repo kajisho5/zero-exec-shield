@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "campaign": "ebpf-rootkit",
+      "level": "CRITICAL",
+      "module": "§31",
+      "path": "ld.so.preload"
+    },
+    {
+      "campaign": "ebpf-rootkit",
+      "level": "HIGH",
+      "module": "§31",
+      "path": ".bashrc"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

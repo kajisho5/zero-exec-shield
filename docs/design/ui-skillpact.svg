@@ -1,0 +1,423 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1440" height="900" viewBox="0 0 1440 900" font-family="system-ui, 'Hiragino Sans', 'Noto Sans JP', sans-serif">
+  <title>ZES v5.2 Web Scanner — SkillPact タブ（1440×900）</title>
+  <desc>Step 2 デザイン。SkillPact タブ：スキル一覧、契約有無、宣言/実態エフェクト6種の突合と差分の赤ハイライト、L1/L2/L3（L3は「署名済みファイル」表記で安全と表示しない）、ポリシー決定、prose矛盾、差分異常、§49 検出ルール12件。トークンは docs/design/ui-design.md §2 と一致。</desc>
+  <defs>
+    <style>
+      .bg{fill:#0a0a0a}
+      .surface{fill:#141414;stroke:#2a2a2a;stroke-width:1}
+      .surface2{fill:#1c1c1c}
+      .line{stroke:#2a2a2a;stroke-width:1}
+      .t-brand{font-size:18px;font-weight:600;fill:#ededed}
+      .t-h2{font-size:16px;font-weight:600;fill:#ededed}
+      .t-h3{font-size:14px;font-weight:600;fill:#ededed}
+      .t-body{font-size:14px;fill:#ededed}
+      .t-tab{font-size:14px;fill:#a3a3a3}
+      .t-tab-active{font-size:14px;font-weight:600;fill:#ededed}
+      .t-sm{font-size:13px;fill:#ededed}
+      .t-muted{font-size:13px;fill:#a3a3a3}
+      .t-cap{font-size:12px;fill:#8a8a8a}
+      .t-cap-muted{font-size:12px;fill:#a3a3a3}
+      .t-badge{font-size:12px;font-weight:600}
+      .t-th{font-size:12px;font-weight:600;fill:#8a8a8a;letter-spacing:.04em}
+      .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+      .t-num{font-size:32px;font-weight:700}
+      .btn{fill:#1c1c1c;stroke:#3a3a3a;stroke-width:1}
+      .btn-primary{fill:#38bdf8}
+      .t-btn{font-size:13px;font-weight:600;fill:#ededed}
+      .t-btn-primary{font-size:13px;font-weight:600;fill:#0a0a0a}
+    </style>
+    <!-- 重大度アイコン（12×12、fill は use 側で指定） -->
+    <polygon id="ico-crit" points="3.5,0 8.5,0 12,3.5 12,8.5 8.5,12 3.5,12 0,8.5 0,3.5"/>
+    <polygon id="ico-high" points="6,0.5 12,11.5 0,11.5"/>
+    <circle id="ico-med" cx="6" cy="6" r="5.5"/>
+    <polygon id="ico-low" points="6,0 12,6 6,12 0,6"/>
+    <path id="ico-info" fill-rule="evenodd" d="M6 0a6 6 0 1 1 0 12A6 6 0 1 1 6 0zM6 2.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z"/>
+    <path id="ico-safe" d="M0.8 6.4L4.4 10L11.2 2.6L9.8 1.3L4.4 7.2L2.2 5z"/>
+    <!-- コピー（16×16、stroke は use 側） -->
+    <g id="ico-copy" fill="none" stroke-width="1.5" stroke-linejoin="round">
+      <rect x="5" y="5" width="9" height="9" rx="2"/>
+      <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2H3.5A1.5 1.5 0 0 0 2 3.5V9.5A1.5 1.5 0 0 0 3.5 11H5"/>
+    </g>
+    <!-- 鍵（16×16） -->
+    <g id="ico-key" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="5" cy="11" r="3"/>
+      <path d="M7.2 8.8L14 2M11 5l2 2M12.5 3.5l1.5 1.5"/>
+    </g>
+    <!-- フォルダ（32×32） -->
+    <g id="ico-folder" fill="none" stroke-width="2" stroke-linejoin="round">
+      <path d="M3 8a2 2 0 0 1 2-2h7l3 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+      <path d="M16 14v8M12.5 18.5L16 22l3.5-3.5"/>
+    </g>
+    <!-- 端末（16×16） -->
+    <g id="ico-term" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="1" y="2" width="14" height="12" rx="2"/>
+      <path d="M4 6l2.5 2L4 10M8 10.5h4"/>
+    </g>
+    <!-- 山括弧 -->
+    <path id="ico-chev-l" d="M9.5 3L5 8l4.5 5" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="ico-chev-r" d="M6.5 3L11 8l-4.5 5" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="ico-chev-d" d="M3 6l5 4.5L13 6" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- 検索 -->
+    <g id="ico-search" fill="none" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></g>
+    <!-- タブバー右端フェード -->
+    <linearGradient id="fade-r" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#0a0a0a" stop-opacity="0"/>
+      <stop offset="1" stop-color="#0a0a0a" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景 -->
+  <rect class="bg" x="0" y="0" width="1440" height="900"/>
+
+  <!-- ===== Header (0–64) ===== -->
+  <g id="header">
+    <line class="line" x1="0" y1="64.5" x2="1440" y2="64.5"/>
+    <!-- 盾ロゴ -->
+    <g transform="translate(32,18)">
+      <path d="M14 0L28 5v9c0 8-6 13.5-14 15C6 27.5 0 22 0 14V5z" fill="#141414" stroke="#38bdf8" stroke-width="2"/>
+      <path d="M8 14.5l4 4 8-8.5" fill="none" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <text class="t-brand" x="72" y="38">Zero-Exec Shield</text>
+    <rect x="228" y="22" width="44" height="22" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <text class="t-badge" x="250" y="37" text-anchor="middle" fill="#a3a3a3">v5.2</text>
+    <text class="t-cap" x="292" y="30">incident_bundle</text>
+    <text class="t-cap-muted mono" x="292" y="46">ZES-2026-OCT-EMERGENCY-V5.2</text>
+
+    <!-- オフライン表示 -->
+    <rect x="1000" y="20" width="196" height="26" rx="13" fill="#0c2214" stroke="#22c55e" stroke-opacity=".5"/>
+    <circle cx="1016" cy="33" r="4" fill="#22c55e"/>
+    <text class="t-badge" x="1028" y="37" fill="#22c55e">オフライン・外部通信ゼロ</text>
+
+    <!-- アクション -->
+    <rect class="btn" x="1212" y="16" width="108" height="34" rx="8"/>
+    <text class="t-btn" x="1266" y="38" text-anchor="middle">JSON 出力</text>
+    <rect class="btn" x="1332" y="16" width="76" height="34" rx="8"/>
+    <text class="t-btn" x="1370" y="38" text-anchor="middle">クリア</text>
+  </g>
+
+  <!-- ===== TabBar (64–112) ===== -->
+  <g id="tabbar">
+    <line class="line" x1="0" y1="112.5" x2="1440" y2="112.5"/>
+    <!-- 左スクロール（無効状態） -->
+    <rect x="32" y="74" width="28" height="28" rx="6" fill="#141414" stroke="#2a2a2a"/>
+    <use xlink:href="#ico-chev-l" x="38" y="80" stroke="#3a3a3a"/>
+
+    <!-- 1 総合（active） -->
+    <text class="t-tab" x="88" y="93">総合</text>
+    <rect x="124" y="79" width="26" height="18" rx="9" fill="#2a0f0f"/>
+    <text class="t-badge" x="137" y="92" text-anchor="middle" fill="#ef4444">20</text>
+    <rect x="164" y="109" width="132" height="3" fill="#38bdf8"/>
+    <!-- 2 SkillPact -->
+    <text class="t-tab-active" x="180" y="93">SkillPact</text>
+    <rect x="256" y="79" width="26" height="18" rx="9" fill="#2a0f0f"/>
+    <text class="t-badge" x="269" y="92" text-anchor="middle" fill="#ef4444">8</text>
+    <!-- 3 TeamPCP -->
+    <text class="t-tab" x="312" y="93">TeamPCP</text>
+    <rect x="378" y="79" width="26" height="18" rx="9" fill="#2a170a"/>
+    <text class="t-badge" x="391" y="92" text-anchor="middle" fill="#f97316">2</text>
+    <!-- 4 ChainDrop -->
+    <text class="t-tab" x="432" y="93">ChainDrop</text>
+    <rect x="510" y="79" width="26" height="18" rx="9" fill="#2a0f0f"/>
+    <text class="t-badge" x="523" y="92" text-anchor="middle" fill="#ef4444">3</text>
+    <!-- 5 PyPI -->
+    <text class="t-tab" x="564" y="93">PyPI</text>
+    <rect x="602" y="79" width="26" height="18" rx="9" fill="#2a0f0f"/>
+    <text class="t-badge" x="615" y="92" text-anchor="middle" fill="#ef4444">1</text>
+    <!-- 6 Solana（0件） -->
+    <text class="t-tab" x="656" y="93">Solana</text>
+    <!-- 7 Post-ShaiHulud -->
+    <text class="t-tab" x="732" y="93">Post-ShaiHulud</text>
+    <!-- 8 MCP -->
+    <text class="t-tab" x="868" y="93">MCP</text>
+    <rect x="906" y="79" width="26" height="18" rx="9" fill="#2a170a"/>
+    <text class="t-badge" x="919" y="92" text-anchor="middle" fill="#f97316">1</text>
+    <!-- 9 GitHub Actions -->
+    <text class="t-tab" x="960" y="93">GitHub Actions</text>
+    <rect x="1074" y="79" width="26" height="18" rx="9" fill="#2a170a"/>
+    <text class="t-badge" x="1087" y="92" text-anchor="middle" fill="#f97316">1</text>
+    <!-- 10 ブラウザ拡張（フェードで見切れ） -->
+    <text class="t-tab" x="1128" y="93">ブラウザ拡張</text>
+    <rect x="1216" y="79" width="26" height="18" rx="9" fill="#262008"/>
+    <text class="t-badge" x="1229" y="92" text-anchor="middle" fill="#eab308">1</text>
+    <rect x="1150" y="66" width="120" height="45" fill="url(#fade-r)"/>
+
+    <!-- 右スクロール -->
+    <rect x="1240" y="74" width="28" height="28" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <use xlink:href="#ico-chev-r" x="1246" y="80" stroke="#ededed"/>
+    <!-- すべてのタブ -->
+    <rect class="btn" x="1276" y="74" width="132" height="28" rx="6"/>
+    <text class="t-btn" x="1288" y="93">すべてのタブ</text>
+    <text class="t-cap-muted" x="1372" y="93">18</text>
+    <use xlink:href="#ico-chev-d" x="1386" y="80" stroke="#a3a3a3"/>
+  </g>
+
+  <defs>
+    <!-- 署名済みファイル（印章、16×16、stroke） -->
+    <g id="ico-seal" fill="none" stroke-width="1.5" stroke-linejoin="round">
+      <path d="M8 1l1.8 1.3 2.2-.1.7 2.1 1.8 1.3-.7 2.1.7 2.1-1.8 1.3-.7 2.1-2.2-.1L8 15l-1.8-1.3-2.2.1-.7-2.1L1.5 10.4l.7-2.1-.7-2.1 1.8-1.3.7-2.1 2.2.1z"/>
+      <path d="M5.5 8h5M5.5 10.2h3.2"/>
+    </g>
+    <!-- 文書（16×16） -->
+    <g id="ico-doc" fill="none" stroke-width="1.5" stroke-linejoin="round"><path d="M3 1.5h6.5L13 5v9.5H3z"/><path d="M9.5 1.5V5H13"/></g>
+    <!-- 差分（16×16） -->
+    <g id="ico-diff" fill="none" stroke-width="1.5" stroke-linecap="round"><path d="M4 2v8M1 6h6M9 14h6"/><path d="M11 3l3 3-3 3"/></g>
+  </defs>
+
+  <!-- 信頼モデル注記バナー (128–164) -->
+  <g id="trust-banner">
+    <rect x="32.5" y="128.5" width="1376" height="36" rx="8" fill="#1b1430" stroke="#a78bfa" stroke-opacity=".45"/>
+    <use xlink:href="#ico-seal" x="46" y="138" stroke="#a78bfa"/>
+    <text class="t-sm" x="70" y="151">L3 は「署名済みファイル」であることのみを示し、安全性や作者の信頼性を意味しません（trust_model.l3_does_not_mean）。</text>
+    <text class="t-cap-muted" x="1394" y="151" text-anchor="end">契約は JSON パースのみ · スキル / L2 テスト / 署名検証は実行しません</text>
+  </g>
+
+  <!-- ===== SkillList (32–352, 180–884) ===== -->
+  <g id="skill-list">
+    <rect class="surface" x="32.5" y="180.5" width="320" height="704" rx="12"/>
+    <text class="t-h2" x="48" y="210">スキル</text>
+    <rect x="98" y="196" width="24" height="18" rx="9" fill="#1c1c1c"/>
+    <text class="t-badge" x="110" y="209" text-anchor="middle" fill="#a3a3a3">4</text>
+    <text class="t-cap" x="48" y="232">SKILL.md を含むディレクトリ単位</text>
+
+    <!-- 1 repo-helper（選択中） -->
+    <rect x="40" y="244" width="304" height="88" rx="10" fill="#1c1c1c" stroke="#38bdf8" stroke-opacity=".6"/>
+    <rect x="40" y="256" width="3" height="64" rx="1.5" fill="#38bdf8"/>
+    <text class="t-h3" x="56" y="268">repo-helper</text>
+    <text class="t-cap mono" x="56" y="286">skills/repo-helper/</text>
+    <rect x="56" y="298" width="148" height="22" rx="6" fill="#1b1430" stroke="#a78bfa" stroke-opacity=".6"/>
+    <use xlink:href="#ico-seal" x="62" y="301" stroke="#a78bfa"/>
+    <text class="t-badge" x="84" y="313" fill="#a78bfa">L3 署名済みファイル</text>
+    <rect x="186" y="254" width="82" height="20" rx="6" fill="#2a0f0f"/>
+    <text class="t-badge" x="227" y="268" text-anchor="middle" fill="#ef4444">CRITICAL 1</text>
+    <rect x="274" y="254" width="58" height="20" rx="6" fill="#2a170a"/>
+    <text class="t-badge" x="303" y="268" text-anchor="middle" fill="#f97316">HIGH 5</text>
+
+    <!-- 2 db-migrate -->
+    <text class="t-h3" x="56" y="364">db-migrate</text>
+    <text class="t-cap mono" x="56" y="382">skills/db-migrate/</text>
+    <rect x="56" y="394" width="36" height="22" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <text class="t-badge" x="74" y="409" text-anchor="middle" fill="#a3a3a3">L2</text>
+    <rect x="250" y="350" width="82" height="20" rx="6" fill="#2a0f0f"/>
+    <text class="t-badge" x="291" y="364" text-anchor="middle" fill="#ef4444">CRITICAL 1</text>
+    <text class="t-cap" x="100" y="409">reversible:false 操作が allow</text>
+    <line class="line" x1="48" y1="430.5" x2="336" y2="430.5"/>
+
+    <!-- 3 quick-notes -->
+    <text class="t-h3" x="56" y="460">quick-notes</text>
+    <text class="t-cap mono" x="56" y="478">skills/quick-notes/</text>
+    <rect x="56" y="490" width="64" height="22" rx="6" fill="#2a170a" stroke="#f97316" stroke-opacity=".6"/>
+    <text class="t-badge" x="88" y="505" text-anchor="middle" fill="#f97316">契約なし</text>
+    <rect x="274" y="446" width="58" height="20" rx="6" fill="#2a170a"/>
+    <text class="t-badge" x="303" y="460" text-anchor="middle" fill="#f97316">HIGH 1</text>
+    <text class="t-cap" x="128" y="505">exec/network の実態あり</text>
+    <line class="line" x1="48" y1="526.5" x2="336" y2="526.5"/>
+
+    <!-- 4 fmt-docs -->
+    <text class="t-h3" x="56" y="556">fmt-docs</text>
+    <text class="t-cap mono" x="56" y="574">skills/fmt-docs/</text>
+    <rect x="56" y="586" width="36" height="22" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <text class="t-badge" x="74" y="601" text-anchor="middle" fill="#a3a3a3">L1</text>
+    <use xlink:href="#ico-info" x="100" y="591" fill="#8a8a8a"/>
+    <text class="t-cap-muted" x="118" y="601">検出なし（静的解析の範囲内）</text>
+
+    <!-- 前版比較の案内 -->
+    <rect x="48" y="636" width="288" height="96" rx="8" fill="#101010" stroke="#2a2a2a"/>
+    <use xlink:href="#ico-diff" x="60" y="648" stroke="#38bdf8"/>
+    <text class="t-badge" x="84" y="660" fill="#ededed">前版との差分比較</text>
+    <text class="t-cap" x="60" y="684">同一作者の前版契約を一緒に投入すると</text>
+    <text class="t-cap" x="60" y="702">差分異常を比較します。ブラウザは</text>
+    <text class="t-cap" x="60" y="720">レジストリを取得しません。</text>
+
+    <text class="t-cap" x="48" y="864">SAFE 表示は使用しません（安全の断定をしない）</text>
+  </g>
+
+  <!-- ===== Viewer (368–1408) ===== -->
+  <!-- Skill header (180–268) -->
+  <g id="skill-header">
+    <rect class="surface" x="368.5" y="180.5" width="1040" height="88" rx="12"/>
+    <text class="t-brand" x="388" y="212">repo-helper</text>
+    <text class="t-cap-muted mono" x="508" y="212">skills/repo-helper/skill.contract.json</text>
+    <text class="t-cap" x="388" y="236">author: example · version 1.4.0 · 前版 1.3.2（ローカルキャッシュ）</text>
+    <text class="t-cap" x="388" y="256">L2 記録: なし · 署名ファイル: あり（検証コマンド宣言あり・未実行）</text>
+
+    <!-- badges right -->
+    <rect x="988" y="196" width="128" height="24" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <use xlink:href="#ico-doc" x="996" y="200" stroke="#a3a3a3"/>
+    <text class="t-badge" x="1018" y="212" fill="#ededed">契約あり · v0.8</text>
+    <rect x="1124" y="196" width="148" height="24" rx="6" fill="#1b1430" stroke="#a78bfa" stroke-opacity=".6"/>
+    <use xlink:href="#ico-seal" x="1131" y="200" stroke="#a78bfa"/>
+    <text class="t-badge" x="1153" y="212" fill="#a78bfa">L3 署名済みファイル</text>
+    <rect x="1280" y="196" width="112" height="24" rx="6" fill="#2a170a" stroke="#f97316" stroke-opacity=".6"/>
+    <text class="t-badge" x="1336" y="212" text-anchor="middle" fill="#f97316">ポリシー: allow</text>
+
+    <rect x="1176" y="232" width="108" height="24" rx="6" fill="#2a0f0f" stroke="#ef4444" stroke-opacity=".6"/>
+    <use xlink:href="#ico-crit" x="1186" y="238" fill="#ef4444"/>
+    <text class="t-badge" x="1204" y="248" fill="#ef4444">CRITICAL 1</text>
+    <rect x="1292" y="232" width="100" height="24" rx="6" fill="#2a170a" stroke="#f97316" stroke-opacity=".6"/>
+    <use xlink:href="#ico-high" x="1300" y="238" fill="#f97316"/>
+    <text class="t-badge" x="1318" y="248" fill="#f97316">HIGH 5</text>
+  </g>
+
+  <!-- EffectMatrix (284–476) -->
+  <g id="effect-matrix">
+    <rect class="surface" x="368.5" y="284.5" width="1040" height="192" rx="12"/>
+    <text class="t-h3" x="388" y="312">エフェクト：宣言（契約）vs 実態（静的解析）</text>
+    <!-- legend -->
+    <rect x="1080" y="300" width="14" height="14" rx="3" fill="#2a0f0f" stroke="#ef4444" stroke-dasharray="3 2"/>
+    <text class="t-cap-muted" x="1100" y="312">未宣言（乖離）</text>
+    <rect x="1196" y="300" width="14" height="14" rx="3" fill="#1c1c1c" stroke="#38bdf8"/>
+    <text class="t-cap-muted" x="1216" y="312">宣言あり</text>
+    <text class="t-cap-muted" x="1290" y="312">— なし</text>
+
+    <!-- column headers -->
+    <text class="t-th" x="388" y="344">区分</text>
+    <text class="t-th mono" x="560" y="344" text-anchor="middle">exec</text>
+    <text class="t-th mono" x="700" y="344" text-anchor="middle">network</text>
+    <text class="t-th mono" x="840" y="344" text-anchor="middle">write</text>
+    <text class="t-th mono" x="980" y="344" text-anchor="middle">read</text>
+    <text class="t-th mono" x="1120" y="344" text-anchor="middle">secrets</text>
+    <text class="t-th mono" x="1260" y="344" text-anchor="middle">spend</text>
+    <line class="line" x1="384" y1="354.5" x2="1392" y2="354.5"/>
+
+    <!-- network column highlight -->
+    <rect x="624" y="358" width="152" height="110" rx="8" fill="#2a0f0f" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5 3"/>
+
+    <!-- row 宣言 (y 362–400) -->
+    <text class="t-sm" x="388" y="385">宣言（契約）</text>
+    <rect x="510" y="370" width="100" height="24" rx="12" fill="#1c1c1c" stroke="#38bdf8"/>
+    <text class="t-badge mono" x="560" y="386" text-anchor="middle" fill="#38bdf8">exec:any</text>
+    <text class="t-muted" x="700" y="387" text-anchor="middle">—</text>
+    <text class="t-muted" x="840" y="387" text-anchor="middle">—</text>
+    <rect x="940" y="370" width="80" height="24" rx="12" fill="#1c1c1c" stroke="#38bdf8"/>
+    <text class="t-badge mono" x="980" y="386" text-anchor="middle" fill="#38bdf8">read</text>
+    <text class="t-muted" x="1120" y="387" text-anchor="middle">—</text>
+    <text class="t-muted" x="1260" y="387" text-anchor="middle">—</text>
+    <line class="line" x1="384" y1="404.5" x2="622" y2="404.5"/>
+    <line class="line" x1="778" y1="404.5" x2="1392" y2="404.5"/>
+
+    <!-- row 実態 (y 404–436) -->
+    <text class="t-sm" x="388" y="425">実態（静的解析）</text>
+    <rect x="520" y="410" width="80" height="24" rx="12" fill="#1c1c1c" stroke="#a3a3a3"/>
+    <text class="t-badge mono" x="560" y="426" text-anchor="middle" fill="#ededed">exec</text>
+    <rect x="660" y="410" width="80" height="24" rx="12" fill="#ef4444"/>
+    <text class="t-badge mono" x="700" y="426" text-anchor="middle" fill="#0a0a0a">network</text>
+    <text class="t-muted" x="840" y="427" text-anchor="middle">—</text>
+    <rect x="940" y="410" width="80" height="24" rx="12" fill="#1c1c1c" stroke="#a3a3a3"/>
+    <text class="t-badge mono" x="980" y="426" text-anchor="middle" fill="#ededed">read</text>
+    <text class="t-muted" x="1120" y="427" text-anchor="middle">—</text>
+    <text class="t-muted" x="1260" y="427" text-anchor="middle">—</text>
+
+    <!-- row 差分 (y 436–468) -->
+    <text class="t-sm" x="388" y="459">差分</text>
+    <text class="t-cap" x="560" y="459" text-anchor="middle">一致（2 箇所）</text>
+    <use xlink:href="#ico-high" x="638" y="448" fill="#ef4444"/>
+    <text class="t-badge" x="710" y="459" text-anchor="middle" fill="#ef4444">未宣言 · CRITICAL</text>
+    <text class="t-cap" x="840" y="459" text-anchor="middle">—</text>
+    <text class="t-cap" x="980" y="459" text-anchor="middle">一致</text>
+    <text class="t-cap" x="1120" y="459" text-anchor="middle">—</text>
+    <text class="t-cap" x="1260" y="459" text-anchor="middle">—</text>
+  </g>
+
+  <!-- Alerts (492–612) -->
+  <g id="prose-conflict">
+    <rect x="368.5" y="492.5" width="512" height="120" rx="12" fill="#141414" stroke="#f97316" stroke-opacity=".55"/>
+    <rect x="369" y="504" width="4" height="96" rx="2" fill="#f97316"/>
+    <use xlink:href="#ico-high" x="388" y="508" fill="#f97316"/>
+    <text class="t-h3" x="408" y="519">prose と契約の矛盾</text>
+    <rect x="808" y="504" width="56" height="20" rx="6" fill="#2a170a"/>
+    <text class="t-badge" x="836" y="518" text-anchor="middle" fill="#f97316">HIGH</text>
+    <text class="t-sm" x="388" y="548">SKILL.md に「読み取りのみ」系の記述（期待: read のみ）</text>
+    <text class="t-sm" x="388" y="572">契約の宣言は <tspan class="mono" fill="#f97316">exec:any</tspan> を含む → 矛盾</text>
+    <text class="t-cap" x="388" y="598">判定根拠はフレーズ ID のみ表示（本文は表示しません）· SKILL.md</text>
+  </g>
+
+  <g id="diff-anomaly">
+    <rect x="896.5" y="492.5" width="512" height="120" rx="12" fill="#141414" stroke="#f97316" stroke-opacity=".55"/>
+    <rect x="897" y="504" width="4" height="96" rx="2" fill="#f97316"/>
+    <use xlink:href="#ico-diff" x="914" y="506" stroke="#f97316"/>
+    <text class="t-h3" x="938" y="519">差分異常（アカウント侵害の疑い）</text>
+    <rect x="1336" y="504" width="56" height="20" rx="6" fill="#2a170a"/>
+    <text class="t-badge" x="1364" y="518" text-anchor="middle" fill="#f97316">HIGH</text>
+    <text class="t-sm" x="916" y="548">同一作者 example · 1.3.2 → 1.4.0 で <tspan class="mono" fill="#f97316">exec</tspan> を新規追加</text>
+    <text class="t-sm" x="916" y="572">スコア 0.50 ≥ 閾値 0.30 · network 送信先 +0 · secrets 拡大なし</text>
+    <text class="t-cap" x="916" y="598">L3 署名済みファイルでも警告します（署名は信頼の根拠にしない）</text>
+  </g>
+
+  <!-- RuleResultList (628–884) -->
+  <g id="rule-results">
+    <rect class="surface" x="368.5" y="628.5" width="1040" height="256" rx="12"/>
+    <text class="t-h3" x="388" y="656">§49 検出ルール</text>
+    <text class="t-cap" x="498" y="656">12 ルール · 該当 6 · 非該当 6 · 判定不可 0</text>
+    <line class="line" x1="384" y1="668.5" x2="1392" y2="668.5"/>
+    <line class="line" x1="888.5" y1="676" x2="888.5" y2="872"/>
+
+    <!-- left column rules 1–6 (rows at 690, 722, 754, 786, 818, 850) -->
+    <text class="t-cap mono" x="388" y="694">01</text>
+    <text class="t-sm" x="414" y="694">契約ファイルが存在しない</text>
+    <text class="t-cap" x="730" y="694">HIGH</text>
+    <text class="t-cap-muted" x="868" y="694" text-anchor="end">非該当</text>
+
+    <text class="t-cap mono" x="388" y="726">02</text>
+    <text class="t-sm" x="414" y="726">schema_version が 0.8 以外</text>
+    <text class="t-cap" x="730" y="726">MEDIUM</text>
+    <text class="t-cap-muted" x="868" y="726" text-anchor="end">非該当</text>
+
+    <rect x="380" y="738" width="500" height="28" rx="6" fill="#2a170a"/>
+    <text class="t-cap mono" x="388" y="758">03</text>
+    <text class="t-sm" x="414" y="758">exec/network/secrets 宣言で L2 記録なし</text>
+    <text class="t-cap" x="730" y="758">HIGH</text>
+    <text class="t-badge" x="868" y="758" text-anchor="end" fill="#f97316">該当</text>
+
+    <text class="t-cap mono" x="388" y="790">04</text>
+    <text class="t-sm" x="414" y="790">未宣言の exec</text>
+    <text class="t-cap" x="730" y="790">CRITICAL</text>
+    <text class="t-cap-muted" x="868" y="790" text-anchor="end">非該当</text>
+
+    <rect x="380" y="802" width="500" height="28" rx="6" fill="#2a0f0f"/>
+    <text class="t-cap mono" x="388" y="822">05</text>
+    <text class="t-sm" x="414" y="822">未宣言の network</text>
+    <text class="t-cap" x="730" y="822">CRITICAL</text>
+    <text class="t-badge" x="868" y="822" text-anchor="end" fill="#ef4444">該当</text>
+
+    <text class="t-cap mono" x="388" y="854">06</text>
+    <text class="t-sm" x="414" y="854">未宣言の secrets</text>
+    <text class="t-cap" x="730" y="854">CRITICAL</text>
+    <text class="t-cap-muted" x="868" y="854" text-anchor="end">非該当</text>
+
+    <!-- right column rules 7–12 -->
+    <rect x="896" y="674" width="500" height="28" rx="6" fill="#2a170a"/>
+    <text class="t-cap mono" x="904" y="694">07</text>
+    <text class="t-sm" x="930" y="694">破壊的マーカー × allow（rm -rf）</text>
+    <text class="t-cap" x="1246" y="694">HIGH</text>
+    <text class="t-badge" x="1384" y="694" text-anchor="end" fill="#f97316">該当</text>
+
+    <text class="t-cap mono" x="904" y="726">08</text>
+    <text class="t-sm" x="930" y="726">永続化マーカー × persist/write 未宣言</text>
+    <text class="t-cap" x="1246" y="726">CRITICAL</text>
+    <text class="t-cap-muted" x="1384" y="726" text-anchor="end">非該当</text>
+
+    <rect x="896" y="738" width="500" height="28" rx="6" fill="#2a170a"/>
+    <text class="t-cap mono" x="904" y="758">09</text>
+    <text class="t-sm" x="930" y="758">prose と契約の矛盾</text>
+    <text class="t-cap" x="1246" y="758">HIGH</text>
+    <text class="t-badge" x="1384" y="758" text-anchor="end" fill="#f97316">該当</text>
+
+    <rect x="896" y="770" width="500" height="28" rx="6" fill="#2a170a"/>
+    <text class="t-cap mono" x="904" y="790">10</text>
+    <text class="t-sm" x="930" y="790">L3 でも前版から exec/network 新規追加</text>
+    <text class="t-cap" x="1246" y="790">HIGH</text>
+    <text class="t-badge" x="1384" y="790" text-anchor="end" fill="#f97316">該当</text>
+
+    <rect x="896" y="802" width="500" height="28" rx="6" fill="#2a170a"/>
+    <text class="t-cap mono" x="904" y="822">11</text>
+    <text class="t-sm" x="930" y="822">never_auto_allow_any を尊重していない</text>
+    <text class="t-cap" x="1246" y="822">HIGH</text>
+    <text class="t-badge" x="1384" y="822" text-anchor="end" fill="#f97316">該当</text>
+
+    <text class="t-cap mono" x="904" y="854">12</text>
+    <text class="t-sm" x="930" y="854">reversible:false 操作が allow</text>
+    <text class="t-cap" x="1246" y="854">CRITICAL</text>
+    <text class="t-cap-muted" x="1384" y="854" text-anchor="end">非該当</text>
+  </g>
+</svg>

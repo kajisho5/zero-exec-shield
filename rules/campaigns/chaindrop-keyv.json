@@ -1,0 +1,169 @@
+{
+  "campaign": "chaindrop-keyv",
+  "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
+  "source": "rules/ioc.json（本ファイルは複製。正はioc.json）",
+  "campaigns": [
+    "chaindrop-keyv"
+  ],
+  "packages": [
+    {
+      "campaign": "chaindrop-keyv",
+      "eco": "npm",
+      "name": "keyv",
+      "match": "versions",
+      "bad_versions": [
+        "6.0.0"
+      ],
+      "safe_version": "5.x最新",
+      "note": ""
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "eco": "npm",
+      "name": "flat-cache",
+      "match": "versions",
+      "bad_versions": [
+        "6.1.24"
+      ],
+      "safe_version": null,
+      "note": ""
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "eco": "npm",
+      "name": "file-entry-cache",
+      "match": "versions",
+      "bad_versions": [
+        "11.1.6"
+      ],
+      "safe_version": null,
+      "note": ""
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "eco": "npm",
+      "name": "cacheable-request",
+      "match": "versions",
+      "bad_versions": [
+        "13.0.20"
+      ],
+      "safe_version": null,
+      "note": ""
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "eco": "npm",
+      "name": "cacheable",
+      "match": "versions",
+      "bad_versions": [
+        "2.5.1"
+      ],
+      "safe_version": null,
+      "note": ""
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "eco": "npm",
+      "name": "@cacheable/memory",
+      "match": "versions",
+      "bad_versions": [
+        "2.2.1"
+      ],
+      "safe_version": null,
+      "note": ""
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "eco": "npm",
+      "name": "cache-manager",
+      "match": "versions",
+      "bad_versions": [
+        "7.2.10"
+      ],
+      "safe_version": null,
+      "note": ""
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "eco": "npm",
+      "name": "@cacheable/node-cache",
+      "match": "versions",
+      "bad_versions": [
+        "3.1.2"
+      ],
+      "safe_version": null,
+      "note": ""
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "eco": "npm",
+      "name": "@cacheable/utils",
+      "match": "versions",
+      "bad_versions": [
+        "2.5.1"
+      ],
+      "safe_version": null,
+      "note": ""
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "eco": "npm",
+      "name": "@cacheable/net",
+      "match": "versions",
+      "bad_versions": [
+        "2.1.1"
+      ],
+      "safe_version": null,
+      "note": ""
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "eco": "npm",
+      "name": "ecto",
+      "match": "versions",
+      "bad_versions": [
+        "5.0.1"
+      ],
+      "safe_version": null,
+      "note": ""
+    }
+  ],
+  "iocs": {
+    "worm_iocs.chaindrop": {
+      "campaign": "chaindrop-keyv",
+      "files": [
+        "setup.mjs",
+        "Math_Symbol.js",
+        "math_init.js"
+      ],
+      "preinstall": "node setup.mjs",
+      "hashes": {
+        "sha256": {
+          "setup.mjs": [
+            "54dc7ea54a1317cca0e890a2770630cf7fa6c97813e0cb9d2caa93012b350668",
+            "fd3ca4007b225fdf8de7af4345a19179d5efa8c4bb9205f88cda806e5684b1eb"
+          ],
+          "Math_Symbol.js": [
+            "9fc2570b7cef51c1b8df116d144d11ff4096357be7d2c4c6367cfc2509cf1bcc"
+          ],
+          "math_init.js": [
+            "9fc2570b7cef51c1b8df116d144d11ff4096357be7d2c4c6367cfc2509cf1bcc"
+          ]
+        }
+      },
+      "domains": [
+        "npm-cache[.]com",
+        "eth-mainnet[.]nodereal[.]io",
+        "go[.]getblock[.]io",
+        "eth[.]llamarpc[.]com",
+        "pypi-get[.]com",
+        "js-mirror[.]com"
+      ]
+    }
+  },
+  "malicious_files": [
+    "setup.mjs",
+    "Math_Symbol.js",
+    "math_init.js"
+  ]
+}

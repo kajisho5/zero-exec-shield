@@ -1,0 +1,60 @@
+{
+  "campaign": "solana-typosquat",
+  "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
+  "source": "rules/ioc.json（本ファイルは複製。正はioc.json）",
+  "campaigns": [
+    "solana-typosquat"
+  ],
+  "packages": [
+    {
+      "campaign": "solana-typosquat",
+      "eco": "npm",
+      "name": "@solana-labs/web3js",
+      "match": "any_version",
+      "bad_versions": [
+        "1.0.0",
+        "1.0.2"
+      ],
+      "safe_version": null,
+      "note": "100+バージョン。MAL-2026-5788"
+    },
+    {
+      "campaign": "solana-typosquat",
+      "eco": "npm",
+      "name": "@solana-labs/spl-toke",
+      "match": "any_version",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "sibling"
+    },
+    {
+      "campaign": "solana-typosquat",
+      "eco": "npm",
+      "name": "@solana-labs/web3-js",
+      "match": "any_version",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "sibling"
+    },
+    {
+      "campaign": "solana-typosquat",
+      "eco": "npm",
+      "name": "@solana-labs/ancor",
+      "match": "any_version",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "sibling"
+    },
+    {
+      "campaign": "solana-typosquat",
+      "eco": "npm",
+      "name": "solana-web3-stable",
+      "match": "any_version",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "sibling"
+    }
+  ],
+  "iocs": {},
+  "malicious_files": []
+}
