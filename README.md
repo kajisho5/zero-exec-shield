@@ -82,6 +82,7 @@ chmod +x zes-scan.sh
 - **18 タブ**: 総合（重大度サマリ・フィルタ・検索・Blast Radius）/ SkillPact（宣言と実態の差分を赤表示、L3 は「署名済みファイル」と表記し安全色を使わない）/ MCP・GitHub Actions・ブラウザ拡張ビューア ほか
 - **JSON 出力**: `schemas/findings.schema.json` 互換の findings.json をダウンロードします（パスは投入フォルダからの相対パスに `/` を前置。`status: partial`、`errors[]` に `ui:host_checks_not_performed` を記録）。CLI の findings.json の読み込み表示もできます
 - **ブラウザで判定できないもの**: プロセス・ネットワーク接続・カーネル・eBPF・マウント・インストール済みツールのバージョンなどのホスト状態は、該当タブに CLI（`./zes-scan.sh --full --json`）の案内を出し、0 件 ＝ 安全とは表示しません
+- **動作確認したブラウザ**: CI で Chromium・Firefox・WebKit（Playwright 版）の e2e を実行しています。WebKit では、直下が隠しエントリだけのフォルダ（`.mcp.json` や `.github/` だけ）を読み込めず、該当 2 件の e2e は除外しています。隠しファイルを渡さない挙動が実際の Safari でも起きるかは未確認です。Safari では、隠しファイル（`.mcp.json`・`.github/`・`.claude/` など）が検査から漏れる可能性があります。その場合はドラッグ＆ドロップか CLI で確認してください。0 件の選択は「0 件でした」と通知します
 
 ### ビルド（開発者向け）
 
