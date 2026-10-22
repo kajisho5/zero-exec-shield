@@ -20,7 +20,7 @@
 ### 未実装
 
 - `index.html`（設計レビュー後に実装）
-- ZET / GER スキル本体（今後実装予定。インターフェースは docs/skill-contracts.md で定義済み）
+- （ZET / GER は別リポジトリで 0.1.0 を実装済み: kajisho5/zero-exec-triage, kajisho5/gated-exec-remediation）
 
 ## 5.1 以前
 

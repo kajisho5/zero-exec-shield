@@ -19,7 +19,7 @@
 | `SKILL.md` — 検知スキル / IoC 抽出モード | 実装済み |
 | `tests/` — フィクスチャ・期待値・`run-tests.sh`・`zero-exec.sh` | 実装済み |
 | `schemas/findings.schema.json` — findings.json の出力契約（JSON Schema 2020-12、strict） | 実装済み（ZET はこれで入力を検証） |
-| `docs/skill-contracts.md` — 判断層・修復層のスキル契約書 | 契約定義済み（ZET / GER スキル本体は今後実装予定） |
+| `docs/skill-contracts.md` — 判断層・修復層のスキル契約書 | 契約定義済み（ZET 0.1.0 / GER 0.1.0 実装済み。A-1〜A-6 反映） |
 | `index.html` — Web Scanner UI | **設計レビュー待ち**（[設計書](docs/design/ui-design.md) と SVG デザイン [総合](docs/design/ui-overview.svg) / [SkillPact](docs/design/ui-skillpact.svg) / [部品](docs/design/ui-components.svg)。承認後に React 実装） |
 
 ```

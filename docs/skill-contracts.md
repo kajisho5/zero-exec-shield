@@ -3,7 +3,9 @@
 - **対象**: ZET — Zero-Exec Triage（判断層、リポジトリ [kajisho5/zero-exec-triage](https://github.com/kajisho5/zero-exec-triage)） / GER — Gated-Exec Remediation（修復層、リポジトリ [kajisho5/gated-exec-remediation](https://github.com/kajisho5/gated-exec-remediation)）
 - **スキーマの所有**: 出力する層がスキーマを持ち、受け取る層は `schema_version` を固定して参照する（findings.json → ZES [`schemas/findings.schema.json`](../schemas/findings.schema.json) / remediation-plan.json → ZET / remediation-log.json → GER）
 - **前段**: 検知層 `zes-scan`（[SKILL.md](../SKILL.md)）が出力する findings.json
-- **位置づけ**: 判断層・修復層スキルは今後実装予定。本書はその実装に先立つインターフェース定義であり、検知層（ZES）は §9 の出力保証でこれに準拠する
+- **位置づけ**: 3 層の共通インターフェース定義。実装は ZET 0.1.0 / GER 0.1.0。検知層（ZES）は §9 の出力保証でこれに準拠する
+- **改定**: 2026-10-22 契約追加 A-1〜A-6（ZET 設計）と GER の出力追加を採用（§3・§6 に反映、各項目に【追加】と表記）
+- **正のスキーマ**: [remediation-plan.schema.json（ZET）](https://github.com/kajisho5/zero-exec-triage/blob/claude/zet-design/schemas/remediation-plan.schema.json) / [remediation-log.schema.json・ger-input.schema.json（GER）](https://github.com/kajisho5/gated-exec-remediation/tree/claude/ger-design/schemas)。本書の JSON 例と食い違う場合はスキーマが正
 - **版**: ZES v5.2（`incident_bundle`: `ZES-2026-OCT-EMERGENCY-V5.2`）
 
 ```
@@ -49,7 +51,8 @@
   "schema_version": "1.0",
   "plan_id": "uuid",
   "created_at": "RFC3339",
-  "status": "ok|partial|error",
+  "status": "ok|partial|error|draft",
+  "plan_hash": "sha256:<plan_hash を除いた本体の正規化 JSON の SHA-256>",
   "items": [
     {
       "finding_id": "sha256:<hash>",
@@ -57,16 +60,27 @@
       "exception_type": "not_affected|fix_unavailable|risk_accepted|null",
       "reason": "string",
       "owner": "team-or-person",
+      "decided_by": "person",
       "decided_at": "RFC3339",
       "due_at": "RFC3339",
       "recheck_at": "RFC3339",
       "approved_by": ["security-lead"],
-      "action": {"type": "string", "target": "/abs/path", "params": {}}
+      "level_effective": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
+      "action": {"type": "string", "target": "/abs/path", "params": {}, "reversible": true, "skillpact_effects": ["read"]}
     }
   ],
-  "held": [{"finding_id": "sha256:<hash>", "reason": "scan_error"}]
+  "held": [{"finding_id": "sha256:<hash>|null", "module": "§6", "reason": "scan_error:skipped_offline"}]
 }
 ```
+
+| 【追加】 | 内容 |
+|---|---|
+| A-1 `status: "draft"` | ZET の下書き。GER は受理しない（確定 plan は `ok` / `partial`） |
+| A-2 `decided_by` | 判断者。「exception は判断者以外が承認」を機械的に検査するために必須 |
+| A-3 `level_effective` | SkillPact 規則で引き上げた後の重大度。入力の `level` は改変しない。引き下げ不可 |
+| A-4 `action.reversible` / `action.skillpact_effects` | ZET が操作種別と finding の `declared_effects` から付与。GER は findings を読まないため、二重承認と SkillPact 制限の判定材料を plan で渡す |
+| A-5 `held[].module`（`finding_id: null` 可） | `errors[]` のモジュールをモジュール単位で保留する（finding が 0 件でも未確定を表現できる） |
+| A-6 `plan_hash` | 確定 plan の本体（`plan_hash` を除く）を、キー順ソート・区切り `,` `:`・UTF-8 で正規化した JSON の SHA-256。GER の承認トークンと照合する |
 
 ## 4. ZET 不変条件
 
@@ -75,6 +89,8 @@
 - `remediate` には `owner` / `due_at` / `action` が必須
 - `held` は修復層に渡さない
 - 入力 findings の `id` / `level` / `module` を改変しない
+- 【追加】`decided_by` / `decided_at` は全判断で必須。`approved_by` は `policy.approvers` に含まれる人だけ。`due_at` は判断日 + `deadlines[level_effective]` 日以内、exception / defer の `recheck_at` は判断日 + `decision_window_days` 日以内
+- 【追加】入力が `partial` の場合、plan も `partial` とし、`errors[]` の各モジュールを `held` に明示する
 - `findings.status == "error"` の入力は拒否する。`errors[]` に記録されたモジュールの finding は未確定として扱う（`held` で明示）
 - **SkillPact**
   - `skillpact.divergence` が非空の finding は `exception` を許可しない（必ず `remediate` または `defer`）
@@ -93,12 +109,14 @@
     "plan_id": "uuid",
     "approved_by": ["security-lead", "platform-owner"],
     "approved_at": "RFC3339",
-    "approval_token": "string"
+    "approval_token": "sha256:<承認対象 plan の plan_hash>"
   },
   "mode": "dry-run|apply",
   "allowed_actions": ["chmod", "write_config", "rotate_secret"]
 }
 ```
+
+【追加】`approval_token` は承認対象の確定 plan の `plan_hash` と一致すること（承認を計画の中身に束縛し、承認後の差し替えを検出する）。`allowed_actions` にワイルドカードは使えない。dry-run と apply の同一性は、入力から `mode` を除いた正規化 JSON の SHA-256（`input_hash`）で判定する。
 
 ## 6. GER 出力 `remediation-log.json`
 
@@ -106,6 +124,8 @@
 {
   "schema_version": "1.0",
   "plan_id": "uuid",
+  "plan_hash": "sha256:<hash>",
+  "mode": "dry-run|apply",
   "started_at": "RFC3339",
   "finished_at": "RFC3339",
   "status": "ok|partial|error",
@@ -118,11 +138,13 @@
       "after": "0600",
       "result": "applied|skipped|failed|rolled_back",
       "reason": "string",
-      "applied_at": "RFC3339"
+      "applied_at": "RFC3339|null"
     }
   ]
 }
 ```
+
+【追加】`plan_hash` と `mode`（どの計画のどの実行かを一意にするため）。`applied_at` は実際に適用した結果以外では `null`。
 
 ## 7. GER 不変条件
 
@@ -134,6 +156,7 @@
 - 対象パスは `plan.items[].action.target` に限定、親ディレクトリへの遡及禁止
 - 全操作は冪等。`reversible: false` は二重承認必須
 - 1 件でも `failed` が出たら残りを実行せずロールバック
+- 【追加】実行者（`--operator`）は `approval.approved_by` に含まれてはならない。dry-run 記録は既定 24 時間で失効し、監査ログのハッシュチェーンが壊れている場合は dry-run 記録を信用しない
 - **SkillPact**
   - `skillpact.declared_effects` に `exec` / `network` / `secrets` が含まれるスキルの修復は、その操作が `allowed_actions` に明示されていなければ拒否
   - `skillpact.signed: true` を承認の代替にしない（人間承認は必須）
