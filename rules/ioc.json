@@ -9,12 +9,12 @@
   },
   "packages": [
     { "campaign": "litellm-oct2026", "eco": "pypi", "name": "litellm", "match": "versions", "bad_versions": ["1.107.0"], "safe_version": "1.106.2", "note": "cook.pth/cook.py/sitecustomize.py" },
-    { "campaign": "litellm-oct2026", "eco": "pypi", "name": "certifi", "match": "versions", "bad_versions": ["<2026.10.19"], "safe_version": "2026.10.19", "note": "" },
+    { "campaign": "emudhra-ca-oct2026", "eco": "pypi", "name": "certifi", "match": "versions", "bad_versions": [">=2019.3.9 <2026.10.19"], "safe_version": "2026.10.19", "note": "GHSA-6q48-6c7w-9gw2。emSign ECC Root CA G3 を削除（eMudhra 事案）。LiteLLM とは無関係" },
     { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "@tanstack/*", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "42pkg/84ver。router_init.js/tanstack_runner.js/vite_setup.mjs" },
     { "campaign": "teampcp-mini-shai-hulud", "eco": "pypi", "name": "mistralai", "match": "versions", "bad_versions": ["2.4.6"], "safe_version": "2.4.5", "note": "" },
     { "campaign": "teampcp-mini-shai-hulud", "eco": "pypi", "name": "guardrails-ai", "match": "versions", "bad_versions": ["0.10.1"], "safe_version": "0.10.0", "note": "" },
-    { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "intercom-client", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "侵害版。1,800+開発者影響" },
-    { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "jscrambler", "match": "versions", "bad_versions": [">=8.14.0 <=8.20.0"], "safe_version": null, "note": "Rust製インフォスティーラー" },
+    { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "intercom-client", "match": "versions", "bad_versions": ["7.0.4"], "safe_version": "7.0.3", "note": "GHSA-54pg-9963-v8vg（2026-04-30、約2時間公開）。影響人数の裏付けなし" },
+    { "campaign": "jscrambler-jul2026", "eco": "npm", "name": "jscrambler", "match": "versions", "bad_versions": ["8.14.0", "8.16.0", "8.17.0", "8.18.0", "8.20.0"], "safe_version": "8.22.0", "note": "2026-07-11 公開の Rust 製インフォスティーラー。TeamPCP への帰属は未確認（JFrog は IronWorm 系統と評価）" },
     { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "@asyncapi/*", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "侵害版" },
     { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "@polymarket/*", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "侵害版" },
     { "campaign": "chaindrop-keyv", "eco": "npm", "name": "keyv", "match": "versions", "bad_versions": ["6.0.0"], "safe_version": "5.x最新", "note": "" },
@@ -28,8 +28,8 @@
     { "campaign": "chaindrop-keyv", "eco": "npm", "name": "@cacheable/utils", "match": "versions", "bad_versions": ["2.5.1"], "safe_version": null, "note": "" },
     { "campaign": "chaindrop-keyv", "eco": "npm", "name": "@cacheable/net", "match": "versions", "bad_versions": ["2.1.1"], "safe_version": null, "note": "" },
     { "campaign": "chaindrop-keyv", "eco": "npm", "name": "ecto", "match": "versions", "bad_versions": ["5.0.1"], "safe_version": null, "note": "" },
-    { "campaign": "pypi-oct2026", "eco": "pypi", "name": "lightning", "match": "versions", "bad_versions": ["2.6.2", "2.6.3"], "safe_version": "2.6.1", "note": "_runtime/" },
-    { "campaign": "pypi-oct2026", "eco": "pypi", "name": "telnyx", "match": "versions", "bad_versions": ["4.87.1", "4.87.2"], "safe_version": "4.87.0", "note": "83[.]142[.]209[.]203:8080" },
+    { "campaign": "pypi-oct2026", "eco": "pypi", "name": "lightning", "match": "versions", "bad_versions": ["2.6.2", "2.6.3"], "safe_version": "2.6.1", "note": "_runtime/（Bun を取得して実行）。公開は 2026-04-30（campaign 名の oct2026 とは時期が異なる）" },
+    { "campaign": "pypi-oct2026", "eco": "pypi", "name": "telnyx", "match": "versions", "bad_versions": ["4.87.1", "4.87.2"], "safe_version": "4.87.0", "note": "GHSA-955r-262c-33jc。hxxp://83[.]142[.]209[.]203:8080/ringtone.wav。公開は 2026-03-27（campaign 名の oct2026 とは時期が異なる）" },
     { "campaign": "pypi-oct2026", "eco": "pypi", "name": "py2ops", "match": "versions", "bad_versions": ["2.2"], "safe_version": null, "note": "PyPIインプラント" },
     { "campaign": "solana-typosquat", "eco": "npm", "name": "@solana-labs/web3js", "match": "any_version", "bad_versions": ["1.0.0", "1.0.2"], "safe_version": null, "note": "100+バージョン。MAL-2026-5788" },
     { "campaign": "solana-typosquat", "eco": "npm", "name": "@solana-labs/spl-toke", "match": "any_version", "bad_versions": [], "safe_version": null, "note": "sibling" },
@@ -38,19 +38,19 @@
     { "campaign": "solana-typosquat", "eco": "npm", "name": "solana-web3-stable", "match": "any_version", "bad_versions": [], "safe_version": null, "note": "sibling" },
     { "campaign": "post-shaihulud", "eco": "binary", "name": "iron-worm", "match": "file_name", "bad_versions": [], "safe_version": null, "note": "Rust窃取" },
     { "campaign": "post-shaihulud", "eco": "binary", "name": "sckit", "match": "file_name", "bad_versions": [], "safe_version": null, "note": "Go窃取" },
-    { "campaign": "post-shaihulud", "eco": "binary", "name": "miasma", "match": "file_name", "bad_versions": [], "safe_version": null, "note": "AI武器化" },
+    { "campaign": "post-shaihulud", "eco": "binary", "name": "miasma", "match": "file_name", "bad_versions": [], "safe_version": null, "note": "AIコーディングツール設定の汚染機能あり（リーク後の悪用事例は未確認）" },
     { "campaign": "shai-hulud-chaindrop", "eco": "npm", "name": "tensorlake", "match": "versions", "bad_versions": ["0.5.144"], "safe_version": null, "note": "2026-10-08" },
     { "campaign": "malfex", "eco": "npm", "name": "imgdecode", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "侵害版。shellcodeローダー" },
     { "campaign": "namastex-worm", "eco": "npm", "name": "Namastex Labs関連", "match": "none", "bad_versions": [], "safe_version": null, "note": "侵害版。npm→PyPI→暗号資産。具体的パッケージ名未定義のため自動照合しない" },
-    { "campaign": "css-nesting-transform", "eco": "npm", "name": "css-nesting-transform", "match": "versions", "bad_versions": ["1.0.0"], "safe_version": null, "note": "2026-10-12" },
+    { "campaign": "css-nesting-transform", "eco": "npm", "name": "css-nesting-transform", "match": "versions", "bad_versions": ["1.0.0"], "safe_version": null, "note": "MAL-2026-17804（npm 公開 2026-10-07）。whoami/id/uname を webhook に送る偵察型" },
     { "campaign": "hf-dataset-poisoning", "eco": "huggingface", "name": "datasets", "match": "none", "bad_versions": [], "safe_version": null, "note": "悪性データセット（2026-07-16）。§36で検査" },
-    { "campaign": "hf-lerobot-rce", "eco": "pypi", "name": "lerobot", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "<CVE-2026-25874修正版。CVSS 9.8。修正版番号未定義のため要確認" },
+    { "campaign": "hf-lerobot-rce", "eco": "pypi", "name": "lerobot", "match": "versions", "bad_versions": ["<=0.5.1"], "safe_version": null, "note": "CVE-2026-25874。CVSS は 9.3（GHSA）と 9.8（CSA）でソース間不一致。公表時点で修正版なし" },
     { "campaign": "megalodon-ci", "eco": "github-actions", "name": "-", "match": "none", "bad_versions": [], "safe_version": null, "note": "5,561リポジトリ。§38で検査" },
     { "campaign": "sckit-memos", "eco": "npm/pypi", "name": "OpenClaw/MemoryOS", "match": "none", "bad_versions": [], "safe_version": null, "note": "2026-09-23。§25/§45で検査" },
     { "campaign": "redhat-cloud-services", "eco": "npm", "name": "@redhat-cloud-services/*", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "MAL-2026-5141。OIDC publisher侵害" },
     { "campaign": "sap-npm", "eco": "npm", "name": "SAP関連", "match": "none", "bad_versions": [], "safe_version": null, "note": "2026-05。具体的パッケージ名未定義のため自動照合しない" },
     { "campaign": "nx-console", "eco": "vscode-ext", "name": "Nx Console", "match": "none", "bad_versions": [], "safe_version": null, "note": "悪性版。§24で拡張IDを検査" },
-    { "campaign": "ovhcloud-cli", "eco": "CLI", "name": "ovhcloud-cli", "match": "none", "bad_versions": [], "safe_version": null, "note": "2026-10-19リリース。GlassWorm経由" },
+    { "campaign": "ovhcloud-cli", "eco": "CLI", "name": "ovhcloud-cli", "match": "none", "bad_versions": [">=0.11.0 <=0.15.0"], "safe_version": "0.16.0", "note": "v0.11.0〜v0.15.0 のリリースバイナリが 2026-10-19 に差し替え。侵入経路は開発者の GitHub アカウント侵害。GlassWorm との関連は研究者の仮説（未確定）" },
     { "campaign": "typosquat-payment-sdk", "eco": "npm/pypi", "name": "決済SDKタイポ", "match": "none", "bad_versions": [], "safe_version": null, "note": "2026-06〜07。§44で近似名検査" },
     { "campaign": "skillpact-undeclared", "eco": "skill", "name": "契約なしスキル", "match": "none", "bad_versions": [], "safe_version": null, "note": "HIGH。§49で検査" },
     { "campaign": "skillpact-divergence", "eco": "skill", "name": "契約と実態の乖離", "match": "none", "bad_versions": [], "safe_version": null, "note": "CRITICAL。§49で検査" },
@@ -71,15 +71,20 @@
           "math_init.js": ["9fc2570b7cef51c1b8df116d144d11ff4096357be7d2c4c6367cfc2509cf1bcc"]
         }
       },
-      "domains": ["npm-cache[.]com", "eth-mainnet[.]nodereal[.]io", "go[.]getblock[.]io", "eth[.]llamarpc[.]com", "pypi-get[.]com", "js-mirror[.]com"]
+      "domains": ["npm-cache[.]com", "pypi-get[.]com", "js-mirror[.]com", "awqhnjewqjkl[.]icu"],
+      "legit_infra": ["eth-mainnet[.]nodereal[.]io", "go[.]getblock[.]io", "eth[.]llamarpc[.]com"],
+      "legit_infra_note": "正規の Ethereum RPC。C2 アドレス解決に悪用された。名前の出現だけでは侵害と断定しない（想定外の接続元を調査）",
+      "eth_contracts": ["0xE1f2395ee43e45A1556EC6438a88c31B83493103"]
     },
     "teampcp": {
       "campaign": "teampcp-mini-shai-hulud",
       "c2_ip": ["83[.]142[.]209[.]194", "94[.]154[.]172[.]43"],
-      "c2_domains": ["api[.]masscan[.]cloud", "git-tanstack[.]com", "seed1[.]getsession[.]org", "seed2[.]getsession[.]org"],
+      "c2_domains": ["api[.]masscan[.]cloud", "git-tanstack[.]com"],
+      "legit_infra": ["seed1[.]getsession[.]org", "seed2[.]getsession[.]org"],
+      "legit_infra_note": "Session メッセンジャーの正規インフラ。窃取データの搬送に使われた。名前の出現だけでは侵害と断定しない",
       "urls": ["hxxps://83[.]142[.]209[.]194/v1/weights", "hxxps://83[.]142[.]209[.]194/audio.mp3", "hxxps://api[.]github[.]com/search/commits?q=FIRESCALE"],
       "oidc_technique": "/proc/<pid>/mem から GitHub Actions OIDC トークン抽出",
-      "deadman_switch": "GitHub認証情報失効検知時に $HOME 全削除"
+      "deadman_switch": "GitHub認証情報失効検知時に $HOME 全削除（同挙動の記録は tensorlake / Miasma。TeamPCP 本体は JFrog が破壊的分岐の存在を記載するのみで帰属は曖昧）"
     },
     "post_shaihulud": {
       "campaign": "post-shaihulud",
@@ -95,7 +100,7 @@
     "miasma": {
       "campaign": "post-shaihulud",
       "deadman_switch": "盗んだGitHubトークンをExfilチャネルに使用、失効検知で$HOME削除",
-      "leaked_source": "2026-06-10にGitHubで一時公開"
+      "leaked_source": "2026-06-08 に GitHub で公開（報道は 06-09〜10）"
     },
     "quasar_linux": {
       "campaign": "ebpf-rootkit",
@@ -120,8 +125,8 @@
       "image_patterns": ["gitlab/gitlab-ee", "gitlab/gitlab-ce"],
       "process_patterns": ["gitlab-workhorse", "gitlab-rails", "puma: cluster worker"],
       "cves": [
-        { "id": "CVE-2026-110264", "cvss": 10.0, "title": "Unauthenticated RCE", "fixed": [] },
-        { "id": "CVE-2026-85706", "cvss": 10.0, "title": "Path Traversal", "fixed": [] },
+        { "id": "CVE-2026-110264", "cvss": 10.0, "title": "Unauthenticated RCE", "fixed": [], "note": "2026-10-21 修正（18.11.13〜19.5.1 の 7 系列）。系列ごとの修正版は未確認" },
+        { "id": "CVE-2026-85706", "cvss": 10.0, "title": "Path Traversal（commits API 経由の認証不要な任意ファイル読取）", "fixed": ["19.1.8", "19.2.6", "19.3.2"], "kev": true },
         { "id": "CVE-2026-19478", "cvss": 9.4, "title": "GraphQL Code Injection", "fixed": [] }
       ]
     },
@@ -144,24 +149,24 @@
     {
       "id": "docker",
       "cves": [
-        { "id": "CVE-2026-17106", "title": "CopyEscape: docker cp でホスト任意ファイル上書き", "fixed": [], "grep_patterns": ["docker cp"] }
+        { "id": "CVE-2026-17106", "title": "CopyEscape: docker cp でホスト任意ファイル上書き", "fixed": [], "grep_patterns": ["docker cp"], "note": "修正が確認できたのは Docker Sandboxes 0.38.0 の sbx cp のみ。Docker CLI 側の修正版は未確認" }
       ]
     },
     {
       "id": "kernel",
       "cves": [
-        { "id": "CVE-2026-31431", "title": "Copy Fail", "kev": true, "fixed": [] },
-        { "id": "CVE-2026-80521", "cvss": 7.8, "title": "AF_UNIX UAF, コンテナ→ホストroot", "fixed": [] },
-        { "id": "CVE-2026-64564", "title": "SCTPhantom, SCTP UAF, 6/8でエスケープ成功", "fixed": [] }
+        { "id": "CVE-2026-31431", "title": "Copy Fail", "kev": true, "fixed": ["6.18.22", "6.19.12", "7.0"] },
+        { "id": "CVE-2026-80521", "cvss": 7.8, "title": "AF_UNIX UAF（SCM_RIGHTS の GC 競合）, コンテナ→ホストroot", "fixed": ["6.12.111", "6.18.53", "7.1.10", "7.2"], "note": "修正版は二次情報" },
+        { "id": "CVE-2026-64564", "title": "SCTPhantom, SCTP ASCONF UAF", "fixed": ["6.6.148", "6.12.101", "6.18.42", "7.1.6"] }
       ]
     },
     {
       "id": "sigstore",
       "cves": [
         { "id": "CVE-2026-22772", "component": "fulcio", "title": "Fulcio metaRegex SSRF", "fixed": ["1.8.5"] },
-        { "id": "CVE-2026-22703", "component": "rekor", "title": "Rekor任意エントリ受理", "fixed": ["2.6.2", "3.0.4"] },
+        { "id": "CVE-2026-22703", "component": "cosign", "title": "成果物を参照しない Rekor エントリを含むバンドルを受理", "fixed": ["2.6.2", "3.0.4"] },
         { "id": "CVE-2026-39395", "component": "cosign", "title": "verify-blob-attestation偽陽性", "fixed": ["3.0.6", "2.6.3"] },
-        { "id": "GHSA-fx35-mq7g-6g98", "component": "cosign", "title": "レガシーバンドル検証バイパス", "fixed": ["3.1.3"] },
+        { "id": "GHSA-fx35-mq7g-6g98", "component": "cosign", "title": "公開鍵を使ったレガシーバンドル検証バイパス", "fixed": ["3.1.3", "2.6.5"], "note": "2.6.5 へのバックポートは確認済み。3.1.3 は仕様書の値で未確認" },
         { "id": "CVE-2026-31830", "component": "sigstore-ruby", "title": "sigstore-ruby検証バイパス", "fixed": ["0.2.3"] }
       ]
     }
@@ -181,27 +186,27 @@
     },
     "neighbor": {
       "alias": "NeighborJack",
-      "behavior": "隣接する脆弱なMCPサーバー経由で間接侵害",
-      "detection": "localhost/127.0.0.1以外の内部IP・未認証MCPエンドポイント登録",
+      "behavior": "MCP サーバーが 0.0.0.0 で待ち受け、同一 LAN から到達できる設定不備（Backslash, 2025-06）",
+      "detection": "0.0.0.0 での待ち受け（一次情報の定義）、およびループバック以外の内部 IP・平文 HTTP の MCP エンドポイント登録（ZES 追加）",
       "internal_ip_regex": "(10\\.[0-9]+\\.[0-9]+\\.[0-9]+|192\\.168\\.[0-9]+\\.[0-9]+|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9]+\\.[0-9]+)"
     },
     "registry_supply_chain": {
       "tool": "SPECTER MCP-POISON",
-      "cves": [
-        { "id": "CVE-2026-52869", "cvss": 7.6 },
-        { "id": "CVE-2026-58500", "title": "MCP Appium XSS-to-RCE" }
-      ]
+      "cves": [],
+      "note": "CVE-2026-52869 / CVE-2026-58500 はレジストリ汚染の事案ではないため mcp_cves に移動"
     },
     "mcp_cves": [
       { "id": "CVE-2026-104850", "title": "MCP TS SDK OAuth偽装" },
       { "id": "CVE-2026-104120", "title": "mcp-server-fetch/everything fetch_url" },
       { "id": "CVE-2026-111767", "title": "InMemoryTaskStore アクセス制御不備" },
       { "id": "CVE-2026-59951", "title": "FastMCP セッション蓄積" },
-      { "id": "CVE-2026-61559", "title": "gitlab-mcp サーバーサイド" }
+      { "id": "CVE-2026-61559", "title": "gitlab-mcp サーバーサイド" },
+      { "id": "CVE-2026-52869", "cvss": 7.1, "title": "MCP Python SDK: セッション ID と認証主体が紐付かない", "eco": "pypi", "package": "mcp", "fixed": "1.27.2", "ghsa": "GHSA-jpw9-pfvf-9f58" },
+      { "id": "CVE-2026-58500", "cvss": 8.2, "title": "appium-mcp: locator UI の XSS", "eco": "npm", "package": "appium-mcp", "fixed": "1.85.10", "ghsa": "GHSA-x975-rgx4-5fh4" }
     ],
     "toolhive_ssrf": {
-      "cves": ["GO-2026-5996", "GO-2026-6002"],
-      "description": "IPv6 NAT64レンジ見逃し、host.docker.internal経由で横移動",
+      "cves": ["GO-2026-5996", "GO-2026-6002", "CVE-2026-58197"],
+      "description": "GO-2026-5996: IPv6 NAT64 レンジの見逃し。GO-2026-6002（CVE-2026-58196）: 認証ディスカバリ経路の SSRF。host.docker.internal 経由の横移動は別件の CVE-2026-58197",
       "patterns": ["host.docker.internal", "64:ff9b::", "64:ff9b:1:"]
     },
     "config_paths": ["~/.cursor/mcp.json", "~/.claude/mcp.json", ".vscode/settings.json", "~/.config/github-copilot/"],
@@ -216,8 +221,10 @@
       "permissions: write-all",
       "uses: <action>@v*（タグ参照）※SHA固定でない"
     ],
+    "compromised_trivy_binary": ["v0.69.4", "0.69.4"],
+    "compromised_trivy_binary_note": "Trivy 本体の悪性版（安全版は v0.69.3）。trivy-action の version 入力やコンテナイメージのタグで参照されうる",
     "known_compromised": [
-      { "action": "aquasecurity/trivy-action", "versions": ["v0.69.4"], "note": "76タグ中75汚染, 2026-03" },
+      { "action": "aquasecurity/trivy-action", "versions": [], "safe_tags": ["v0.35.0"], "note": "2026-03-19 にタグ 75/76 が強制 push（Aqua 発表では 76/77）。v0.35.0 以外のタグ参照は汚染の可能性" },
       { "action": "tj-actions/*", "versions": [], "note": "" },
       { "action": "aquasecurity/*", "versions": [], "note": "" }
     ],
@@ -233,8 +240,8 @@
       "campaign": "ghostaction-oct2026",
       "date": "2026-10-07以降",
       "accounts": "500+",
-      "technique": "偽装フォントファイルにインフォスティーラーを隠蔽、第2ワークフローも設置",
-      "note": "2025年9月初出の再活性化",
+      "technique": "500 アカウント波: 第 2 ワークフローの設置。偽装フォント（public/fonts/fa-solid-400.woff2、94 リポジトリ、tasks.json の folderOpen で起動）は別の後続／模倣活動として報告",
+      "note": "2025年9月初出の再活性化。偽装フォント事案とは別件",
       "font_ext": [".ttf", ".otf", ".woff", ".woff2"]
     },
     "secrets_ref_threshold": 10
@@ -324,12 +331,12 @@
   "ai_coding_assistant": {
     "cursor": [
       { "id": "CVE-2026-26268", "cvss": 9.9, "fixed": "2.5", "title": "悪性Gitリポジトリ→エージェントフック自律実行RCE" },
-      { "id": "CVE-2026-50548", "alias": "EUVD-2026-39537", "title": "Zero-Clickプロンプトインジェクション" },
+      { "id": "CVE-2026-50548", "alias": "EUVD-2026-39537", "cvss": 9.8, "fixed": "3.0", "title": "DuneSlide: run_terminal_cmd の working_directory を使ったパストラバーサル（Zero-Click プロンプトインジェクション）" },
       { "id": "CVE-2025-54136", "title": "MCP JSON Zero-Click Configuration RCE" },
       { "id": "git.exe Zero-Day", "title": "未パッチ、Windowsリポジトリルートのgit.exe自動実行" }
     ],
     "copilot": [
-      { "id": "CVE-2025-62222", "title": "信頼ダイアログ表示前のコマンド実行" },
+      { "id": "CVE-2025-62222", "cvss": 8.8, "fixed": "0.32.5", "extension": "github.copilot-chat", "title": "VS Code Copilot Chat 拡張のコマンドインジェクション" },
       { "id": "CVE-2026-50510", "title": "JetBrains版Copilotのローカルコード実行" }
     ],
     "codex_cli": ["信頼境界を越える未信頼スキル/MCPコンテンツ"],
@@ -399,8 +406,13 @@
     "go": ["1.27.3", "1.26.10"],
     "certifi": "2026.10.19",
     "homebrew_ca_certificates": "2026-09-25_1",
-    "cursor": "2.5",
-    "cosign": ["3.1.3"]
+    "cursor": ["2.5", "3.0"],
+    "cosign": ["3.1.3", "2.6.5"],
+    "copilot_chat": "0.32.5",
+    "notes": {
+      "homebrew_ca_certificates": "仕様書の値。eMudhra 事案の報告（2026-10-17）より前の日付で修正版として矛盾するため誤りの疑い（一次情報未確認）。ZES は MEDIUM（要確認）で報告する",
+      "cosign": "3.1.3 は仕様書の値で未確認。2.x 系は GHSA-fx35-mq7g-6g98 のバックポート 2.6.5"
+    }
   },
   "emudhra": {
     "probe_host": "dv-g3b-emudhra[.]we-have-a-problem[.]com",

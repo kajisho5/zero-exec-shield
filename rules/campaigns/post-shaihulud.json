@@ -33,7 +33,7 @@
       "match": "file_name",
       "bad_versions": [],
       "safe_version": null,
-      "note": "AI武器化"
+      "note": "AIコーディングツール設定の汚染機能あり（リーク後の悪用事例は未確認）"
     },
     {
       "campaign": "shai-hulud-chaindrop",
@@ -72,7 +72,7 @@
     "worm_iocs.miasma": {
       "campaign": "post-shaihulud",
       "deadman_switch": "盗んだGitHubトークンをExfilチャネルに使用、失効検知で$HOME削除",
-      "leaked_source": "2026-06-10にGitHubで一時公開"
+      "leaked_source": "2026-06-08 に GitHub で公開（報道は 06-09〜10）"
     },
     "worm_iocs.sckit": {
       "campaign": "sckit-memos",

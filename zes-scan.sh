@@ -558,6 +558,15 @@ detect_service_version() {
   done < <(files_named '^(docker-compose.*\.ya?ml|compose.*\.ya?ml|Dockerfile.*|.*\.dockerfile|.*\.ya?ml|.*\.tf|.*\.json)$')
 }
 
+# infra_fixed INFRA_ID CVE_ID … infrastructures[] の修正版を 1 行ずつ
+infra_fixed() {
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    jq -r --arg i "$1" --arg c "$2" '.infrastructures[] | select(.id==$i) | .cves[] | select(.id==$c) | (.fixed // [])[]' "$IOC_FILE"
+  else
+    grep -o "\"$2\".*" "$IOC_FILE" | head -n1 | grep -o '"fixed": *\[[^]]*\]' | grep -o '"[0-9][^"]*"' | tr -d '"'
+  fi
+}
+
 HOME_RC_FILES=( .bashrc .bash_profile .profile .zshrc .zprofile .zshenv .zlogin .bash_login )
 home_rc_paths() { local f; for f in "${HOME_RC_FILES[@]}"; do [ -f "$HOME_DIR/$f" ] && printf '%s\n' "$HOME_DIR/$f"; done; return 0; }
 host_enabled() { [ "$HOST_CHECKS" = "1" ]; }
@@ -674,7 +683,11 @@ check_s3() {
   while IFS=$'\t' read -r ver f; do
     [ -n "$ver" ] || continue
     found=1
-    high "" "$f" "GitLab ${ver} を検出。CVE-2026-110264/CVE-2026-85706/CVE-2026-19478 の修正版を公式アドバイザリで確認してください（ioc に修正版未定義）"
+    local -a gfix; mapfile -t gfix < <(infra_fixed gitlab CVE-2026-85706)
+    if [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "${#gfix[@]}" -gt 0 ] && version_branch_vulnerable "$ver" "${gfix[@]}"; then
+      critical "" "$f" "GitLab ${ver} は CVE-2026-85706（CVSS 10.0, KEV）の影響範囲（修正版: ${gfix[*]}）"
+    fi
+    high "" "$f" "GitLab ${ver} を検出。CVE-2026-110264（10.0、2026-10-21 修正）/CVE-2026-19478 は系列ごとの修正版が ioc 未定義のため公式アドバイザリで確認してください"
   done < <(detect_service_version 'gitlab/gitlab-(ee|ce)')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -775,7 +788,7 @@ check_s6() {
   for d in /opt/homebrew/Cellar/ca-certificates /usr/local/Cellar/ca-certificates "$HOME_DIR/.linuxbrew/Cellar/ca-certificates"; do
     [ -d "$d" ] || continue
     v="$(ls -1 "$d" 2>/dev/null | sort | tail -n1)"
-    [ -n "$v" ] && [[ "$v" < "$min" ]] && high "" "$d/$v" "Homebrew ca-certificates ${v} は ${min} 未満"
+    [ -n "$v" ] && [[ "$v" < "$min" ]] && medium "" "$d/$v" "Homebrew ca-certificates ${v} は仕様上の基準 ${min} 未満（基準値は一次情報未確認・誤りの疑いあり。最新版への更新と emSign ECC Root CA G3 の除去を確認）"
   done
   min="$(read_ioc '.runtime_minimums.certifi')"
   build_deps
@@ -1127,23 +1140,36 @@ check_s17() {
 }
 
 # §18 ネットワーク IoC（C2 ドメイン/IP、履歴）
+# network_iocs [all] … 照合文字列<TAB>campaign<TAB>種別（malicious / legit）
+#   既定は悪性のみ。all を付けると、悪用された正規インフラ（legit_infra）も含める
 network_iocs() {
-  local s
-  for s in '.worm_iocs.chaindrop.domains' '.worm_iocs.teampcp.c2_ip' '.worm_iocs.teampcp.c2_domains'; do
+  local s kind
+  local -a keys=('.worm_iocs.chaindrop.domains' '.worm_iocs.chaindrop.eth_contracts' '.worm_iocs.teampcp.c2_ip' '.worm_iocs.teampcp.c2_domains')
+  [ "${1:-}" = "all" ] && keys+=('.worm_iocs.chaindrop.legit_infra' '.worm_iocs.teampcp.legit_infra')
+  for s in "${keys[@]}"; do
     local camp="chaindrop-keyv"; [[ "$s" == *teampcp* ]] && camp="teampcp-mini-shai-hulud"
-    read_ioc "$s" | while IFS= read -r i; do [ -n "$i" ] && printf '%s\t%s\n' "$(refang "$i")" "$camp"; done
+    kind="malicious"; [[ "$s" == *legit_infra* ]] && kind="legit"
+    read_ioc "$s" | while IFS= read -r i; do [ -n "$i" ] && printf '%s\t%s\t%s\n' "$(refang "$i")" "$camp" "$kind"; done
   done
 }
 check_s18() {
   log_section "§18" "ネットワークIoC"
-  network_iocs >"$TMP_DIR/netioc.tsv"
-  cut -f1 "$TMP_DIR/netioc.tsv" >"$TMP_DIR/netioc.pat"
+  network_iocs all >"$TMP_DIR/netioc.tsv"
+  awk -F'\t' '$3=="malicious"{print $1}' "$TMP_DIR/netioc.tsv" >"$TMP_DIR/netioc.pat"
+  awk -F'\t' '$3=="legit"{print $1}' "$TMP_DIR/netioc.tsv" >"$TMP_DIR/netioc-legit.pat"
   [ -s "$TMP_DIR/netioc.pat" ] || { record_error "§18" "ioc_empty"; return 0; }
-  local f hit camp
-  grep -v -E '/\.(zsh|bash)_history$' "$FILES_LIST" | tr '\n' '\0' | xargs -0 grep -l -I -F -f "$TMP_DIR/netioc.pat" -- /dev/null 2>/dev/null | grep -v '^/dev/null$' | while IFS= read -r f; do
-    hit="$(grep -o -F -f "$TMP_DIR/netioc.pat" -- "$f" 2>/dev/null | sort -u | head -n3 | tr '\n' ' ')"
-    camp="$(grep -F -- "$(printf '%s' "$hit" | awk '{print $1}')" "$TMP_DIR/netioc.tsv" | head -n1 | cut -f2)"
-    critical "$camp" "$f" "ネットワーク IoC を含むファイル（${hit% }）"
+  local f hit camp pat
+  for pat in netioc netioc-legit; do
+    [ -s "$TMP_DIR/$pat.pat" ] || continue
+    grep -v -E '/\.(zsh|bash)_history$' "$FILES_LIST" | tr '\n' '\0' | xargs -0 grep -l -I -F -f "$TMP_DIR/$pat.pat" -- /dev/null 2>/dev/null | grep -v '^/dev/null$' | while IFS= read -r f; do
+      hit="$(grep -o -F -f "$TMP_DIR/$pat.pat" -- "$f" 2>/dev/null | sort -u | head -n3 | tr '\n' ' ')"
+      camp="$(grep -F -- "$(printf '%s' "$hit" | awk '{print $1}')" "$TMP_DIR/netioc.tsv" | head -n1 | cut -f2)"
+      if [ "$pat" = "netioc" ]; then
+        critical "$camp" "$f" "ネットワーク IoC を含むファイル（${hit% }）"
+      else
+        medium "$camp" "$f" "攻撃に悪用された正規インフラへの参照（${hit% }）。正規利用か、想定外の接続元かを確認"
+      fi
+    done
   done
   local hf
   for hf in "$HOME_DIR/.zsh_history" "$HOME_DIR/.bash_history"; do
@@ -1221,7 +1247,7 @@ check_s21() {
         critical "ghostaction-oct2026" "$f" "pull_request_target + PR head の checkout + secrets 参照（pwn request）"
       fi
       if printf '%s\n' "$refs" | grep -q -x 'noref'; then
-        critical "ghostaction-oct2026" "$f" "pull_request_target + actions/checkout(refなし) + secrets 参照"
+        high "ghostaction-oct2026" "$f" "pull_request_target + actions/checkout(refなし) + secrets 参照（ベースブランチの取得だが、後続ステップで PR 由来のコードを扱わないか確認）"
       fi
     fi
     fgrep_q 'key:.*github\.event\.pull_request\.number' "$f" && high "ghostaction-oct2026" "$f" "actions/cache のキーに PR 番号（キャッシュポイズニング）"
@@ -1240,8 +1266,8 @@ check_s22() {
       case "$line" in ./*|docker://*) continue ;; esac
       act="${line%@*}"; ref="${line##*@}"
       [ "$act" != "$line" ] || { high "ghostaction-oct2026" "$f" "uses: ${line} がバージョン未指定"; continue; }
-      if [ "$act" = "aquasecurity/trivy-action" ] && [ "$ref" = "v0.69.4" ]; then
-        critical "ghostaction-oct2026" "$f" "既知の汚染アクション ${line}"
+      if [ "$act" = "aquasecurity/trivy-action" ] && ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]] && [ "$ref" != "v0.35.0" ]; then
+        critical "ghostaction-oct2026" "$f" "汚染されたタグ参照の可能性（${line}。2026-03-19 にタグ 75/76 が強制 push。安全版 v0.35.0 または検証済み SHA に固定）"
       elif [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
         case "$act" in tj-actions/*|aquasecurity/*) medium "ghostaction-oct2026" "$f" "侵害履歴のある発行元のアクション ${act}（SHA 固定済み。SHA が安全な版か確認）" ;; esac
       else
@@ -1251,7 +1277,14 @@ check_s22() {
         esac
       fi
     done
+    if grep -q -E "(trivy-version|version):[[:space:]]*[\"']?v?0\.69\.4[\"']?[[:space:]]*$" "$f" 2>/dev/null && grep -q 'trivy' "$f"; then
+      critical "ghostaction-oct2026" "$f" "Trivy 本体の悪性版 v0.69.4 を指定（安全版は v0.69.3）"
+    fi
   done < <(workflow_files; files_path '/action\.ya?ml$')
+  local ver
+  while IFS=$'\t' read -r ver f; do
+    [ "${ver#v}" = "0.69.4" ] && critical "ghostaction-oct2026" "$f" "Trivy 本体の悪性版イメージ（aquasec/trivy:0.69.4）"
+  done < <(detect_service_version 'aquasec/trivy')
   return 0
 }
 
@@ -1263,7 +1296,17 @@ check_s23() {
     dv="$(safe_probe docker version --format '{{.Client.Version}}')"
     [ -n "$dv" ] && medium "" "$(command -v docker)" "Docker ${dv}: CVE-2026-17106（CopyEscape）の修正版を公式で確認してください（ioc に修正版未定義）"
     kv="$(uname -r 2>/dev/null)"
-    [ -n "$kv" ] && [ "$OS_NAME" = "Linux" ] && medium "" "/proc/version" "Linux カーネル ${kv}: CVE-2026-31431（Copy Fail, KEV）/CVE-2026-80521/CVE-2026-64564 の修正適用を確認してください"
+    if [ -n "$kv" ] && [ "$OS_NAME" = "Linux" ]; then
+      local kver cve; kver="$(printf '%s' "$kv" | grep -o -E '^[0-9]+\.[0-9]+(\.[0-9]+)?')"
+      [[ "$kver" =~ ^[0-9]+\.[0-9]+$ ]] && kver="$kver.0"
+      for cve in CVE-2026-31431 CVE-2026-80521 CVE-2026-64564; do
+        local -a kfix; mapfile -t kfix < <(infra_fixed kernel "$cve")
+        [ "${#kfix[@]}" -gt 0 ] && [ -n "$kver" ] || continue
+        if version_branch_vulnerable "$kver" "${kfix[@]}"; then
+          high "" "/proc/version" "Linux カーネル ${kv} は ${cve} の upstream 修正版（${kfix[*]}）未満。ディストリビューションのバックポート有無を確認"
+        fi
+      done
+    fi
   fi
   local f
   files_named '\.(ya?ml)$' | grep_l '^[[:space:]]*privileged:[[:space:]]*true' | while IFS= read -r f; do
@@ -1659,6 +1702,14 @@ check_s37() {
     fgrep_q '64:ff9b(:1)?::' "$f" && high "mcp-poisoning" "$f" "MCP 設定が IPv6 NAT64 レンジ（64:ff9b::/96, 64:ff9b:1::/48）を参照（SSRF フィルタ回避）"
   done < <(mcp_config_files | sort -u; files_path '/(tool|server|mcp)\.json$')
   build_deps
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    local ce cp cf cid
+    while IFS=$'\t' read -r cid ce cp cf; do
+      awk -F'\t' -v e="$ce" -v n="$cp" '$1==e && $2==n {print $3"\t"$4}' "$DEPS_TSV" | sort -u | while IFS=$'\t' read -r v f; do
+        [ -n "$v" ] && version_lt "$v" "$cf" && high "mcp-poisoning" "$f" "${cp}@${v} は ${cid} の影響範囲（修正版 ${cf}）"
+      done
+    done < <(jq -r '.mcp_poisoning.mcp_cves[] | select(.package and .fixed) | [.id, .eco, .package, .fixed] | @tsv' "$IOC_FILE")
+  fi
   awk -F'\t' '
     ($1=="npm" && ($2=="@modelcontextprotocol/sdk" || $2 ~ /appium.*mcp|mcp.*appium/ || $2=="@modelcontextprotocol/server-everything" || $2 ~ /gitlab-mcp/)) ||
     ($1=="pypi" && ($2=="mcp" || $2=="mcp-server-fetch" || $2=="fastmcp")) ||
@@ -1795,17 +1846,23 @@ check_s40() {
 check_s41() {
   log_section "§41" "AIアシスタント"
   local f v
-  local cmin; cmin="$(read_ioc '.runtime_minimums.cursor')"
   for f in "/Applications/Cursor.app/Contents/Info.plist" "$HOME_DIR/Applications/Cursor.app/Contents/Info.plist" "/usr/share/cursor/resources/app/package.json" "/opt/Cursor/resources/app/package.json"; do
     [ -f "$f" ] || continue
     case "$f" in /Applications/*|/usr/*|/opt/*) host_enabled || continue ;; esac
     if [[ "$f" == *.plist ]]; then v="$(grep -A1 'CFBundleShortVersionString' "$f" | grep -o -E '[0-9]+(\.[0-9]+)+' | head -n1)"
     else v="$(grep -m1 -E '"version"' "$f" | grep -o -E '[0-9]+(\.[0-9]+)+')"; fi
-    [ -n "$v" ] && version_lt "$v" "$cmin" && critical "" "$f" "Cursor ${v} は ${cmin} 未満（CVE-2026-26268 CVSS 9.9 / CVE-2026-50548）"
+    [ -n "$v" ] || continue
+    if version_lt "$v" "2.5"; then
+      critical "" "$f" "Cursor ${v} は CVE-2026-26268（CVSS 9.9、2.5 で修正）と CVE-2026-50548（DuneSlide、CVSS 9.8、3.0 で修正）の影響範囲"
+    elif version_lt "$v" "3.0"; then
+      critical "" "$f" "Cursor ${v} は CVE-2026-50548（DuneSlide、CVSS 9.8）の影響範囲（3.0 で修正）"
+    fi
   done
-  local d
-  for d in "$HOME_DIR"/.vscode/extensions/github.copilot-[0-9]* "$HOME_DIR"/.vscode/extensions/github.copilot-chat-[0-9]*; do
-    [ -d "$d" ] && medium "" "$d" "GitHub Copilot 拡張 ${d##*/}: CVE-2025-62222 の修正版適用を確認"
+  local d cfix; cfix="$(read_ioc '.runtime_minimums.copilot_chat')"
+  for d in "$HOME_DIR"/.vscode/extensions/github.copilot-chat-[0-9]*; do
+    [ -d "$d" ] || continue
+    v="${d##*/github.copilot-chat-}"; v="${v%%-*}"
+    [ -n "$cfix" ] && version_lt "$v" "$cfix" && high "" "$d" "GitHub Copilot Chat 拡張 ${v} は CVE-2025-62222（コマンドインジェクション、CVSS 8.8）の影響範囲（修正版 ${cfix}）"
   done
   for d in "$HOME_DIR"/Library/Application\ Support/JetBrains/*/plugins/github-copilot-intellij "$HOME_DIR"/.local/share/JetBrains/*/github-copilot-intellij; do
     [ -d "$d" ] && medium "" "$d" "JetBrains 版 Copilot: CVE-2026-50510 の修正版適用を確認"
@@ -1858,14 +1915,14 @@ check_s42() {
 check_s43() {
   log_section "§43" "Sigstore/SLSA"
   local f v
-  local cmin; cmin="$(read_ioc '.runtime_minimums.cosign')"
+  local -a cmins; mapfile -t cmins < <(read_ioc '.runtime_minimums.cosign')
   if host_enabled; then
     v="$(safe_probe cosign version 2>&1 | grep -o -E 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
-    [ -n "$v" ] && version_lt "${v#v}" "$cmin" && high "" "$(command -v cosign)" "cosign ${v} は ${cmin} 未満（GHSA-fx35-mq7g-6g98 / CVE-2026-39395 / CVE-2026-22703）"
+    [ -n "$v" ] && version_branch_vulnerable "${v#v}" "${cmins[@]}" && high "" "$(command -v cosign)" "cosign ${v} は修正版（${cmins[*]}）未満（GHSA-fx35-mq7g-6g98 / CVE-2026-39395 / CVE-2026-22703。3.1.3 は仕様書の値で未確認）"
   fi
   files_path '/\.github/workflows/[^/]+\.ya?ml$' | grep_l 'cosign-release:[[:space:]]*["'"'"']?v?[0-9]' | while IFS= read -r f; do
     v="$(grep -o -E 'cosign-release:[[:space:]]*["'"'"']?v?[0-9]+\.[0-9]+\.[0-9]+' "$f" | head -n1 | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+')"
-    [ -n "$v" ] && version_lt "$v" "$cmin" && high "" "$f" "cosign-installer の cosign ${v} は ${cmin} 未満"
+    [ -n "$v" ] && version_branch_vulnerable "$v" "${cmins[@]}" && high "" "$f" "cosign-installer の cosign ${v} は修正版（${cmins[*]}）未満"
   done
   # cosign verify / verify-blob の identity 指定漏れ（--key 使用時は対象外）
   local line
@@ -1887,7 +1944,6 @@ check_s43() {
   done
   local ver
   while IFS=$'\t' read -r ver f; do [ -n "$ver" ] && version_lt "${ver#v}" "1.8.5" && high "" "$f" "Fulcio ${ver} は CVE-2026-22772（metaRegex SSRF）の影響範囲（<1.8.5）"; done < <(detect_service_version 'projectsigstore/fulcio')
-  while IFS=$'\t' read -r ver f; do [ -n "$ver" ] && version_branch_vulnerable "${ver#v}" 2.6.2 3.0.4 && high "" "$f" "Rekor ${ver} は CVE-2026-22703 の影響範囲（<2.6.2 / <3.0.4）"; done < <(detect_service_version 'projectsigstore/rekor-server')
   build_deps
   awk -F'\t' '$1=="gem" && $2=="sigstore" {print $3"\t"$4}' "$DEPS_TSV" | while IFS=$'\t' read -r v f; do
     version_lt "$v" "0.2.3" && high "" "$f" "sigstore-ruby ${v} は CVE-2026-31830（検証バイパス）の影響範囲（<0.2.3）"

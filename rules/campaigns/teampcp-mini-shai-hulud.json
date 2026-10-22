@@ -41,21 +41,12 @@
       "campaign": "teampcp-mini-shai-hulud",
       "eco": "npm",
       "name": "intercom-client",
-      "match": "unknown_versions",
-      "bad_versions": [],
-      "safe_version": null,
-      "note": "侵害版。1,800+開発者影響"
-    },
-    {
-      "campaign": "teampcp-mini-shai-hulud",
-      "eco": "npm",
-      "name": "jscrambler",
       "match": "versions",
       "bad_versions": [
-        ">=8.14.0 <=8.20.0"
+        "7.0.4"
       ],
-      "safe_version": null,
-      "note": "Rust製インフォスティーラー"
+      "safe_version": "7.0.3",
+      "note": "GHSA-54pg-9963-v8vg（2026-04-30、約2時間公開）。影響人数の裏付けなし"
     },
     {
       "campaign": "teampcp-mini-shai-hulud",
@@ -85,17 +76,20 @@
       ],
       "c2_domains": [
         "api[.]masscan[.]cloud",
-        "git-tanstack[.]com",
+        "git-tanstack[.]com"
+      ],
+      "legit_infra": [
         "seed1[.]getsession[.]org",
         "seed2[.]getsession[.]org"
       ],
+      "legit_infra_note": "Session メッセンジャーの正規インフラ。窃取データの搬送に使われた。名前の出現だけでは侵害と断定しない",
       "urls": [
         "hxxps://83[.]142[.]209[.]194/v1/weights",
         "hxxps://83[.]142[.]209[.]194/audio.mp3",
         "hxxps://api[.]github[.]com/search/commits?q=FIRESCALE"
       ],
       "oidc_technique": "/proc/<pid>/mem から GitHub Actions OIDC トークン抽出",
-      "deadman_switch": "GitHub認証情報失効検知時に $HOME 全削除"
+      "deadman_switch": "GitHub認証情報失効検知時に $HOME 全削除（同挙動の記録は tensorlake / Miasma。TeamPCP 本体は JFrog が破壊的分岐の存在を記載するのみで帰属は曖昧）"
     }
   },
   "malicious_files": [

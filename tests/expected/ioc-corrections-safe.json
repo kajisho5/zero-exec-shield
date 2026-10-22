@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "campaign": "mcp-poisoning",
+      "level": "MEDIUM",
+      "module": "§37",
+      "path": "package-lock.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "MEDIUM",
+      "module": "§37",
+      "path": "requirements.txt"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

@@ -5,7 +5,7 @@
 - **前段**: 検知層 `zes-scan`（[SKILL.md](../SKILL.md)）が出力する findings.json
 - **位置づけ**: 3 層の共通インターフェース定義。実装は ZET 0.1.0 / GER 0.1.0。検知層（ZES）は §9 の出力保証でこれに準拠する
 - **改定**: 2026-10-22 契約追加 A-1〜A-6（ZET 設計）と GER の出力追加を採用（§3・§6 に反映、各項目に【追加】と表記）
-- **正のスキーマ**: [remediation-plan.schema.json（ZET）](https://github.com/kajisho5/zero-exec-triage/blob/claude/zet-design/schemas/remediation-plan.schema.json) / [remediation-log.schema.json・ger-input.schema.json（GER）](https://github.com/kajisho5/gated-exec-remediation/tree/claude/ger-design/schemas)。本書の JSON 例と食い違う場合はスキーマが正
+- **正のスキーマ**: [remediation-plan.schema.json（ZET）](https://github.com/kajisho5/zero-exec-triage/blob/main/schemas/remediation-plan.schema.json) / [remediation-log.schema.json・ger-input.schema.json（GER）](https://github.com/kajisho5/gated-exec-remediation/tree/main/schemas)。本書の JSON 例と食い違う場合はスキーマが正
 - **版**: ZES v5.2（`incident_bundle`: `ZES-2026-OCT-EMERGENCY-V5.2`）
 
 ```
