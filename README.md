@@ -20,7 +20,7 @@
 | `tests/` — フィクスチャ・期待値・`run-tests.sh`・`zero-exec.sh` | 実装済み |
 | `schemas/findings.schema.json` — findings.json の出力契約（JSON Schema 2020-12、strict） | 実装済み（ZET はこれで入力を検証） |
 | `docs/skill-contracts.md` — 判断層・修復層のスキル契約書 | 契約定義済み（ZET 0.1.0 / GER 0.1.0 実装済み。A-1〜A-6 反映） |
-| `index.html` — Web Scanner UI | **設計レビュー待ち**（[設計書](docs/design/ui-design.md) と SVG デザイン [総合](docs/design/ui-overview.svg) / [SkillPact](docs/design/ui-skillpact.svg) / [部品](docs/design/ui-components.svg)。承認後に React 実装） |
+| `index.html` — Web Scanner UI | 実装済み（ブラウザで開くだけで動く単一ファイル。ソースは `ui/`、[設計書](docs/design/ui-design.md) / SVG デザイン [総合](docs/design/ui-overview.svg) / [SkillPact](docs/design/ui-skillpact.svg) / [部品](docs/design/ui-components.svg) に準拠） |
 
 ```
 [検知層] ZES（zes-scan.sh / index.html / rules）
@@ -71,6 +71,29 @@ chmod +x zes-scan.sh
 ### 終了コード
 
 `0` = 完了（`status` が `ok` / `partial`）、`2` = `status: error`、`64` = 引数・環境エラー。重大度による非 0 終了はしません。CI で失敗させる場合は `jq -e '[.findings[] | select(.level=="CRITICAL")] | length == 0'` 等で判定してください。
+
+## Web Scanner UI（index.html）
+
+リポジトリ直下の `index.html` をブラウザで開く（`file://` のままで可）だけで使えます。インストールもサーバーも不要です。
+
+- **外部通信ゼロ**: JS / CSS / `rules/ioc.json` をすべて 1 ファイルにインライン化しています。CSP は `default-src 'none'; connect-src 'none'`、スクリプトとスタイルはビルド時に計算した SHA-256 だけを許可します（`unsafe-inline` なし）
+- **ファイル内容は判定にのみ使用**: 画面・JSON 出力に出すのはパス・ルール・固定文言・ハッシュだけです。例外は設計書 §13-4 で承認した設定値（MCP の command / args、Actions の `uses:`、拡張のパーミッション名、120 文字まで）
+- **投入方法**: フォルダのドラッグ＆ドロップ、または「フォルダを選択…」（`webkitdirectory`）。テキスト貼り付け判定もできます（内容は再表示しません）
+- **18 タブ**: 総合（重大度サマリ・フィルタ・検索・Blast Radius）/ SkillPact（宣言と実態の差分を赤表示、L3 は「署名済みファイル」と表記し安全色を使わない）/ MCP・GitHub Actions・ブラウザ拡張ビューア ほか
+- **JSON 出力**: `schemas/findings.schema.json` 互換の findings.json をダウンロードします（パスは投入フォルダからの相対パスに `/` を前置。`status: partial`、`errors[]` に `ui:host_checks_not_performed` を記録）。CLI の findings.json の読み込み表示もできます
+- **ブラウザで判定できないもの**: プロセス・ネットワーク接続・カーネル・eBPF・マウント・インストール済みツールのバージョンなどのホスト状態は、該当タブに CLI（`./zes-scan.sh --full --json`）の案内を出し、0 件 ＝ 安全とは表示しません
+
+### ビルド（開発者向け）
+
+```bash
+cd ui && npm ci && npm run build     # 型チェック → vite build → ../index.html へインライン化 → 静的検査
+npm test                             # Vitest: 判定エンジンの単体テスト（tests/fixtures を CLI と共用）
+PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npm run test:e2e   # Playwright: file:// で起動・外部リクエストゼロ・主要操作
+```
+
+- `ui/.npmrc` で `ignore-scripts=true`（依存のインストールスクリプトを実行しない）。依存はすべて `package-lock.json` で版固定
+- `rules/ioc.json` を更新したら `npm run build` で `index.html` を再生成してコミットしてください（UI は ioc.json をビルド時に取り込みます）
+- `scripts/verify-no-network.mjs` が成果物に通信 API・外部 URL・外部読み込みタグが無いこと、CSP がハッシュ方式であること、ソースに `eval` 等が無いことを検査し、違反があればビルドを失敗させます
 
 ## 3つの使い方
 
