@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.2.3 — 2026-10-22
+
+### 修正
+
+- §16: 個別判定のある製品（TeamCity / JFrog Artifactory）に 5.2.2 で追記した CVE（TeamCity CVE-2026-111094 / 106218、Artifactory CVE-2026-42016 / 42018 / 66384）が判定されていなかった。`cves[].generic` で汎用判定の対象にした
+- テスト: `gitlab/compose.safe.yml` を新しい CVE の修正版に更新
+
 ## 5.2.2 — 2026-10-22
 
 `incident_bundle`: `ZES-2026-OCT-EMERGENCY-V5.2`（据え置き）

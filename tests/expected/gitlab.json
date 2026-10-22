@@ -15,6 +15,36 @@
     {
       "campaign": null,
       "level": "CRITICAL",
+      "module": "§16",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": null,
+      "level": "CRITICAL",
+      "module": "§16",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§16",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§16",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§16",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": null,
+      "level": "CRITICAL",
       "module": "§3",
       "path": "docker-compose.yml"
     },

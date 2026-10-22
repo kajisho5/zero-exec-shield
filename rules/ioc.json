@@ -229,8 +229,8 @@
       "process_patterns": ["teamcity-server", "TeamCity"],
       "cves": [
         {"id": "CVE-2026-63077", "cvss": 9.8, "title": "TeamCity RCE", "fixed": ["2026.1.3", "2025.11.7"], "kev": true, "kev_due": "2026-08-08"},
-        {"id": "CVE-2026-111094", "cvss": 9.8, "title": "TeamCity ビルドメッセージプロトコルのホワイトリスト回避による RCE", "fixed": ["2026.2", "2026.1.4", "2025.11.8"], "severity": "CRITICAL", "verification": "confirmed", "note": "JetBrains CVSS 8.1 (AC:H) / NVD 9.8。同時期の CVE-2026-100255（パスワードリセットで管理者乗っ取り）も同じ修正版。KEV の CVE-2026-63077 とは別件。", "source": "https://www.jetbrains.com/privacy-security/issues-fixed/"},
-        {"id": "CVE-2026-106218", "cvss": 10.0, "title": "TeamCity Kotlin DSL サンドボックス脱出によるサーバー RCE", "fixed": ["2026.1.3", "2025.11.7"], "severity": "CRITICAL", "verification": "confirmed", "note": "JetBrains CVSS 8.8 / NVD 10.0。7月の同種 CVE-2026-65906 (2026.1.2/2025.11.6 で修正) の再発。NVD CPE は 2026.1.1 起点だが 2026.1.0 の扱いは不明確。", "source": "https://www.jetbrains.com/privacy-security/issues-fixed/"}
+        {"id": "CVE-2026-111094", "generic": true, "cvss": 9.8, "title": "TeamCity ビルドメッセージプロトコルのホワイトリスト回避による RCE", "fixed": ["2026.2", "2026.1.4", "2025.11.8"], "severity": "CRITICAL", "verification": "confirmed", "note": "JetBrains CVSS 8.1 (AC:H) / NVD 9.8。同時期の CVE-2026-100255（パスワードリセットで管理者乗っ取り）も同じ修正版。KEV の CVE-2026-63077 とは別件。", "source": "https://www.jetbrains.com/privacy-security/issues-fixed/"},
+        {"id": "CVE-2026-106218", "generic": true, "cvss": 10.0, "title": "TeamCity Kotlin DSL サンドボックス脱出によるサーバー RCE", "fixed": ["2026.1.3", "2025.11.7"], "severity": "CRITICAL", "verification": "confirmed", "note": "JetBrains CVSS 8.8 / NVD 10.0。7月の同種 CVE-2026-65906 (2026.1.2/2025.11.6 で修正) の再発。NVD CPE は 2026.1.1 起点だが 2026.1.0 の扱いは不明確。", "source": "https://www.jetbrains.com/privacy-security/issues-fixed/"}
       ]
     },
     {
@@ -239,9 +239,9 @@
       "process_patterns": ["artifactory"],
       "cves": [
         {"id": "CVE-2026-82329", "cvss": 9.8, "title": "Artifactory RCE", "fixed": ["7.111.21", "7.117.28", "7.125.20", "7.133.29", "7.146.38", "7.161.20"]},
-        {"id": "CVE-2026-42016", "cvss": 8.8, "title": "JFrog Artifactory トークンスコープ未検証による権限昇格（KEV, 実攻撃）", "fixed": ["7.133.11"], "severity": "HIGH", "kev": true, "kev_added": "2026-09-11", "verification": "confirmed", "note": "JFrog CVSS 8.1 / NVD 8.8。Wiz が CVE-2026-42018 との連鎖悪用を報告。修正版は単一系列表記 (7.133.11) のみで、他 LTS 系列の扱いは NVD に記載なし。CVE-2026-82329 とは別件。", "source": "https://docs.jfrog.com/releases/docs/jfrog-security-advisories"},
-        {"id": "CVE-2026-42018", "cvss": 7.5, "title": "JFrog Artifactory 匿名無効時に内部匿名トークンを未認証者へ返却（KEV）", "fixed": ["7.111.20", "7.117.27", "7.125.19", "7.133.28", "7.146.8"], "severity": "HIGH", "kev": true, "kev_added": "2026-09-11", "verification": "confirmed", "note": "系列ごとの修正版が CNA で明示されている。42016 と組み合わせた実攻撃が報告済み。", "source": "https://docs.jfrog.com/releases/docs/jfrog-security-advisories"},
-        {"id": "CVE-2026-66384", "cvss": 5.3, "title": "JFrog Artifactory Docker リモートリポジトリのキャッシュパス外書込（KEV）", "fixed": ["7.146.35", "7.161.16"], "severity": "HIGH", "kev": true, "kev_added": "2026-08-27", "verification": "confirmed", "note": "CVSS は 5.3 (MEDIUM) だが KEV 登録のため収録し、severity は KEV 優先で HIGH 扱い（要件に応じ調整）。NVD 参照に OpenAI/Hugging Face インシデント報告が含まれる。", "source": "https://docs.jfrog.com/releases/docs/jfrog-security-advisories"}
+        {"id": "CVE-2026-42016", "generic": true, "cvss": 8.8, "title": "JFrog Artifactory トークンスコープ未検証による権限昇格（KEV, 実攻撃）", "fixed": ["7.133.11"], "severity": "HIGH", "kev": true, "kev_added": "2026-09-11", "verification": "confirmed", "note": "JFrog CVSS 8.1 / NVD 8.8。Wiz が CVE-2026-42018 との連鎖悪用を報告。修正版は単一系列表記 (7.133.11) のみで、他 LTS 系列の扱いは NVD に記載なし。CVE-2026-82329 とは別件。", "source": "https://docs.jfrog.com/releases/docs/jfrog-security-advisories"},
+        {"id": "CVE-2026-42018", "generic": true, "cvss": 7.5, "title": "JFrog Artifactory 匿名無効時に内部匿名トークンを未認証者へ返却（KEV）", "fixed": ["7.111.20", "7.117.27", "7.125.19", "7.133.28", "7.146.8"], "severity": "HIGH", "kev": true, "kev_added": "2026-09-11", "verification": "confirmed", "note": "系列ごとの修正版が CNA で明示されている。42016 と組み合わせた実攻撃が報告済み。", "source": "https://docs.jfrog.com/releases/docs/jfrog-security-advisories"},
+        {"id": "CVE-2026-66384", "generic": true, "cvss": 5.3, "title": "JFrog Artifactory Docker リモートリポジトリのキャッシュパス外書込（KEV）", "fixed": ["7.146.35", "7.161.16"], "severity": "HIGH", "kev": true, "kev_added": "2026-08-27", "verification": "confirmed", "note": "CVSS は 5.3 (MEDIUM) だが KEV 登録のため収録し、severity は KEV 優先で HIGH 扱い（要件に応じ調整）。NVD 参照に OpenAI/Hugging Face インシデント報告が含まれる。", "source": "https://docs.jfrog.com/releases/docs/jfrog-security-advisories"}
       ]
     },
     {

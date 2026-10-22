@@ -736,6 +736,7 @@ intel_host_processes() {
 # 開発インフラ CVE（§16 で汎用判定。image_patterns と fixed を持つ infrastructures[] を対象）
 intel_infra() {
   intel_ready || return 0
+  # 製品全体が generic、または個別判定のある製品に追記した CVE（cves[].generic）を対象にする
   local iid pat cve fixed sev cvss ver f
   while IFS=$'\t' read -r iid pat cve fixed sev cvss; do
     [ -n "$pat" ] && [ -n "$fixed" ] || continue
@@ -746,7 +747,7 @@ intel_infra() {
       [[ "${ver#v}" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { [ "$ver" = "latest" ] && medium "" "$f" "${iid} が浮動タグ（latest）。${cve} の修正版（${fixed//,/ }）以上か確認"; continue; }
       version_branch_vulnerable "${ver#v}" "${fx[@]}" && lvl_emit "$sev" "" "$f" "${iid} ${ver} は ${cve}${cvss:+（CVSS ${cvss}）}の影響範囲（修正版: ${fixed//,/ }）"
     done < <(detect_service_version "$pat")
-  done < <(intel_jq '.infrastructures[] | select(.generic == true) | .id as $i | (.image_patterns // []) as $p | .cves[] | select((.fixed // []) | length > 0) |
+  done < <(intel_jq '.infrastructures[] | (.generic == true) as $g | .id as $i | (.image_patterns // []) as $p | .cves[] | select($g or .generic == true) | select((.fixed // []) | length > 0) |
             [$i, ($p | join("|")), .id, (.fixed | join(",")), (.severity // (if (.cvss // 0) >= 9 or .kev then "CRITICAL" else "HIGH" end)), ((.cvss // "") | tostring)] | @tsv')
 }
 
