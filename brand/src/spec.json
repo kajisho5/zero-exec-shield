@@ -1,0 +1,65 @@
+{
+  "background": "gradient:#1B2A44,#070A12",
+  "darkBackground": "gradient:#111A2C,#04060B",
+  "groups": [
+    {
+      "name": "Zero",
+      "props": {
+        "translucency": {
+          "enabled": true,
+          "value": 0.12
+        },
+        "blur-material": 0.2,
+        "shadow": {
+          "kind": "neutral",
+          "opacity": 0.5
+        },
+        "specular": true
+      },
+      "layers": [
+        {
+          "file": "zero.svg",
+          "name": "2 Zero",
+          "props": {
+            "glass": true,
+            "fill": {
+              "linear-gradient": [
+                "#FFFFFF",
+                "#CFF6EF"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Shield",
+      "props": {
+        "translucency": {
+          "enabled": true,
+          "value": 0.15
+        },
+        "blur-material": 0.1,
+        "shadow": {
+          "kind": "neutral",
+          "opacity": 0.35
+        }
+      },
+      "layers": [
+        {
+          "file": "shield.svg",
+          "name": "1 Shield",
+          "props": {
+            "glass": true,
+            "fill": {
+              "linear-gradient": [
+                "#3DDCC4",
+                "#3A6BFF"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -9,6 +9,8 @@ const dist = here('../dist/');
 let html = readFileSync(dist + 'index.html', 'utf8');
 const js = readFileSync(dist + 'app.js', 'utf8');
 const css = readFileSync(dist + 'app.css', 'utf8');
+// ファビコンは brand/ の生成物を data: URI で埋め込む（CSP img-src data: の範囲内。外部取得なし）
+const icon = readFileSync(here('../../brand/web/favicon-64.png')).toString('base64');
 
 // </script> / </style> の終端を本文中に含まないことを確認（含むとインライン化で HTML が壊れる）
 if (/<\/script/i.test(js)) throw new Error('app.js に </script が含まれるためインライン化できません');
@@ -37,6 +39,7 @@ html = html
   .replace(scriptTag, () => '')
   .replace(styleTag, () => `<style>${css}</style>`)
   .replace('<!--ZES-CSP-->', () => `<meta http-equiv="Content-Security-Policy" content="${csp}" />`)
+  .replace('<!--ZES-ICON-->', () => `<link rel="icon" type="image/png" sizes="64x64" href="data:image/png;base64,${icon}" />`)
   .replace('</body>', () => `<script type="module">${js}</script>\n  </body>`);
 
 const banner = '<!-- Zero-Exec Shield v5.2 Web Scanner UI。ui/ から生成（cd ui && npm ci && npm run build）。直接編集しないこと。 -->\n';

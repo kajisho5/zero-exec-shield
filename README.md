@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/zes-logo-dark.svg">
+    <img src="brand/logo/zes-logo-light.svg" alt="zero-exec shield" height="72">
+  </picture>
+</p>
+
 # Zero-Exec Shield (ZES)
 
 バージョン 0.1.0（ZES v5.2 Master Specification 準拠）
