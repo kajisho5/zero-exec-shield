@@ -41,7 +41,7 @@ export function filenameRules(ctx: RuleCtx): void {
   }
 }
 
-type Dep = { eco: 'npm' | 'pypi' | 'cargo' | 'packagist' | 'gem'; name: string; version: string; path: string; sha: string | null };
+type Dep = { eco: 'npm' | 'pypi' | 'cargo' | 'packagist' | 'gem' | 'go'; name: string; version: string; path: string; sha: string | null };
 
 function normPypi(n: string): string {
   return n.toLowerCase().replace(/[_.]/g, '-');
@@ -77,6 +77,11 @@ function collectDeps(ctx: RuleCtx): Dep[] {
           if (p.name && p.version) out.push({ eco: 'packagist', name: p.name, version: p.version.replace(/^v/, ''), path: f.relPath, sha: f.sha256 });
         }
       } catch { /* noop */ }
+    } else if (f.name === 'go.sum') {
+      for (const line of f.text.split(/\r?\n/)) {
+        const [mod, ver] = line.split(/\s+/);
+        if (mod && ver) out.push({ eco: 'go', name: mod, version: ver.replace(/\/go\.mod$/, ''), path: f.relPath, sha: f.sha256 });
+      }
     } else if (f.name === 'Gemfile.lock') {
       for (const m of f.text.matchAll(/^ {4}([A-Za-z0-9._-]+) \(([0-9][^)\s]*)\)$/gm)) {
         if (m[1] && m[2]) out.push({ eco: 'gem', name: m[1], version: m[2], path: f.relPath, sha: f.sha256 });
@@ -122,7 +127,7 @@ export function packageRules(ctx: RuleCtx): void {
   }
   const deps = collectDeps(ctx);
   for (const p of ctx.ioc.packages) {
-    if (!['npm', 'pypi', 'cargo', 'packagist', 'gem'].includes(p.eco)) continue;
+    if (!['npm', 'pypi', 'cargo', 'packagist', 'gem', 'go'].includes(p.eco)) continue;
     if (!['versions', 'vulnerable_versions', 'any_version', 'unknown_versions'].includes(p.match ?? 'versions')) continue;
     const want = p.eco === 'pypi' ? normPypi(p.name) : p.name;
     for (const d of deps) {
