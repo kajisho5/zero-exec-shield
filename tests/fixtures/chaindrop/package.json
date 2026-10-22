@@ -1,0 +1,6 @@
+{
+  "name": "chaindrop-fixture",
+  "version": "1.0.0",
+  "scripts": { "preinstall": "node setup.mjs" },
+  "dependencies": { "keyv": "6.0.0" }
+}

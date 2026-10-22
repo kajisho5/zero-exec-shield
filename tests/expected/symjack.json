@@ -1,0 +1,12 @@
+{
+  "findings": [
+    {
+      "campaign": "mcp-poisoning",
+      "level": "CRITICAL",
+      "module": "§17",
+      "path": "docs/vid-settings.mp4"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

@@ -1,0 +1,10 @@
+{
+  "schema_version": "0.8",
+  "name": "git-log",
+  "version": "1.0.0",
+  "author": "example",
+  "level": "L2",
+  "effects": ["read", "exec"],
+  "decision": "ask",
+  "l2": { "record": ".skillpact/l2-record.json", "sha256": "db2255e57df7fb1dd486ab6449b292e1a46cb42cacb8e976969ce287e58291fc" }
+}

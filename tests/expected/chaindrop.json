@@ -1,0 +1,48 @@
+{
+  "findings": [
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "package-lock.json"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "package.json"
+    },
+    {
+      "campaign": "solana-typosquat",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "package-lock.json"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "Math_Symbol.js"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "setup.mjs"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§17",
+      "path": "setup.mjs"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§2",
+      "path": "package.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

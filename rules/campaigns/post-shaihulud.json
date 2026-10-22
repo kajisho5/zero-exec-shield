@@ -1,0 +1,88 @@
+{
+  "campaign": "post-shaihulud",
+  "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
+  "source": "rules/ioc.json（本ファイルは複製。正はioc.json）",
+  "campaigns": [
+    "post-shaihulud",
+    "shai-hulud-chaindrop",
+    "sckit-memos"
+  ],
+  "packages": [
+    {
+      "campaign": "post-shaihulud",
+      "eco": "binary",
+      "name": "iron-worm",
+      "match": "file_name",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "Rust窃取"
+    },
+    {
+      "campaign": "post-shaihulud",
+      "eco": "binary",
+      "name": "sckit",
+      "match": "file_name",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "Go窃取"
+    },
+    {
+      "campaign": "post-shaihulud",
+      "eco": "binary",
+      "name": "miasma",
+      "match": "file_name",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "AI武器化"
+    },
+    {
+      "campaign": "shai-hulud-chaindrop",
+      "eco": "npm",
+      "name": "tensorlake",
+      "match": "versions",
+      "bad_versions": [
+        "0.5.144"
+      ],
+      "safe_version": null,
+      "note": "2026-10-08"
+    },
+    {
+      "campaign": "sckit-memos",
+      "eco": "npm/pypi",
+      "name": "OpenClaw/MemoryOS",
+      "match": "none",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "2026-09-23。§25/§45で検査"
+    }
+  ],
+  "iocs": {
+    "worm_iocs.post_shaihulud": {
+      "campaign": "post-shaihulud",
+      "binaries": [
+        "iron-worm",
+        "sckit",
+        "sckit.exe",
+        "miasma"
+      ],
+      "masquerade": [
+        "cargo-install"
+      ]
+    },
+    "worm_iocs.miasma": {
+      "campaign": "post-shaihulud",
+      "deadman_switch": "盗んだGitHubトークンをExfilチャネルに使用、失効検知で$HOME削除",
+      "leaked_source": "2026-06-10にGitHubで一時公開"
+    },
+    "worm_iocs.sckit": {
+      "campaign": "sckit-memos",
+      "binaries": [
+        "sckit",
+        "sckit.exe"
+      ],
+      "source": "MemOS Cloud OpenClaw plugin / MemoryOS",
+      "date": "2026-09-23"
+    }
+  },
+  "malicious_files": []
+}

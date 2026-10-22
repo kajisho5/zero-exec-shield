@@ -1,0 +1,12 @@
+{
+  "findings": [
+    {
+      "campaign": "ebpf-rootkit",
+      "level": "HIGH",
+      "module": "§40",
+      "path": "ld_preload.sh"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

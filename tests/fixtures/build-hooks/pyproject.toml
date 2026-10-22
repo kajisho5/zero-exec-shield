@@ -1,0 +1,4 @@
+[build-system]
+requires = ["custombuild"]
+build-backend = "custombuild.backend"
+backend-path = ["_build"]

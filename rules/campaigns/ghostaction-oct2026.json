@@ -1,0 +1,99 @@
+{
+  "campaign": "ghostaction-oct2026",
+  "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
+  "source": "rules/ioc.json（本ファイルは複製。正はioc.json）",
+  "campaigns": [
+    "ghostaction-oct2026",
+    "megalodon-ci"
+  ],
+  "packages": [
+    {
+      "campaign": "megalodon-ci",
+      "eco": "github-actions",
+      "name": "-",
+      "match": "none",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "5,561リポジトリ。§38で検査"
+    }
+  ],
+  "iocs": {
+    "github_actions": {
+      "campaign": "ghostaction-oct2026",
+      "dangerous_patterns": [
+        "pull_request_target + actions/checkout(refなし) + secrets参照",
+        "actions/cache のキーに github.event.pull_request.number を含む",
+        "permissions: write-all",
+        "uses: <action>@v*（タグ参照）※SHA固定でない"
+      ],
+      "known_compromised": [
+        {
+          "action": "aquasecurity/trivy-action",
+          "versions": [
+            "v0.69.4"
+          ],
+          "note": "76タグ中75汚染, 2026-03"
+        },
+        {
+          "action": "tj-actions/*",
+          "versions": [],
+          "note": ""
+        },
+        {
+          "action": "aquasecurity/*",
+          "versions": [],
+          "note": ""
+        }
+      ],
+      "workflow_injection": {
+        "megalodon": {
+          "campaign": "megalodon-ci",
+          "affected_repos": 5561,
+          "date": "2026-05"
+        },
+        "mass_workflow_planting": {
+          "accounts": "500+",
+          "repos": "数万",
+          "date": "2026-10-07以降",
+          "stolen_secrets": [
+            "PyPI",
+            "npm",
+            "DockerHub"
+          ]
+        },
+        "ci_platform_env_harvest": [
+          "CircleCI",
+          "Travis CI",
+          "Jenkins",
+          "GitHub Actions",
+          "GitLab CI",
+          "Buildkite",
+          "Azure Pipelines"
+        ]
+      },
+      "reusable_component_poisoning": {
+        "vectors": [
+          "GitHub Actions",
+          "GitLab includes",
+          "CircleCI orbs",
+          "Jenkins shared libraries"
+        ]
+      },
+      "ghostaction_oct2026": {
+        "campaign": "ghostaction-oct2026",
+        "date": "2026-10-07以降",
+        "accounts": "500+",
+        "technique": "偽装フォントファイルにインフォスティーラーを隠蔽、第2ワークフローも設置",
+        "note": "2025年9月初出の再活性化",
+        "font_ext": [
+          ".ttf",
+          ".otf",
+          ".woff",
+          ".woff2"
+        ]
+      },
+      "secrets_ref_threshold": 10
+    }
+  },
+  "malicious_files": []
+}

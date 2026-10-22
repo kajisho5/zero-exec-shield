@@ -1,0 +1,30 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§24",
+      "path": "Extensions/abcd/manifest.json"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§24",
+      "path": "Extensions/abcd/manifest.json"
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§24",
+      "path": "Extensions/efgh/2.0.0/manifest.json"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§42",
+      "path": "Extensions/efgh/2.0.0/manifest.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

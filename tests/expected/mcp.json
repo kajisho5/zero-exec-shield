@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": ".mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "MEDIUM",
+      "module": "§17",
+      "path": ".mcp.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

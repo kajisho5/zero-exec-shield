@@ -1,0 +1,1 @@
+{ "manifest_version": 3, "name": "Screenshot Fixture", "version": "2.0.0", "permissions": ["storage", "debugger", "nativeMessaging"] }

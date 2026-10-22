@@ -1,0 +1,332 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1440" height="900" viewBox="0 0 1440 900" font-family="system-ui, 'Hiragino Sans', 'Noto Sans JP', sans-serif">
+  <title>ZES v5.2 Web Scanner — UI コンポーネント一覧（1440×900）</title>
+  <desc>Step 2 デザイン。カラートークン、タイポグラフィ、ボタン、タブ、重大度バッジ、SkillPact バッジ、テーブル行、トースト、アイコン。</desc>
+  <defs>
+    <style>
+      .bg{fill:#0a0a0a}
+      .surface{fill:#141414;stroke:#2a2a2a;stroke-width:1}
+      .surface2{fill:#1c1c1c}
+      .line{stroke:#2a2a2a;stroke-width:1}
+      .t-brand{font-size:18px;font-weight:600;fill:#ededed}
+      .t-h2{font-size:16px;font-weight:600;fill:#ededed}
+      .t-h3{font-size:14px;font-weight:600;fill:#ededed}
+      .t-body{font-size:14px;fill:#ededed}
+      .t-tab{font-size:14px;fill:#a3a3a3}
+      .t-tab-active{font-size:14px;font-weight:600;fill:#ededed}
+      .t-sm{font-size:13px;fill:#ededed}
+      .t-muted{font-size:13px;fill:#a3a3a3}
+      .t-cap{font-size:12px;fill:#8a8a8a}
+      .t-cap-muted{font-size:12px;fill:#a3a3a3}
+      .t-badge{font-size:12px;font-weight:600}
+      .t-th{font-size:12px;font-weight:600;fill:#8a8a8a;letter-spacing:.04em}
+      .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+      .t-num{font-size:32px;font-weight:700}
+      .btn{fill:#1c1c1c;stroke:#3a3a3a;stroke-width:1}
+      .btn-primary{fill:#38bdf8}
+      .t-btn{font-size:13px;font-weight:600;fill:#ededed}
+      .t-btn-primary{font-size:13px;font-weight:600;fill:#0a0a0a}
+    </style>
+    <!-- 重大度アイコン（12×12、fill は use 側で指定） -->
+    <polygon id="ico-crit" points="3.5,0 8.5,0 12,3.5 12,8.5 8.5,12 3.5,12 0,8.5 0,3.5"/>
+    <polygon id="ico-high" points="6,0.5 12,11.5 0,11.5"/>
+    <circle id="ico-med" cx="6" cy="6" r="5.5"/>
+    <polygon id="ico-low" points="6,0 12,6 6,12 0,6"/>
+    <path id="ico-info" fill-rule="evenodd" d="M6 0a6 6 0 1 1 0 12A6 6 0 1 1 6 0zM6 2.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 1 0 0-7z"/>
+    <path id="ico-safe" d="M0.8 6.4L4.4 10L11.2 2.6L9.8 1.3L4.4 7.2L2.2 5z"/>
+    <!-- コピー（16×16、stroke は use 側） -->
+    <g id="ico-copy" fill="none" stroke-width="1.5" stroke-linejoin="round">
+      <rect x="5" y="5" width="9" height="9" rx="2"/>
+      <path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2H3.5A1.5 1.5 0 0 0 2 3.5V9.5A1.5 1.5 0 0 0 3.5 11H5"/>
+    </g>
+    <!-- 鍵（16×16） -->
+    <g id="ico-key" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="5" cy="11" r="3"/>
+      <path d="M7.2 8.8L14 2M11 5l2 2M12.5 3.5l1.5 1.5"/>
+    </g>
+    <!-- フォルダ（32×32） -->
+    <g id="ico-folder" fill="none" stroke-width="2" stroke-linejoin="round">
+      <path d="M3 8a2 2 0 0 1 2-2h7l3 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+      <path d="M16 14v8M12.5 18.5L16 22l3.5-3.5"/>
+    </g>
+    <!-- 端末（16×16） -->
+    <g id="ico-term" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="1" y="2" width="14" height="12" rx="2"/>
+      <path d="M4 6l2.5 2L4 10M8 10.5h4"/>
+    </g>
+    <!-- 山括弧 -->
+    <path id="ico-chev-l" d="M9.5 3L5 8l4.5 5" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="ico-chev-r" d="M6.5 3L11 8l-4.5 5" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path id="ico-chev-d" d="M3 6l5 4.5L13 6" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- 検索 -->
+    <g id="ico-search" fill="none" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></g>
+    <!-- タブバー右端フェード -->
+    <linearGradient id="fade-r" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#0a0a0a" stop-opacity="0"/>
+      <stop offset="1" stop-color="#0a0a0a" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+  <defs>
+    <!-- 署名済みファイル（印章、16×16、stroke） -->
+    <g id="ico-seal" fill="none" stroke-width="1.5" stroke-linejoin="round">
+      <path d="M8 1l1.8 1.3 2.2-.1.7 2.1 1.8 1.3-.7 2.1.7 2.1-1.8 1.3-.7 2.1-2.2-.1L8 15l-1.8-1.3-2.2.1-.7-2.1L1.5 10.4l.7-2.1-.7-2.1 1.8-1.3.7-2.1 2.2.1z"/>
+      <path d="M5.5 8h5M5.5 10.2h3.2"/>
+    </g>
+    <!-- 文書（16×16） -->
+    <g id="ico-doc" fill="none" stroke-width="1.5" stroke-linejoin="round"><path d="M3 1.5h6.5L13 5v9.5H3z"/><path d="M9.5 1.5V5H13"/></g>
+    <!-- 差分（16×16） -->
+    <g id="ico-diff" fill="none" stroke-width="1.5" stroke-linecap="round"><path d="M4 2v8M1 6h6M9 14h6"/><path d="M11 3l3 3-3 3"/></g>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1440" height="900"/>
+  <text class="t-brand" x="32" y="40">UI コンポーネント / デザイントークン</text>
+  <text class="t-cap" x="372" y="40">docs/design/ui-design.md §2 と同一値 · 背景 #0a0a0a</text>
+
+  <!-- ===== A. カラートークン (y 60–228) ===== -->
+  <text class="t-th" x="32" y="72">A. カラートークン</text>
+  <g id="tokens" font-size="12">
+    <!-- row 1 -->
+    <rect x="32" y="84" width="40" height="40" rx="8" fill="#0a0a0a" stroke="#3a3a3a"/>
+    <text class="t-sm mono" x="80" y="100">--bg</text><text class="t-cap mono" x="80" y="118">#0a0a0a</text>
+    <rect x="204" y="84" width="40" height="40" rx="8" fill="#141414" stroke="#3a3a3a"/>
+    <text class="t-sm mono" x="252" y="100">--surface</text><text class="t-cap mono" x="252" y="118">#141414</text>
+    <rect x="376" y="84" width="40" height="40" rx="8" fill="#1c1c1c" stroke="#3a3a3a"/>
+    <text class="t-sm mono" x="424" y="100">--surface-2</text><text class="t-cap mono" x="424" y="118">#1c1c1c</text>
+    <rect x="548" y="84" width="40" height="40" rx="8" fill="#2a2a2a"/>
+    <text class="t-sm mono" x="596" y="100">--border</text><text class="t-cap mono" x="596" y="118">#2a2a2a</text>
+    <rect x="720" y="84" width="40" height="40" rx="8" fill="#3a3a3a"/>
+    <text class="t-sm mono" x="768" y="100">--border-strong</text><text class="t-cap mono" x="768" y="118">#3a3a3a</text>
+    <rect x="892" y="84" width="40" height="40" rx="8" fill="#ededed"/>
+    <text class="t-sm mono" x="940" y="100">--text</text><text class="t-cap mono" x="940" y="118">#ededed</text>
+    <rect x="1064" y="84" width="40" height="40" rx="8" fill="#a3a3a3"/>
+    <text class="t-sm mono" x="1112" y="100">--text-muted</text><text class="t-cap mono" x="1112" y="118">#a3a3a3</text>
+    <rect x="1236" y="84" width="40" height="40" rx="8" fill="#8a8a8a"/>
+    <text class="t-sm mono" x="1284" y="100">--text-subtle</text><text class="t-cap mono" x="1284" y="118">#8a8a8a</text>
+    <!-- row 2 (fg / bg ペア) -->
+    <rect x="32" y="148" width="40" height="40" rx="8" fill="#38bdf8"/>
+    <text class="t-sm mono" x="80" y="164">--accent</text><text class="t-cap mono" x="80" y="182">#38bdf8</text>
+    <rect x="204" y="148" width="40" height="40" rx="8" fill="#2a0f0f"/><rect x="204" y="148" width="20" height="40" rx="8" fill="#ef4444"/><rect x="214" y="148" width="10" height="40" fill="#ef4444"/>
+    <text class="t-sm mono" x="252" y="164">--critical</text><text class="t-cap mono" x="252" y="182">#ef4444</text><text class="t-cap mono" x="252" y="198">bg #2a0f0f</text>
+    <rect x="376" y="148" width="40" height="40" rx="8" fill="#2a170a"/><rect x="376" y="148" width="20" height="40" rx="8" fill="#f97316"/><rect x="386" y="148" width="10" height="40" fill="#f97316"/>
+    <text class="t-sm mono" x="424" y="164">--high</text><text class="t-cap mono" x="424" y="182">#f97316</text><text class="t-cap mono" x="424" y="198">bg #2a170a</text>
+    <rect x="548" y="148" width="40" height="40" rx="8" fill="#262008"/><rect x="548" y="148" width="20" height="40" rx="8" fill="#eab308"/><rect x="558" y="148" width="10" height="40" fill="#eab308"/>
+    <text class="t-sm mono" x="596" y="164">--medium</text><text class="t-cap mono" x="596" y="182">#eab308</text><text class="t-cap mono" x="596" y="198">bg #262008</text>
+    <rect x="720" y="148" width="40" height="40" rx="8" fill="#0d1a30"/><rect x="720" y="148" width="20" height="40" rx="8" fill="#3b82f6"/><rect x="730" y="148" width="10" height="40" fill="#3b82f6"/>
+    <text class="t-sm mono" x="768" y="164">--low</text><text class="t-cap mono" x="768" y="182">#3b82f6</text><text class="t-cap mono" x="768" y="198">bg #0d1a30</text>
+    <rect x="892" y="148" width="40" height="40" rx="8" fill="#1c1c1c"/><rect x="892" y="148" width="20" height="40" rx="8" fill="#a3a3a3"/><rect x="902" y="148" width="10" height="40" fill="#a3a3a3"/>
+    <text class="t-sm mono" x="940" y="164">--info</text><text class="t-cap mono" x="940" y="182">#a3a3a3</text><text class="t-cap mono" x="940" y="198">bg #1c1c1c</text>
+    <rect x="1064" y="148" width="40" height="40" rx="8" fill="#0c2214"/><rect x="1064" y="148" width="20" height="40" rx="8" fill="#22c55e"/><rect x="1074" y="148" width="10" height="40" fill="#22c55e"/>
+    <text class="t-sm mono" x="1112" y="164">--safe</text><text class="t-cap mono" x="1112" y="182">#22c55e</text><text class="t-cap mono" x="1112" y="198">bg #0c2214</text>
+    <rect x="1236" y="148" width="40" height="40" rx="8" fill="#1b1430"/><rect x="1236" y="148" width="20" height="40" rx="8" fill="#a78bfa"/><rect x="1246" y="148" width="10" height="40" fill="#a78bfa"/>
+    <text class="t-sm mono" x="1284" y="164">--signed</text><text class="t-cap mono" x="1284" y="182">#a78bfa</text><text class="t-cap mono" x="1284" y="198">bg #1b1430</text>
+  </g>
+  <text class="t-cap" x="32" y="222">ペア色は左=前景（文字・アイコン・枠）、右=背景ティント。--safe は SkillPact タブでは使用しない。--signed は L3 専用（安全色の緑を避ける）。</text>
+  <line class="line" x1="32" y1="232.5" x2="1408" y2="232.5"/>
+
+  <!-- ===== B-left. タイポグラフィ (y 248–420) ===== -->
+  <text class="t-th" x="32" y="260">B. タイポグラフィ</text>
+  <text x="32" y="294" font-size="24" font-weight="600" fill="#ededed">ページタイトル 24/600</text>
+  <text x="32" y="328" font-size="18" font-weight="600" fill="#ededed">セクション見出し 18/600</text>
+  <text x="32" y="356" font-size="14" fill="#ededed">本文 14/400 — ファイル内容は判定にのみ使用します。</text>
+  <text x="32" y="380" font-size="13" fill="#ededed">テーブル 13/400 — skillpact-divergence</text>
+  <text x="32" y="402" font-size="12" font-weight="500" fill="#a3a3a3">キャプション 12/500 — 補足情報</text>
+  <text class="mono" x="380" y="380" font-size="13" fill="#ededed">mono 13 — skills/a/run.sh</text>
+  <text class="mono" x="380" y="402" font-size="12" fill="#8a8a8a">sha256:9fc2570b…cf1bcc</text>
+
+  <!-- ===== B-right. ボタン / タブ (x 720–1408) ===== -->
+  <text class="t-th" x="720" y="260">C. ボタン（高さ 32–34 / 角丸 8）</text>
+  <rect class="btn-primary" x="720" y="276" width="104" height="34" rx="8"/>
+  <text class="t-btn-primary" x="772" y="298" text-anchor="middle">プライマリ</text>
+  <rect class="btn" x="836" y="276" width="104" height="34" rx="8"/>
+  <text class="t-btn" x="888" y="298" text-anchor="middle">セカンダリ</text>
+  <rect x="952" y="276" width="104" height="34" rx="8" fill="none"/>
+  <text class="t-btn" x="1004" y="298" text-anchor="middle" fill="#38bdf8">ゴースト</text>
+  <rect x="1068" y="276" width="104" height="34" rx="8" fill="#141414" stroke="#2a2a2a"/>
+  <text class="t-btn" x="1120" y="298" text-anchor="middle" fill="#5a5a5a">無効</text>
+  <!-- focus ring -->
+  <rect x="1182" y="272" width="112" height="42" rx="11" fill="none" stroke="#38bdf8" stroke-width="2"/>
+  <rect class="btn" x="1186" y="276" width="104" height="34" rx="8"/>
+  <text class="t-btn" x="1238" y="298" text-anchor="middle">フォーカス</text>
+  <!-- icon button -->
+  <rect x="1306" y="277" width="32" height="32" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+  <use xlink:href="#ico-copy" x="1314" y="285" stroke="#a3a3a3"/>
+  <rect x="1350" y="277" width="32" height="32" rx="6" fill="#0a0a0a" stroke="#38bdf8"/>
+  <use xlink:href="#ico-copy" x="1358" y="285" stroke="#38bdf8"/>
+
+  <text class="t-th" x="720" y="344">D. タブ（role=tab · ←→ / Home / End）</text>
+  <line class="line" x1="720" y1="404.5" x2="1408" y2="404.5"/>
+  <text class="t-tab-active" x="736" y="386">選択中</text>
+  <rect x="790" y="372" width="26" height="18" rx="9" fill="#2a0f0f"/>
+  <text class="t-badge" x="803" y="385" text-anchor="middle" fill="#ef4444">3</text>
+  <rect x="720" y="401" width="112" height="3" fill="#38bdf8"/>
+  <text class="t-tab" x="856" y="386">非選択</text>
+  <rect x="910" y="372" width="26" height="18" rx="9" fill="#2a170a"/>
+  <text class="t-badge" x="923" y="385" text-anchor="middle" fill="#f97316">1</text>
+  <rect x="954" y="368" width="88" height="28" rx="6" fill="#1c1c1c"/>
+  <text class="t-tab" x="970" y="386" fill="#ededed">ホバー</text>
+  <rect x="1060" y="366" width="96" height="32" rx="6" fill="none" stroke="#38bdf8" stroke-width="2"/>
+  <text class="t-tab" x="1076" y="386">フォーカス</text>
+  <text class="t-tab" x="1176" y="386">0件（バッジなし）</text>
+
+  <line class="line" x1="32" y1="424.5" x2="1408" y2="424.5"/>
+
+  <!-- ===== E. 重大度バッジ (y 440–) ===== -->
+  <text class="t-th" x="32" y="452">E. 重大度バッジ（色＋形状＋ラベル）</text>
+  <rect x="32" y="464" width="92" height="22" rx="6" fill="#2a0f0f" stroke="#ef4444" stroke-opacity=".6"/>
+  <use xlink:href="#ico-crit" x="40" y="469" fill="#ef4444"/><text class="t-badge" x="58" y="479" fill="#ef4444">CRITICAL</text>
+  <rect x="132" y="464" width="60" height="22" rx="6" fill="#2a170a" stroke="#f97316" stroke-opacity=".6"/>
+  <use xlink:href="#ico-high" x="140" y="469" fill="#f97316"/><text class="t-badge" x="158" y="479" fill="#f97316">HIGH</text>
+  <rect x="200" y="464" width="80" height="22" rx="6" fill="#262008" stroke="#eab308" stroke-opacity=".6"/>
+  <use xlink:href="#ico-med" x="208" y="469" fill="#eab308"/><text class="t-badge" x="226" y="479" fill="#eab308">MEDIUM</text>
+  <rect x="288" y="464" width="56" height="22" rx="6" fill="#0d1a30" stroke="#3b82f6" stroke-opacity=".6"/>
+  <use xlink:href="#ico-low" x="296" y="469" fill="#3b82f6"/><text class="t-badge" x="314" y="479" fill="#3b82f6">LOW</text>
+  <rect x="352" y="464" width="64" height="22" rx="6" fill="#1c1c1c" stroke="#a3a3a3" stroke-opacity=".6"/>
+  <use xlink:href="#ico-info" x="360" y="469" fill="#a3a3a3"/><text class="t-badge" x="378" y="479" fill="#a3a3a3">INFO</text>
+  <rect x="424" y="464" width="60" height="22" rx="6" fill="#0c2214" stroke="#22c55e" stroke-opacity=".6"/>
+  <use xlink:href="#ico-safe" x="432" y="469" fill="#22c55e"/><text class="t-badge" x="450" y="479" fill="#22c55e">SAFE</text>
+  <text class="t-cap" x="496" y="479">SkillPact では SAFE 不使用</text>
+
+  <!-- ===== F. SkillPact バッジ ===== -->
+  <text class="t-th" x="32" y="520">F. SkillPact バッジ</text>
+  <text class="t-cap-muted" x="32" y="548">エフェクト</text>
+  <!-- declared -->
+  <rect x="112" y="534" width="64" height="22" rx="11" fill="#1c1c1c" stroke="#38bdf8"/>
+  <text class="t-badge mono" x="144" y="549" text-anchor="middle" fill="#38bdf8">exec</text>
+  <rect x="182" y="534" width="72" height="22" rx="11" fill="#1c1c1c" stroke="#38bdf8"/>
+  <text class="t-badge mono" x="218" y="549" text-anchor="middle" fill="#38bdf8">network</text>
+  <rect x="260" y="534" width="60" height="22" rx="11" fill="#1c1c1c" stroke="#38bdf8"/>
+  <text class="t-badge mono" x="290" y="549" text-anchor="middle" fill="#38bdf8">write</text>
+  <rect x="326" y="534" width="56" height="22" rx="11" fill="#1c1c1c" stroke="#38bdf8"/>
+  <text class="t-badge mono" x="354" y="549" text-anchor="middle" fill="#38bdf8">read</text>
+  <rect x="388" y="534" width="72" height="22" rx="11" fill="#1c1c1c" stroke="#38bdf8"/>
+  <text class="t-badge mono" x="424" y="549" text-anchor="middle" fill="#38bdf8">secrets</text>
+  <rect x="466" y="534" width="60" height="22" rx="11" fill="#1c1c1c" stroke="#38bdf8"/>
+  <text class="t-badge mono" x="496" y="549" text-anchor="middle" fill="#38bdf8">spend</text>
+  <text class="t-cap" x="536" y="549">宣言あり</text>
+
+  <rect x="112" y="566" width="64" height="22" rx="11" fill="#1c1c1c" stroke="#a3a3a3"/>
+  <text class="t-badge mono" x="144" y="581" text-anchor="middle" fill="#ededed">exec</text>
+  <text class="t-cap" x="186" y="581">実態（宣言と一致）</text>
+  <rect x="300" y="566" width="72" height="22" rx="11" fill="#ef4444"/>
+  <text class="t-badge mono" x="336" y="581" text-anchor="middle" fill="#0a0a0a">network</text>
+  <rect x="380" y="563" width="104" height="28" rx="6" fill="#2a0f0f" stroke="#ef4444" stroke-dasharray="4 3"/>
+  <use xlink:href="#ico-high" x="388" y="571" fill="#ef4444"/>
+  <text class="t-badge" x="406" y="581" fill="#ef4444">未宣言</text>
+  <text class="t-cap" x="494" y="581">実態のみ＝乖離（赤＋破線＋文字）</text>
+
+  <text class="t-cap-muted" x="32" y="618">レベル</text>
+  <rect x="112" y="604" width="36" height="22" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+  <text class="t-badge" x="130" y="619" text-anchor="middle" fill="#a3a3a3">L1</text>
+  <rect x="154" y="604" width="36" height="22" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+  <text class="t-badge" x="172" y="619" text-anchor="middle" fill="#a3a3a3">L2</text>
+  <rect x="196" y="604" width="148" height="22" rx="6" fill="#1b1430" stroke="#a78bfa" stroke-opacity=".6"/>
+  <use xlink:href="#ico-seal" x="202" y="607" stroke="#a78bfa"/>
+  <text class="t-badge" x="224" y="619" fill="#a78bfa">L3 署名済みファイル</text>
+  <text class="t-cap" x="354" y="619">「安全」「信頼済み」「Verified」の語・緑色は使用禁止</text>
+
+  <text class="t-cap-muted" x="32" y="656">ポリシー</text>
+  <rect x="112" y="642" width="64" height="22" rx="6" fill="#2a170a" stroke="#f97316" stroke-opacity=".6"/>
+  <text class="t-badge mono" x="144" y="657" text-anchor="middle" fill="#f97316">allow</text>
+  <rect x="182" y="642" width="56" height="22" rx="6" fill="#262008" stroke="#eab308" stroke-opacity=".6"/>
+  <text class="t-badge mono" x="210" y="657" text-anchor="middle" fill="#eab308">ask</text>
+  <rect x="244" y="642" width="56" height="22" rx="6" fill="#0d1a30" stroke="#3b82f6" stroke-opacity=".6"/>
+  <text class="t-badge mono" x="272" y="657" text-anchor="middle" fill="#3b82f6">deny</text>
+  <text class="t-cap" x="310" y="657">自動許可（allow）ほど注意色</text>
+
+  <text class="t-cap-muted" x="32" y="694">契約</text>
+  <rect x="112" y="680" width="128" height="22" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+  <use xlink:href="#ico-doc" x="120" y="683" stroke="#a3a3a3"/>
+  <text class="t-badge" x="142" y="695" fill="#ededed">契約あり · v0.8</text>
+  <rect x="246" y="680" width="64" height="22" rx="6" fill="#2a170a" stroke="#f97316" stroke-opacity=".6"/>
+  <text class="t-badge" x="278" y="695" text-anchor="middle" fill="#f97316">契約なし</text>
+  <rect x="316" y="680" width="96" height="22" rx="6" fill="#262008" stroke="#eab308" stroke-opacity=".6"/>
+  <text class="t-badge" x="364" y="695" text-anchor="middle" fill="#eab308">schema 0.7</text>
+  <rect x="418" y="680" width="72" height="22" rx="6" fill="#2a170a" stroke="#f97316" stroke-opacity=".6"/>
+  <text class="t-badge" x="454" y="695" text-anchor="middle" fill="#f97316">JSON 不正</text>
+
+  <!-- ===== G. テーブル行 / トースト (x 720–1408, y 440–) ===== -->
+  <text class="t-th" x="720" y="452">G. テーブル行（高さ 50）</text>
+  <rect x="720.5" y="464.5" width="688" height="100" rx="10" fill="#141414" stroke="#2a2a2a"/>
+  <!-- normal -->
+  <rect x="736" y="477" width="92" height="22" rx="6" fill="#2a0f0f" stroke="#ef4444" stroke-opacity=".6"/>
+  <use xlink:href="#ico-crit" x="744" y="482" fill="#ef4444"/><text class="t-badge" x="762" y="492" fill="#ef4444">CRITICAL</text>
+  <text class="t-sm mono" x="844" y="492">§49</text>
+  <text class="t-sm mono" x="900" y="486">skills/a/scripts/run.sh</text>
+  <text class="t-cap-muted" x="900" y="504">契約に exec 未宣言、実態に exec を検出</text>
+  <text class="t-cap" x="1260" y="492">通常</text>
+  <rect x="1356" y="475" width="32" height="28" rx="6" fill="#1c1c1c" stroke="#3a3a3a"/>
+  <use xlink:href="#ico-copy" x="1364" y="481" stroke="#a3a3a3"/>
+  <line class="line" x1="736" y1="514.5" x2="1392" y2="514.5"/>
+  <!-- hover -->
+  <rect x="721" y="515" width="687" height="49" fill="#1c1c1c"/>
+  <path d="M721 515h687v39a10 10 0 0 1-10 10H731a10 10 0 0 1-10-10z" fill="#1c1c1c"/>
+  <rect x="736" y="527" width="60" height="22" rx="6" fill="#2a170a" stroke="#f97316" stroke-opacity=".6"/>
+  <use xlink:href="#ico-high" x="744" y="532" fill="#f97316"/><text class="t-badge" x="762" y="542" fill="#f97316">HIGH</text>
+  <text class="t-sm mono" x="844" y="542">§22</text>
+  <text class="t-sm mono" x="900" y="536">.github/workflows/ci.yml</text>
+  <text class="t-cap-muted" x="900" y="554">uses: がタグ参照</text>
+  <text class="t-cap" x="1260" y="542">ホバー</text>
+  <rect x="1356" y="525" width="32" height="28" rx="6" fill="#0a0a0a" stroke="#38bdf8"/>
+  <use xlink:href="#ico-copy" x="1364" y="531" stroke="#38bdf8"/>
+
+  <text class="t-th" x="720" y="600">H. トースト（aria-live=polite · 右下 · 4 秒）</text>
+  <rect x="720" y="614" width="332" height="44" rx="10" fill="#1c1c1c" stroke="#3a3a3a"/>
+  <use xlink:href="#ico-safe" x="736" y="630" fill="#22c55e"/>
+  <text class="t-sm" x="758" y="641">パスをクリップボードにコピーしました</text>
+  <rect x="1064" y="614" width="344" height="44" rx="10" fill="#2a0f0f" stroke="#ef4444" stroke-opacity=".6"/>
+  <use xlink:href="#ico-crit" x="1080" y="630" fill="#ef4444"/>
+  <text class="t-sm" x="1102" y="641">契約ファイルの JSON パースに失敗しました</text>
+
+  <rect x="720" y="670" width="688" height="44" rx="10" fill="#141414" stroke="#2a2a2a"/>
+  <use xlink:href="#ico-term" x="736" y="684" stroke="#38bdf8"/>
+  <text class="t-sm" x="760" y="697">CLI 専用の項目です：</text>
+  <text class="t-sm mono" x="900" y="697">./zes-scan.sh --full --json</text>
+  <text class="t-cap" x="1392" y="697" text-anchor="end">CliOnlyNotice</text>
+
+  <line class="line" x1="32" y1="728.5" x2="1408" y2="728.5"/>
+
+  <!-- ===== I. アイコン (y 744–) ===== -->
+  <text class="t-th" x="32" y="756">I. アイコン（SVG パス · 12/16/32 グリッド · stroke 1.5）</text>
+  <g id="icon-grid">
+    <rect x="32" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-crit" x="54" y="790" fill="#ef4444"/>
+    <text class="t-cap" x="60" y="842" text-anchor="middle">crit</text>
+    <rect x="100" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-high" x="122" y="790" fill="#f97316"/>
+    <text class="t-cap" x="128" y="842" text-anchor="middle">high</text>
+    <rect x="168" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-med" x="190" y="790" fill="#eab308"/>
+    <text class="t-cap" x="196" y="842" text-anchor="middle">medium</text>
+    <rect x="236" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-low" x="258" y="790" fill="#3b82f6"/>
+    <text class="t-cap" x="264" y="842" text-anchor="middle">low</text>
+    <rect x="304" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-info" x="326" y="790" fill="#a3a3a3"/>
+    <text class="t-cap" x="332" y="842" text-anchor="middle">info</text>
+    <rect x="372" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-safe" x="394" y="790" fill="#22c55e"/>
+    <text class="t-cap" x="400" y="842" text-anchor="middle">safe</text>
+    <rect x="440" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-copy" x="460" y="788" stroke="#ededed"/>
+    <text class="t-cap" x="468" y="842" text-anchor="middle">copy</text>
+    <rect x="508" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-key" x="528" y="788" stroke="#ededed"/>
+    <text class="t-cap" x="536" y="842" text-anchor="middle">key</text>
+    <rect x="576" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-folder" x="588" y="780" stroke="#ededed"/>
+    <text class="t-cap" x="604" y="842" text-anchor="middle">folder</text>
+    <rect x="644" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-term" x="664" y="788" stroke="#ededed"/>
+    <text class="t-cap" x="672" y="842" text-anchor="middle">terminal</text>
+    <rect x="712" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-search" x="732" y="788" stroke="#ededed"/>
+    <text class="t-cap" x="740" y="842" text-anchor="middle">search</text>
+    <rect x="780" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-seal" x="800" y="788" stroke="#a78bfa"/>
+    <text class="t-cap" x="808" y="842" text-anchor="middle">seal</text>
+    <rect x="848" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-doc" x="868" y="788" stroke="#ededed"/>
+    <text class="t-cap" x="876" y="842" text-anchor="middle">doc</text>
+    <rect x="916" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-diff" x="936" y="788" stroke="#ededed"/>
+    <text class="t-cap" x="944" y="842" text-anchor="middle">diff</text>
+    <rect x="984" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/><use xlink:href="#ico-chev-l" x="996" y="788" stroke="#ededed"/><use xlink:href="#ico-chev-r" x="1012" y="788" stroke="#ededed"/>
+    <text class="t-cap" x="1012" y="842" text-anchor="middle">chevron</text>
+    <rect x="1052" y="768" width="56" height="56" rx="8" fill="#141414" stroke="#2a2a2a"/>
+    <g transform="translate(1066,782)"><path d="M14 0L28 5v9c0 8-6 13.5-14 15C6 27.5 0 22 0 14V5z" fill="#141414" stroke="#38bdf8" stroke-width="2"/><path d="M8 14.5l4 4 8-8.5" fill="none" stroke="#38bdf8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <text class="t-cap" x="1080" y="842" text-anchor="middle">brand</text>
+  </g>
+
+  <!-- 使用ルール -->
+  <rect x="1124" y="768" width="284" height="104" rx="10" fill="#141414" stroke="#2a2a2a"/>
+  <text class="t-badge" x="1140" y="792" fill="#ededed">使用ルール</text>
+  <text class="t-cap-muted" x="1140" y="814">・重大度は色だけに依存しない</text>
+  <text class="t-cap-muted" x="1140" y="834">・最小操作領域 32px（タッチ 44px）</text>
+  <text class="t-cap-muted" x="1140" y="854">・フォーカスは --accent 2px リング</text>
+</svg>

@@ -1,0 +1,106 @@
+{
+  "campaign": "teampcp-mini-shai-hulud",
+  "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
+  "source": "rules/ioc.json（本ファイルは複製。正はioc.json）",
+  "campaigns": [
+    "teampcp-mini-shai-hulud"
+  ],
+  "packages": [
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "eco": "npm",
+      "name": "@tanstack/*",
+      "match": "unknown_versions",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "42pkg/84ver。router_init.js/tanstack_runner.js/vite_setup.mjs"
+    },
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "eco": "pypi",
+      "name": "mistralai",
+      "match": "versions",
+      "bad_versions": [
+        "2.4.6"
+      ],
+      "safe_version": "2.4.5",
+      "note": ""
+    },
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "eco": "pypi",
+      "name": "guardrails-ai",
+      "match": "versions",
+      "bad_versions": [
+        "0.10.1"
+      ],
+      "safe_version": "0.10.0",
+      "note": ""
+    },
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "eco": "npm",
+      "name": "intercom-client",
+      "match": "unknown_versions",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "侵害版。1,800+開発者影響"
+    },
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "eco": "npm",
+      "name": "jscrambler",
+      "match": "versions",
+      "bad_versions": [
+        ">=8.14.0 <=8.20.0"
+      ],
+      "safe_version": null,
+      "note": "Rust製インフォスティーラー"
+    },
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "eco": "npm",
+      "name": "@asyncapi/*",
+      "match": "unknown_versions",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "侵害版"
+    },
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "eco": "npm",
+      "name": "@polymarket/*",
+      "match": "unknown_versions",
+      "bad_versions": [],
+      "safe_version": null,
+      "note": "侵害版"
+    }
+  ],
+  "iocs": {
+    "worm_iocs.teampcp": {
+      "campaign": "teampcp-mini-shai-hulud",
+      "c2_ip": [
+        "83[.]142[.]209[.]194",
+        "94[.]154[.]172[.]43"
+      ],
+      "c2_domains": [
+        "api[.]masscan[.]cloud",
+        "git-tanstack[.]com",
+        "seed1[.]getsession[.]org",
+        "seed2[.]getsession[.]org"
+      ],
+      "urls": [
+        "hxxps://83[.]142[.]209[.]194/v1/weights",
+        "hxxps://83[.]142[.]209[.]194/audio.mp3",
+        "hxxps://api[.]github[.]com/search/commits?q=FIRESCALE"
+      ],
+      "oidc_technique": "/proc/<pid>/mem から GitHub Actions OIDC トークン抽出",
+      "deadman_switch": "GitHub認証情報失効検知時に $HOME 全削除"
+    }
+  },
+  "malicious_files": [
+    "router_init.js",
+    "tanstack_runner.js",
+    "vite_setup.mjs"
+  ]
+}

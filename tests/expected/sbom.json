@@ -1,0 +1,24 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§48",
+      "path": "sbom.json"
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§48",
+      "path": "."
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§48",
+      "path": "sbom.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

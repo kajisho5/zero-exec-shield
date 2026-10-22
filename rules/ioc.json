@@ -1,0 +1,418 @@
+{
+  "schema_version": "1.0",
+  "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
+  "meta": {
+    "generated_from": "ZES v5.2 Master Specification §3",
+    "updated_at": "2026-10-22",
+    "defang_rule": "ネットワークIoC（ドメイン/IP/URL）は [.] 形式で無害化して格納する。スキャナは照合時に [.] を . に戻す（§13）",
+    "verification": "本ファイルの値は仕様書からの転記。一次情報との照合結果は docs/ioc-verification.md を参照"
+  },
+  "packages": [
+    { "campaign": "litellm-oct2026", "eco": "pypi", "name": "litellm", "match": "versions", "bad_versions": ["1.107.0"], "safe_version": "1.106.2", "note": "cook.pth/cook.py/sitecustomize.py" },
+    { "campaign": "litellm-oct2026", "eco": "pypi", "name": "certifi", "match": "versions", "bad_versions": ["<2026.10.19"], "safe_version": "2026.10.19", "note": "" },
+    { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "@tanstack/*", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "42pkg/84ver。router_init.js/tanstack_runner.js/vite_setup.mjs" },
+    { "campaign": "teampcp-mini-shai-hulud", "eco": "pypi", "name": "mistralai", "match": "versions", "bad_versions": ["2.4.6"], "safe_version": "2.4.5", "note": "" },
+    { "campaign": "teampcp-mini-shai-hulud", "eco": "pypi", "name": "guardrails-ai", "match": "versions", "bad_versions": ["0.10.1"], "safe_version": "0.10.0", "note": "" },
+    { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "intercom-client", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "侵害版。1,800+開発者影響" },
+    { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "jscrambler", "match": "versions", "bad_versions": [">=8.14.0 <=8.20.0"], "safe_version": null, "note": "Rust製インフォスティーラー" },
+    { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "@asyncapi/*", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "侵害版" },
+    { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "@polymarket/*", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "侵害版" },
+    { "campaign": "chaindrop-keyv", "eco": "npm", "name": "keyv", "match": "versions", "bad_versions": ["6.0.0"], "safe_version": "5.x最新", "note": "" },
+    { "campaign": "chaindrop-keyv", "eco": "npm", "name": "flat-cache", "match": "versions", "bad_versions": ["6.1.24"], "safe_version": null, "note": "" },
+    { "campaign": "chaindrop-keyv", "eco": "npm", "name": "file-entry-cache", "match": "versions", "bad_versions": ["11.1.6"], "safe_version": null, "note": "" },
+    { "campaign": "chaindrop-keyv", "eco": "npm", "name": "cacheable-request", "match": "versions", "bad_versions": ["13.0.20"], "safe_version": null, "note": "" },
+    { "campaign": "chaindrop-keyv", "eco": "npm", "name": "cacheable", "match": "versions", "bad_versions": ["2.5.1"], "safe_version": null, "note": "" },
+    { "campaign": "chaindrop-keyv", "eco": "npm", "name": "@cacheable/memory", "match": "versions", "bad_versions": ["2.2.1"], "safe_version": null, "note": "" },
+    { "campaign": "chaindrop-keyv", "eco": "npm", "name": "cache-manager", "match": "versions", "bad_versions": ["7.2.10"], "safe_version": null, "note": "" },
+    { "campaign": "chaindrop-keyv", "eco": "npm", "name": "@cacheable/node-cache", "match": "versions", "bad_versions": ["3.1.2"], "safe_version": null, "note": "" },
+    { "campaign": "chaindrop-keyv", "eco": "npm", "name": "@cacheable/utils", "match": "versions", "bad_versions": ["2.5.1"], "safe_version": null, "note": "" },
+    { "campaign": "chaindrop-keyv", "eco": "npm", "name": "@cacheable/net", "match": "versions", "bad_versions": ["2.1.1"], "safe_version": null, "note": "" },
+    { "campaign": "chaindrop-keyv", "eco": "npm", "name": "ecto", "match": "versions", "bad_versions": ["5.0.1"], "safe_version": null, "note": "" },
+    { "campaign": "pypi-oct2026", "eco": "pypi", "name": "lightning", "match": "versions", "bad_versions": ["2.6.2", "2.6.3"], "safe_version": "2.6.1", "note": "_runtime/" },
+    { "campaign": "pypi-oct2026", "eco": "pypi", "name": "telnyx", "match": "versions", "bad_versions": ["4.87.1", "4.87.2"], "safe_version": "4.87.0", "note": "83[.]142[.]209[.]203:8080" },
+    { "campaign": "pypi-oct2026", "eco": "pypi", "name": "py2ops", "match": "versions", "bad_versions": ["2.2"], "safe_version": null, "note": "PyPIインプラント" },
+    { "campaign": "solana-typosquat", "eco": "npm", "name": "@solana-labs/web3js", "match": "any_version", "bad_versions": ["1.0.0", "1.0.2"], "safe_version": null, "note": "100+バージョン。MAL-2026-5788" },
+    { "campaign": "solana-typosquat", "eco": "npm", "name": "@solana-labs/spl-toke", "match": "any_version", "bad_versions": [], "safe_version": null, "note": "sibling" },
+    { "campaign": "solana-typosquat", "eco": "npm", "name": "@solana-labs/web3-js", "match": "any_version", "bad_versions": [], "safe_version": null, "note": "sibling" },
+    { "campaign": "solana-typosquat", "eco": "npm", "name": "@solana-labs/ancor", "match": "any_version", "bad_versions": [], "safe_version": null, "note": "sibling" },
+    { "campaign": "solana-typosquat", "eco": "npm", "name": "solana-web3-stable", "match": "any_version", "bad_versions": [], "safe_version": null, "note": "sibling" },
+    { "campaign": "post-shaihulud", "eco": "binary", "name": "iron-worm", "match": "file_name", "bad_versions": [], "safe_version": null, "note": "Rust窃取" },
+    { "campaign": "post-shaihulud", "eco": "binary", "name": "sckit", "match": "file_name", "bad_versions": [], "safe_version": null, "note": "Go窃取" },
+    { "campaign": "post-shaihulud", "eco": "binary", "name": "miasma", "match": "file_name", "bad_versions": [], "safe_version": null, "note": "AI武器化" },
+    { "campaign": "shai-hulud-chaindrop", "eco": "npm", "name": "tensorlake", "match": "versions", "bad_versions": ["0.5.144"], "safe_version": null, "note": "2026-10-08" },
+    { "campaign": "malfex", "eco": "npm", "name": "imgdecode", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "侵害版。shellcodeローダー" },
+    { "campaign": "namastex-worm", "eco": "npm", "name": "Namastex Labs関連", "match": "none", "bad_versions": [], "safe_version": null, "note": "侵害版。npm→PyPI→暗号資産。具体的パッケージ名未定義のため自動照合しない" },
+    { "campaign": "css-nesting-transform", "eco": "npm", "name": "css-nesting-transform", "match": "versions", "bad_versions": ["1.0.0"], "safe_version": null, "note": "2026-10-12" },
+    { "campaign": "hf-dataset-poisoning", "eco": "huggingface", "name": "datasets", "match": "none", "bad_versions": [], "safe_version": null, "note": "悪性データセット（2026-07-16）。§36で検査" },
+    { "campaign": "hf-lerobot-rce", "eco": "pypi", "name": "lerobot", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "<CVE-2026-25874修正版。CVSS 9.8。修正版番号未定義のため要確認" },
+    { "campaign": "megalodon-ci", "eco": "github-actions", "name": "-", "match": "none", "bad_versions": [], "safe_version": null, "note": "5,561リポジトリ。§38で検査" },
+    { "campaign": "sckit-memos", "eco": "npm/pypi", "name": "OpenClaw/MemoryOS", "match": "none", "bad_versions": [], "safe_version": null, "note": "2026-09-23。§25/§45で検査" },
+    { "campaign": "redhat-cloud-services", "eco": "npm", "name": "@redhat-cloud-services/*", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "MAL-2026-5141。OIDC publisher侵害" },
+    { "campaign": "sap-npm", "eco": "npm", "name": "SAP関連", "match": "none", "bad_versions": [], "safe_version": null, "note": "2026-05。具体的パッケージ名未定義のため自動照合しない" },
+    { "campaign": "nx-console", "eco": "vscode-ext", "name": "Nx Console", "match": "none", "bad_versions": [], "safe_version": null, "note": "悪性版。§24で拡張IDを検査" },
+    { "campaign": "ovhcloud-cli", "eco": "CLI", "name": "ovhcloud-cli", "match": "none", "bad_versions": [], "safe_version": null, "note": "2026-10-19リリース。GlassWorm経由" },
+    { "campaign": "typosquat-payment-sdk", "eco": "npm/pypi", "name": "決済SDKタイポ", "match": "none", "bad_versions": [], "safe_version": null, "note": "2026-06〜07。§44で近似名検査" },
+    { "campaign": "skillpact-undeclared", "eco": "skill", "name": "契約なしスキル", "match": "none", "bad_versions": [], "safe_version": null, "note": "HIGH。§49で検査" },
+    { "campaign": "skillpact-divergence", "eco": "skill", "name": "契約と実態の乖離", "match": "none", "bad_versions": [], "safe_version": null, "note": "CRITICAL。§49で検査" },
+    { "campaign": "skillpact-account-compromise", "eco": "skill", "name": "同一作者の急激な差分", "match": "none", "bad_versions": [], "safe_version": null, "note": "HIGH。§49で検査" }
+  ],
+  "worm_iocs": {
+    "chaindrop": {
+      "campaign": "chaindrop-keyv",
+      "files": ["setup.mjs", "Math_Symbol.js", "math_init.js"],
+      "preinstall": "node setup.mjs",
+      "hashes": {
+        "sha256": {
+          "setup.mjs": [
+            "54dc7ea54a1317cca0e890a2770630cf7fa6c97813e0cb9d2caa93012b350668",
+            "fd3ca4007b225fdf8de7af4345a19179d5efa8c4bb9205f88cda806e5684b1eb"
+          ],
+          "Math_Symbol.js": ["9fc2570b7cef51c1b8df116d144d11ff4096357be7d2c4c6367cfc2509cf1bcc"],
+          "math_init.js": ["9fc2570b7cef51c1b8df116d144d11ff4096357be7d2c4c6367cfc2509cf1bcc"]
+        }
+      },
+      "domains": ["npm-cache[.]com", "eth-mainnet[.]nodereal[.]io", "go[.]getblock[.]io", "eth[.]llamarpc[.]com", "pypi-get[.]com", "js-mirror[.]com"]
+    },
+    "teampcp": {
+      "campaign": "teampcp-mini-shai-hulud",
+      "c2_ip": ["83[.]142[.]209[.]194", "94[.]154[.]172[.]43"],
+      "c2_domains": ["api[.]masscan[.]cloud", "git-tanstack[.]com", "seed1[.]getsession[.]org", "seed2[.]getsession[.]org"],
+      "urls": ["hxxps://83[.]142[.]209[.]194/v1/weights", "hxxps://83[.]142[.]209[.]194/audio.mp3", "hxxps://api[.]github[.]com/search/commits?q=FIRESCALE"],
+      "oidc_technique": "/proc/<pid>/mem から GitHub Actions OIDC トークン抽出",
+      "deadman_switch": "GitHub認証情報失効検知時に $HOME 全削除"
+    },
+    "post_shaihulud": {
+      "campaign": "post-shaihulud",
+      "binaries": ["iron-worm", "sckit", "sckit.exe", "miasma"],
+      "masquerade": ["cargo-install"]
+    },
+    "sckit": {
+      "campaign": "sckit-memos",
+      "binaries": ["sckit", "sckit.exe"],
+      "source": "MemOS Cloud OpenClaw plugin / MemoryOS",
+      "date": "2026-09-23"
+    },
+    "miasma": {
+      "campaign": "post-shaihulud",
+      "deadman_switch": "盗んだGitHubトークンをExfilチャネルに使用、失効検知で$HOME削除",
+      "leaked_source": "2026-06-10にGitHubで一時公開"
+    },
+    "quasar_linux": {
+      "campaign": "ebpf-rootkit",
+      "alias": "QLNX",
+      "persistence": ["LD_PRELOAD", "systemd", "crontab", "init.d", "XDG autostart", ".bashrc"],
+      "rootkit": ["userland LD_PRELOAD", "kernel eBPF"]
+    },
+    "linkpro": {
+      "campaign": "ebpf-rootkit",
+      "type": "eBPFベースGNU/Linuxバックドア",
+      "fallback": "LD_PRELOAD"
+    },
+    "voidlink": {
+      "campaign": "ebpf-rootkit",
+      "rootkit": ["LD_PRELOAD", "LKM", "eBPF"],
+      "type": "クラウドネイティブLinuxマルウェア"
+    }
+  },
+  "infrastructures": [
+    {
+      "id": "gitlab",
+      "image_patterns": ["gitlab/gitlab-ee", "gitlab/gitlab-ce"],
+      "process_patterns": ["gitlab-workhorse", "gitlab-rails", "puma: cluster worker"],
+      "cves": [
+        { "id": "CVE-2026-110264", "cvss": 10.0, "title": "Unauthenticated RCE", "fixed": [] },
+        { "id": "CVE-2026-85706", "cvss": 10.0, "title": "Path Traversal", "fixed": [] },
+        { "id": "CVE-2026-19478", "cvss": 9.4, "title": "GraphQL Code Injection", "fixed": [] }
+      ]
+    },
+    {
+      "id": "teamcity",
+      "image_patterns": ["jetbrains/teamcity-server"],
+      "process_patterns": ["teamcity-server", "TeamCity"],
+      "cves": [
+        { "id": "CVE-2026-63077", "cvss": 9.8, "title": "TeamCity RCE", "fixed": ["2026.1.3", "2025.11.7"], "kev": true, "kev_due": "2026-08-08" }
+      ]
+    },
+    {
+      "id": "jfrog-artifactory",
+      "image_patterns": ["jfrog/artifactory-pro", "jfrog/artifactory-oss", "jfrog/artifactory-jcr", "releases-docker.jfrog.io/jfrog/artifactory"],
+      "process_patterns": ["artifactory"],
+      "cves": [
+        { "id": "CVE-2026-82329", "cvss": 9.8, "title": "Artifactory RCE", "fixed": ["7.111.21", "7.117.28", "7.125.20", "7.133.29", "7.146.38", "7.161.20"] }
+      ]
+    },
+    {
+      "id": "docker",
+      "cves": [
+        { "id": "CVE-2026-17106", "title": "CopyEscape: docker cp でホスト任意ファイル上書き", "fixed": [], "grep_patterns": ["docker cp"] }
+      ]
+    },
+    {
+      "id": "kernel",
+      "cves": [
+        { "id": "CVE-2026-31431", "title": "Copy Fail", "kev": true, "fixed": [] },
+        { "id": "CVE-2026-80521", "cvss": 7.8, "title": "AF_UNIX UAF, コンテナ→ホストroot", "fixed": [] },
+        { "id": "CVE-2026-64564", "title": "SCTPhantom, SCTP UAF, 6/8でエスケープ成功", "fixed": [] }
+      ]
+    },
+    {
+      "id": "sigstore",
+      "cves": [
+        { "id": "CVE-2026-22772", "component": "fulcio", "title": "Fulcio metaRegex SSRF", "fixed": ["1.8.5"] },
+        { "id": "CVE-2026-22703", "component": "rekor", "title": "Rekor任意エントリ受理", "fixed": ["2.6.2", "3.0.4"] },
+        { "id": "CVE-2026-39395", "component": "cosign", "title": "verify-blob-attestation偽陽性", "fixed": ["3.0.6", "2.6.3"] },
+        { "id": "GHSA-fx35-mq7g-6g98", "component": "cosign", "title": "レガシーバンドル検証バイパス", "fixed": ["3.1.3"] },
+        { "id": "CVE-2026-31830", "component": "sigstore-ruby", "title": "sigstore-ruby検証バイパス", "fixed": ["0.2.3"] }
+      ]
+    }
+  ],
+  "mcp_poisoning": {
+    "campaign": "mcp-poisoning",
+    "symjack": {
+      "target_configs": [".mcp.json", ".cursor/mcp.json", ".claude/settings.json", ".gemini/settings.json", ".codex/config.toml"],
+      "example_payloads": ["ln -s ../.claude/settings.json docs/vid-settings.mp4", "ln -sf ../../.mcp.json docs/vid-mcp.mp4"],
+      "decoy_name_patterns": ["vid-", "logo.", "readme.", "docs/"]
+    },
+    "runtime_gate": {
+      "alias": "Deadbugz",
+      "behavior": "最初の3回正常、4回目以降に悪性実行",
+      "detection_regex": ["callCount\\s*>\\s*[0-9]+", "invocations?\\s*>\\s*[0-9]+", "count\\+\\+.*if\\s*\\(\\s*count\\s*>"],
+      "injection_phrases": ["ignore previous instructions", "do not tell the user", "execute"]
+    },
+    "neighbor": {
+      "alias": "NeighborJack",
+      "behavior": "隣接する脆弱なMCPサーバー経由で間接侵害",
+      "detection": "localhost/127.0.0.1以外の内部IP・未認証MCPエンドポイント登録",
+      "internal_ip_regex": "(10\\.[0-9]+\\.[0-9]+\\.[0-9]+|192\\.168\\.[0-9]+\\.[0-9]+|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9]+\\.[0-9]+)"
+    },
+    "registry_supply_chain": {
+      "tool": "SPECTER MCP-POISON",
+      "cves": [
+        { "id": "CVE-2026-52869", "cvss": 7.6 },
+        { "id": "CVE-2026-58500", "title": "MCP Appium XSS-to-RCE" }
+      ]
+    },
+    "mcp_cves": [
+      { "id": "CVE-2026-104850", "title": "MCP TS SDK OAuth偽装" },
+      { "id": "CVE-2026-104120", "title": "mcp-server-fetch/everything fetch_url" },
+      { "id": "CVE-2026-111767", "title": "InMemoryTaskStore アクセス制御不備" },
+      { "id": "CVE-2026-59951", "title": "FastMCP セッション蓄積" },
+      { "id": "CVE-2026-61559", "title": "gitlab-mcp サーバーサイド" }
+    ],
+    "toolhive_ssrf": {
+      "cves": ["GO-2026-5996", "GO-2026-6002"],
+      "description": "IPv6 NAT64レンジ見逃し、host.docker.internal経由で横移動",
+      "patterns": ["host.docker.internal", "64:ff9b::", "64:ff9b:1:"]
+    },
+    "config_paths": ["~/.cursor/mcp.json", "~/.claude/mcp.json", ".vscode/settings.json", "~/.config/github-copilot/"],
+    "suspicious_commands": ["curl", "wget", "npx", "uvx", "node -e", "bash -c", "powershell -enc"],
+    "ide_hook": ".vscode/tasks.json / .claude/tasks.json の runOn: folderOpen"
+  },
+  "github_actions": {
+    "campaign": "ghostaction-oct2026",
+    "dangerous_patterns": [
+      "pull_request_target + actions/checkout(refなし) + secrets参照",
+      "actions/cache のキーに github.event.pull_request.number を含む",
+      "permissions: write-all",
+      "uses: <action>@v*（タグ参照）※SHA固定でない"
+    ],
+    "known_compromised": [
+      { "action": "aquasecurity/trivy-action", "versions": ["v0.69.4"], "note": "76タグ中75汚染, 2026-03" },
+      { "action": "tj-actions/*", "versions": [], "note": "" },
+      { "action": "aquasecurity/*", "versions": [], "note": "" }
+    ],
+    "workflow_injection": {
+      "megalodon": { "campaign": "megalodon-ci", "affected_repos": 5561, "date": "2026-05" },
+      "mass_workflow_planting": { "accounts": "500+", "repos": "数万", "date": "2026-10-07以降", "stolen_secrets": ["PyPI", "npm", "DockerHub"] },
+      "ci_platform_env_harvest": ["CircleCI", "Travis CI", "Jenkins", "GitHub Actions", "GitLab CI", "Buildkite", "Azure Pipelines"]
+    },
+    "reusable_component_poisoning": {
+      "vectors": ["GitHub Actions", "GitLab includes", "CircleCI orbs", "Jenkins shared libraries"]
+    },
+    "ghostaction_oct2026": {
+      "campaign": "ghostaction-oct2026",
+      "date": "2026-10-07以降",
+      "accounts": "500+",
+      "technique": "偽装フォントファイルにインフォスティーラーを隠蔽、第2ワークフローも設置",
+      "note": "2025年9月初出の再活性化",
+      "font_ext": [".ttf", ".otf", ".woff", ".woff2"]
+    },
+    "secrets_ref_threshold": 10
+  },
+  "browser_extensions": {
+    "dangerous_permissions": ["webRequest", "cookies", "management", "debugger", "nativeMessaging"],
+    "dangerous_matches": ["<all_urls>"],
+    "official_update_urls": ["https://clients2.google.com/service/update2/crx", "https://edge.microsoft.com/extensionwebstorebase/v1/crx"],
+    "watch_paths": {
+      "mac": ["~/Library/Application Support/Google/Chrome/*/Extensions/", "~/Library/Application Support/Microsoft Edge/*/Extensions/"],
+      "linux": ["~/.config/google-chrome/*/Extensions/", "~/.config/microsoft-edge/*/Extensions/"],
+      "vscode": ["~/.vscode/extensions/"]
+    },
+    "known_campaigns": [
+      { "name": "19 Chrome/Edge拡張の所有権移転型悪性アップデート(2026)", "ids": [] },
+      { "name": "Save Image as Type", "users": "100万+", "note": "アフィリエイト詐欺", "ids": [] },
+      { "name": "QuickLens – Search Screen with Google Lens", "users": "約7,000", "ids": [] },
+      { "name": "ShotBird – Scrolling Screenshots", "users": "約800", "ids": [] },
+      { "name": "GlassWorm", "note": "WebSocket RAT", "ids": [] },
+      { "name": "ModHeader", "note": "署名済み正規拡張への休眠Exfil", "ids": [] },
+      { "name": "Nx Console", "campaign": "nx-console", "note": "悪性版（VS Code拡張）", "ids": [] }
+    ]
+  },
+  "build_hooks": {
+    "rust_build_rs": ["Command::new", "std::process::Command", "include_bytes!", "include_str!", "curl", "wget"],
+    "go_generate": ["//go:generate curl", "//go:generate bash", "//go:generate sh -c"],
+    "py_build_backend_safe": ["setuptools.build_meta", "hatchling.build", "flit_core.buildapi", "poetry.core.masonry.api"],
+    "py_cmdclass": ["setup.py の cmdclass 悪用"]
+  },
+  "model_supply_chain": {
+    "campaign": "hf-supply-chain",
+    "risky_ext": [".pkl", ".pickle", ".pt", ".bin"],
+    "risky_code": ["torch.load(..., weights_only=False)", "trust_remote_code=True"],
+    "risky_code_regex": ["weights_only\\s*=\\s*False", "trust_remote_code\\s*=\\s*True"],
+    "preferred": ".safetensors",
+    "pip_confusion": "requirements.txt 内の --extra-index-url が PyPI 以外",
+    "hf_2026_07": [
+      "悪性データセット→2つのコード実行経路→クラスタ認証情報窃取",
+      "リモートコードデータセットローダー ＋ データセット設定テンプレートインジェクション",
+      "2026 Q1で9件の悪性モデルアップロード、3件が本番パイプラインに到達",
+      "悪性モデルの約95%がPyTorch pickleシリアライゼーション",
+      "データセット汚染: 少量の敵対的サンプル混入"
+    ]
+  },
+  "persistence": {
+    "macos": {
+      "launch_agents": "~/Library/LaunchAgents/*.plist",
+      "launch_agents_note": "Labelランダム文字列",
+      "launch_daemons": "/Library/LaunchDaemons/*.plist",
+      "login_items": "osascript -e 'tell application \"System Events\" to get name of every login item'",
+      "dyld": "DYLD_INSERT_LIBRARIES (shell profile / launchctl setenv)",
+      "security_plist": "~/Library/Preferences/com.apple.security.plist",
+      "profiles": "profiles show"
+    },
+    "linux": {
+      "ld_preload": "/etc/ld.so.preload",
+      "ld_preload_note": "空であるべき",
+      "systemd_user": "~/.config/systemd/user/*.service",
+      "autostart": "~/.config/autostart/*.desktop",
+      "cron_d": "/etc/cron.d/"
+    },
+    "git": ["core.sshCommand", "core.fsmonitor", "core.hooksPath"],
+    "direnv": ".envrc (curl | bash)",
+    "asdf_mise": [".tool-versions", "mise.toml"],
+    "shell_hooks": ["PROMPT_COMMAND", "precmd", "command_not_found_handle", "~/.bash_logout", "~/.zlogout"],
+    "ebpf_rootkit": [
+      "Quasar Linux (QLNX): userland LD_PRELOAD + kernel eBPF",
+      "LinkPro: eBPF + LD_PRELOAD + systemd名前偽装",
+      "VoidLink: LD_PRELOAD / LKM / eBPF"
+    ]
+  },
+  "anti_forensics": {
+    "noatime_mount": "mount | grep noatime → §13 ハニーポット無効環境警告",
+    "auditd_disabled": "systemctl is-active auditd / OpenBSM (macOS)",
+    "history_erase": ["HISTFILE=/dev/null", "HISTSIZE=0"],
+    "history_symlink": "~/.bash_history が /dev/null へのシンボリックリンク",
+    "mtime_rollback": "mtime が作成時刻より古いファイル",
+    "git_hash_malleability": [
+      "SLSA Source Track v1.2のコミットハッシュ不変性が破綻しうる",
+      "Rekorオフライン検証だけでは不十分"
+    ],
+    "cosign_legacy_bundle": [
+      "レガシーバンドル内の予期しない公開鍵による検証バイパス",
+      "Rekorエントリ存在確認のみで受理されるケース"
+    ]
+  },
+  "ai_coding_assistant": {
+    "cursor": [
+      { "id": "CVE-2026-26268", "cvss": 9.9, "fixed": "2.5", "title": "悪性Gitリポジトリ→エージェントフック自律実行RCE" },
+      { "id": "CVE-2026-50548", "alias": "EUVD-2026-39537", "title": "Zero-Clickプロンプトインジェクション" },
+      { "id": "CVE-2025-54136", "title": "MCP JSON Zero-Click Configuration RCE" },
+      { "id": "git.exe Zero-Day", "title": "未パッチ、Windowsリポジトリルートのgit.exe自動実行" }
+    ],
+    "copilot": [
+      { "id": "CVE-2025-62222", "title": "信頼ダイアログ表示前のコマンド実行" },
+      { "id": "CVE-2026-50510", "title": "JetBrains版Copilotのローカルコード実行" }
+    ],
+    "codex_cli": ["信頼境界を越える未信頼スキル/MCPコンテンツ"],
+    "instruction_files": [".cursorrules", "CLAUDE.md", ".github/copilot-instructions.md"],
+    "detection": [
+      ".cursorrules / CLAUDE.md / .github/copilot-instructions.md の不可視文字・BiDi・ホモグリフ",
+      "リポジトリ内容由来の間接プロンプトインジェクション",
+      "Git hooks とエージェントフックの連鎖",
+      "ツールdescription内の命令形動詞と外部リソース参照の共起"
+    ],
+    "imperative_verbs": ["ignore", "execute", "run", "send", "upload", "fetch", "download", "do not tell", "must call", "always call"]
+  },
+  "skillpact": {
+    "campaign": "skillpact",
+    "contract_filenames": ["skill.contract.json", ".skillpact/contract.json"],
+    "schema_versions": ["0.8"],
+    "effects": ["exec", "network", "write", "read", "secrets", "spend"],
+    "levels": ["L1", "L2", "L3"],
+    "policy_files": ["policy-v0.8.json", ".skillpact/policy.json"],
+    "decision_values": ["allow", "ask", "deny"],
+    "risk_flags": ["exec:any", "network:any", "write:outside_workspace", "secrets:any", "spend:any"],
+    "destructive_markers": ["rm -rf", "git reset --hard", "git push --force", "drop table", "truncate", "chmod 777", "curl | bash", "wget | sh"],
+    "persistence_markers": ["crontab", "launchctl", "systemctl enable", "schtasks", "registry run", ".bashrc", ".zshrc", "authorized_keys"],
+    "trust_model": {
+      "l3_means": "signed_files",
+      "l3_does_not_mean": "safe_or_trusted_author",
+      "account_compromise_resilient": false,
+      "mitigation": "diff_anomaly_detection",
+      "diff_anomaly_detection": { "threshold": 0.3 }
+    },
+    "proposed_effects": ["persist", "longrun"],
+    "prose_claims": [
+      { "claim": "read_only", "patterns": ["読み取りのみ", "読み取り専用", "参照だけ", "参照のみ", "read-only", "read only"], "forbids": ["exec", "network", "write"] },
+      { "claim": "no_network", "patterns": ["外部通信なし", "外部通信しない", "no network"], "forbids": ["network"] },
+      { "claim": "no_write", "patterns": ["ファイル変更なし", "ファイルを変更しない", "does not modify"], "forbids": ["write"] },
+      { "claim": "no_exec", "patterns": ["実行しない", "does not execute"], "forbids": ["exec"] }
+    ],
+    "observed_effect_patterns": {
+      "exec": ["subprocess", "os\\.system", "os\\.popen", "child_process", "execSync", "spawnSync", "\\bexec\\(", "\\beval\\(", "Command::new", "bash -c", "sh -c", "Runtime\\.getRuntime"],
+      "network": ["\\bcurl\\b", "\\bwget\\b", "requests\\.(get|post|put)", "urllib\\.request", "http\\.client", "\\bfetch\\(", "axios", "XMLHttpRequest", "socket\\.connect", "\\bnc\\s", "Invoke-WebRequest"],
+      "write": ["\\btee\\b", "\\bmkdir\\b", "\\bcp\\s", "\\bmv\\s", "[^2&]>>?\\s*[~/$A-Za-z0-9._-]", "open\\([^)]*['\"][wa]\\+?['\"]", "writeFile", "fs\\.write", "\\.write_text\\(", "\\bsed -i\\b"],
+      "secrets": ["\\.env\\b", "API_KEY", "_TOKEN\\b", "SECRET", "\\.ssh/", "\\.aws/credentials", "\\.netrc", "\\.git-credentials", "keychain", "find-generic-password", "\\bprintenv\\b", "os\\.environ", "process\\.env"],
+      "spend": ["stripe\\.", "api\\.stripe\\.com", "paypal", "checkout\\.sessions", "purchase\\("]
+    },
+    "write_outside_workspace_regex": ["~/", "\\$HOME", "/etc/", "/usr/", "/Library/"],
+    "l2_record_filenames": [".skillpact/l2-record.json", "l2-test-record.json", ".skillpact/l2/record.json"],
+    "signature_filenames": ["skill.contract.json.sig", "skill.contract.json.bundle", ".skillpact/contract.sig", ".skillpact/contract.bundle", ".skillpact/signature.sig"],
+    "script_extensions": ["sh", "bash", "zsh", "py", "js", "mjs", "cjs", "ts", "rb", "pl", "ps1"]
+  },
+  "markers": ["/tmp/.pc_once_*", "/tmp/remote_code_loader.lock"],
+  "malicious_files": ["cook.pth", "cook.py", "sitecustomize.py", "usercustomize.py", "router_init.js", "tanstack_runner.js", "vite_setup.mjs", "setup.mjs", "Math_Symbol.js", "math_init.js"],
+  "malicious_files_campaign": {
+    "cook.pth": "litellm-oct2026",
+    "cook.py": "litellm-oct2026",
+    "sitecustomize.py": "litellm-oct2026",
+    "usercustomize.py": "litellm-oct2026",
+    "router_init.js": "teampcp-mini-shai-hulud",
+    "tanstack_runner.js": "teampcp-mini-shai-hulud",
+    "vite_setup.mjs": "teampcp-mini-shai-hulud",
+    "setup.mjs": "chaindrop-keyv",
+    "Math_Symbol.js": "chaindrop-keyv",
+    "math_init.js": "chaindrop-keyv"
+  },
+  "process_signatures": ["letters9813", "pythonclient-test", "litellm.dev", "PRIVCOLLECT", "npm-cache", "math_init", "iron-worm", "sckit", "miasma"],
+  "runtime_minimums": {
+    "python": ["3.15.1", "3.14.9", "3.13.17"],
+    "go": ["1.27.3", "1.26.10"],
+    "certifi": "2026.10.19",
+    "homebrew_ca_certificates": "2026-09-25_1",
+    "cursor": "2.5",
+    "cosign": ["3.1.3"]
+  },
+  "emudhra": {
+    "probe_host": "dv-g3b-emudhra[.]we-have-a-problem[.]com",
+    "note": "接続成功=侵害CAを信頼中(CRITICAL) / SSLエラー=SAFE"
+  },
+  "blast_radius": {
+    "base": ["~/.ssh", "~/.aws", "~/.config/gcloud", "~/.claude", "~/.cursor", "~/.config/gh", "~/.docker/config.json", "~/.npmrc", "~/.pypirc"],
+    "extended": ["~/.kube/config", "~/.vault-token", "~/.git-credentials", "~/.netrc", "~/.config/heroku/", "~/.terraform.d/credentials.tfrc.json", "~/.config/op/"]
+  },
+  "official_registries": ["registry.npmjs.org", "registry.yarnpkg.com", "registry.npmmirror.com", "pypi.org", "files.pythonhosted.org", "upload.pypi.org", "crates.io", "index.crates.io", "static.crates.io"],
+  "protected_hosts": ["registry.npmjs.org", "registry.yarnpkg.com", "pypi.org", "files.pythonhosted.org", "github.com", "api.github.com", "objects.githubusercontent.com", "crates.io", "proxy.golang.org"],
+  "ci_env_vars": ["GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL", "GITHUB_REPOSITORY", "GITHUB_WORKFLOW", "GITHUB_ACTOR", "CI_JOB_TOKEN", "CI_REGISTRY_PASSWORD", "CI_DEPLOY_PASSWORD", "CI_PROJECT_ID", "GITLAB_TOKEN", "CIRCLE_TOKEN", "CIRCLECI_TOKEN", "CIRCLE_PROJECT_REPONAME", "CIRCLE_BRANCH", "TRAVIS_TOKEN", "TRAVIS_REPO_SLUG", "TRAVIS_BRANCH", "JENKINS_URL", "JENKINS_TOKEN", "BUILD_TAG", "BUILDKITE_AGENT_ACCESS_TOKEN", "BUILDKITE_PIPELINE_SLUG", "BUILDKITE_BRANCH", "SYSTEM_ACCESSTOKEN", "BUILD_REPOSITORY_URI", "SYSTEM_TEAMFOUNDATIONCOLLECTIONURI", "NPM_TOKEN", "NODE_AUTH_TOKEN", "PYPI_TOKEN", "TWINE_PASSWORD", "DOCKERHUB_TOKEN", "DOCKER_PASSWORD", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS", "AZURE_CLIENT_SECRET", "VAULT_TOKEN"],
+  "ci_env_harvest_threshold": 20,
+  "payment_sdks": ["stripe", "paypal", "square", "adyen", "@stripe/stripe-js", "@paypal/checkout-server-sdk", "squareup", "@adyen/api-library"]
+}

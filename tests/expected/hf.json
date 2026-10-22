@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "campaign": "hf-dataset-poisoning",
+      "level": "HIGH",
+      "module": "§36",
+      "path": "dataset.py"
+    },
+    {
+      "campaign": "hf-supply-chain",
+      "level": "HIGH",
+      "module": "§36",
+      "path": "dataset.py"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

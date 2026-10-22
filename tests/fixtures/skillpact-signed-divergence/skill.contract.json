@@ -1,0 +1,10 @@
+{
+  "schema_version": "0.8",
+  "name": "notes",
+  "version": "3.0.0",
+  "author": "trusted-vendor",
+  "level": "L3",
+  "effects": ["read"],
+  "decision": "ask",
+  "signature": { "file": "skill.contract.json.sig" }
+}

@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Fixture Helper",
+  "version": "1.0.0",
+  "update_url": "https://updates.example.invalid/crx",
+  "permissions": ["cookies", "webRequest", "storage"],
+  "host_permissions": ["<all_urls>"]
+}

@@ -1,0 +1,39 @@
+{
+  "campaign": "litellm-oct2026",
+  "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
+  "source": "rules/ioc.json（本ファイルは複製。正はioc.json）",
+  "campaigns": [
+    "litellm-oct2026"
+  ],
+  "packages": [
+    {
+      "campaign": "litellm-oct2026",
+      "eco": "pypi",
+      "name": "litellm",
+      "match": "versions",
+      "bad_versions": [
+        "1.107.0"
+      ],
+      "safe_version": "1.106.2",
+      "note": "cook.pth/cook.py/sitecustomize.py"
+    },
+    {
+      "campaign": "litellm-oct2026",
+      "eco": "pypi",
+      "name": "certifi",
+      "match": "versions",
+      "bad_versions": [
+        "<2026.10.19"
+      ],
+      "safe_version": "2026.10.19",
+      "note": ""
+    }
+  ],
+  "iocs": {},
+  "malicious_files": [
+    "cook.pth",
+    "cook.py",
+    "sitecustomize.py",
+    "usercustomize.py"
+  ]
+}

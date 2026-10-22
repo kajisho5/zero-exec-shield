@@ -1,0 +1,7 @@
+services:
+  teamcity:
+    image: jetbrains/teamcity-server:2026.1.3
+  artifactory:
+    image: releases-docker.jfrog.io/jfrog/artifactory-pro:7.146.38
+  artifactory-old-branch:
+    image: releases-docker.jfrog.io/jfrog/artifactory-pro:7.111.21
