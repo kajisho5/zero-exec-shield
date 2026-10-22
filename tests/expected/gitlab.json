@@ -20,7 +20,13 @@
     },
     {
       "campaign": null,
-      "level": "HIGH",
+      "level": "CRITICAL",
+      "module": "§3",
+      "path": "docker-compose.yml"
+    },
+    {
+      "campaign": null,
+      "level": "CRITICAL",
       "module": "§3",
       "path": "docker-compose.yml"
     }

@@ -1,0 +1,9 @@
+version = 3
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.9"
+
+[[package]]
+name = "arrayref"
+version = "0.3.10"
