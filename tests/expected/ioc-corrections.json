@@ -1,0 +1,66 @@
+{
+  "findings": [
+    {
+      "campaign": "jscrambler-jul2026",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "package-lock.json"
+    },
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "package-lock.json"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§18",
+      "path": "relay.js"
+    },
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "level": "MEDIUM",
+      "module": "§18",
+      "path": "relay.js"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§22",
+      "path": ".github/workflows/scan.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§22",
+      "path": ".github/workflows/scan.yml"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§37",
+      "path": "package-lock.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§37",
+      "path": "py/requirements.txt"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "MEDIUM",
+      "module": "§37",
+      "path": "package-lock.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "MEDIUM",
+      "module": "§37",
+      "path": "py/requirements.txt"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

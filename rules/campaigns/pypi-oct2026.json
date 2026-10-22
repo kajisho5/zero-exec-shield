@@ -16,7 +16,7 @@
         "2.6.3"
       ],
       "safe_version": "2.6.1",
-      "note": "_runtime/"
+      "note": "_runtime/（Bun を取得して実行）。公開は 2026-04-30（campaign 名の oct2026 とは時期が異なる）"
     },
     {
       "campaign": "pypi-oct2026",
@@ -28,7 +28,7 @@
         "4.87.2"
       ],
       "safe_version": "4.87.0",
-      "note": "83[.]142[.]209[.]203:8080"
+      "note": "GHSA-955r-262c-33jc。hxxp://83[.]142[.]209[.]203:8080/ringtone.wav。公開は 2026-03-27（campaign 名の oct2026 とは時期が異なる）"
     },
     {
       "campaign": "pypi-oct2026",

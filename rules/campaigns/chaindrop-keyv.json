@@ -153,11 +153,18 @@
       },
       "domains": [
         "npm-cache[.]com",
+        "pypi-get[.]com",
+        "js-mirror[.]com",
+        "awqhnjewqjkl[.]icu"
+      ],
+      "legit_infra": [
         "eth-mainnet[.]nodereal[.]io",
         "go[.]getblock[.]io",
-        "eth[.]llamarpc[.]com",
-        "pypi-get[.]com",
-        "js-mirror[.]com"
+        "eth[.]llamarpc[.]com"
+      ],
+      "legit_infra_note": "正規の Ethereum RPC。C2 アドレス解決に悪用された。名前の出現だけでは侵害と断定しない（想定外の接続元を調査）",
+      "eth_contracts": [
+        "0xE1f2395ee43e45A1556EC6438a88c31B83493103"
       ]
     }
   },

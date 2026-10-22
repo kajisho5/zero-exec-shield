@@ -209,3 +209,37 @@
 22. Go 1.27.3 / 1.26.10
 
 **調査していない範囲**: §3.6〜§3.12 のうち CVE / キャンペーン名を含まない手法記述（`dangerous_patterns`、`build_hooks`、`persistence`、`anti_forensics` の一般的な手法）、`process_signatures` の残り（letters9813 / pythonclient-test / PRIVCOLLECT / npm-cache / math_init）、`markers` の `/tmp/.pc_once_*`、§9.4 の Djinn / OmniStealer、§5 の Python 3.15.1 / 3.14.9 / 3.13.17。
+
+---
+
+## 5.2.1 での反映（2026-10-22）
+
+ユーザー承認に基づき、一次情報で確認できた相違を `rules/ioc.json` と `zes-scan.sh` に反映した。確認できなかった値（「確認できず」の行）は変更せず、必要なものに注記を付けた。
+
+| 項目 | 変更内容 | 根拠（本レポートの行） |
+|---|---|---|
+| certifi | campaign を `litellm-oct2026` → `emudhra-ca-oct2026`、範囲を `>=2019.3.9 <2026.10.19` に | certifi 行（GHSA-6q48-6c7w-9gw2） |
+| intercom-client | 侵害版 7.0.4・安全版 7.0.3 を設定、「1,800+」の記述を削除 | intercom-client 行（GHSA-54pg-9963-v8vg） |
+| jscrambler | 悪性版を 8.14.0 / 8.16.0 / 8.17.0 / 8.18.0 / 8.20.0 に限定、安全版 8.22.0、campaign を `jscrambler-jul2026` に分離（TeamPCP 帰属は未確認） | jscrambler 行 |
+| lightning / telnyx | 値は据え置き。公開日（04-30 / 03-27）と GHSA を注記 | 各行 |
+| css-nesting-transform | MAL-2026-17804・公開日 10-07 を注記 | 同行 |
+| lerobot | 影響範囲 `<=0.5.1` を設定（CRITICAL）。CVSS のソース間不一致を注記 | lerobot 行 |
+| ovhcloud-cli | 影響 v0.11.0〜v0.15.0、安全版 v0.16.0。GlassWorm 帰属は未確定と注記 | ovhcloud-cli 行 |
+| ChainDrop | C2 `awqhnjewqjkl[.]icu` と解決コントラクト `0xE1f2…3103` を追加。Ethereum RPC 3 ホストは `legit_infra`（MEDIUM）へ | chaindrop C2 / RPC 行 |
+| TeamPCP | `seed1/seed2.getsession.org` を `legit_infra`（MEDIUM）へ。deadman_switch の帰属が曖昧なことを注記 | teampcp 各行 |
+| Miasma | 公開日 06-08、「AI 武器化」の表現を修正 | Miasma 行 |
+| GitLab CVE-2026-85706 | 修正版 19.1.8 / 19.2.6 / 19.3.2 を設定（§3 で CRITICAL 判定）。110264 は系列別修正版が未確認のため注記のみ | GitLab 行 |
+| Kernel | Copy Fail / CVE-2026-80521 / SCTPhantom の修正版を設定（§23 で HIGH 判定）。「6/8」の記述を削除 | Kernel 行 |
+| Docker CVE-2026-17106 | CLI の修正版が未確認であることを注記 | Docker 行 |
+| CVE-2026-22703 | 対象製品を Cosign に修正。§43 の Rekor イメージ判定を削除 | Sigstore 行 |
+| GHSA-fx35-mq7g-6g98 | 2.x 系の修正版 2.6.5 を追加（3.1.3 は未確認と注記） | 同行 |
+| NeighborJack | 定義を「0.0.0.0 での待ち受け」に修正（§20 は従来どおり両方を検出） | NeighborJack 行 |
+| CVE-2026-52869 / 58500 | mcp_cves へ移動し、`mcp<1.27.2` / `appium-mcp<1.85.10` を §37 で HIGH 判定 | 各行 |
+| ToolHive | GO-2026-6002 と CVE-2026-58197 の取り違えを修正 | ToolHive 行 |
+| Cursor CVE-2026-50548 | 修正版 3.0 を設定（§41 で <3.0 を CRITICAL） | Cursor 行 |
+| Copilot CVE-2025-62222 | Copilot Chat 拡張 <0.32.5 を §41 で HIGH 判定、説明を修正 | Copilot 行 |
+| trivy-action | v0.69.4 は Trivy 本体の版と修正。trivy-action は v0.35.0 以外のタグ参照を CRITICAL、Trivy 本体 v0.69.4 の指定を CRITICAL | trivy-action 行 |
+| GhostAction | 偽装フォント事案が別件であることを注記 | ghostaction 行 |
+| Homebrew ca-certificates | 基準値の誤りが疑われるため、判定を HIGH → MEDIUM（要確認）に変更 | Homebrew 行 |
+
+`incident_bundle` は `ZES-2026-OCT-EMERGENCY-V5.2` のまま（findings.json スキーマの形式 `V<major>.<minor>` を維持するため）。

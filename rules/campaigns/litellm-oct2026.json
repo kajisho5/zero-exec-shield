@@ -16,17 +16,6 @@
       ],
       "safe_version": "1.106.2",
       "note": "cook.pth/cook.py/sitecustomize.py"
-    },
-    {
-      "campaign": "litellm-oct2026",
-      "eco": "pypi",
-      "name": "certifi",
-      "match": "versions",
-      "bad_versions": [
-        "<2026.10.19"
-      ],
-      "safe_version": "2026.10.19",
-      "note": ""
     }
   ],
   "iocs": {},

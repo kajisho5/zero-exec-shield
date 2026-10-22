@@ -1,7 +1,7 @@
 {
   "findings": [
     {
-      "campaign": "litellm-oct2026",
+      "campaign": "emudhra-ca-oct2026",
       "level": "CRITICAL",
       "module": "§15",
       "path": "site-packages/certifi-2026.9.1.dist-info"

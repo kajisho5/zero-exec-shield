@@ -26,13 +26,19 @@
         "permissions: write-all",
         "uses: <action>@v*（タグ参照）※SHA固定でない"
       ],
+      "compromised_trivy_binary": [
+        "v0.69.4",
+        "0.69.4"
+      ],
+      "compromised_trivy_binary_note": "Trivy 本体の悪性版（安全版は v0.69.3）。trivy-action の version 入力やコンテナイメージのタグで参照されうる",
       "known_compromised": [
         {
           "action": "aquasecurity/trivy-action",
-          "versions": [
-            "v0.69.4"
+          "versions": [],
+          "safe_tags": [
+            "v0.35.0"
           ],
-          "note": "76タグ中75汚染, 2026-03"
+          "note": "2026-03-19 にタグ 75/76 が強制 push（Aqua 発表では 76/77）。v0.35.0 以外のタグ参照は汚染の可能性"
         },
         {
           "action": "tj-actions/*",
@@ -83,8 +89,8 @@
         "campaign": "ghostaction-oct2026",
         "date": "2026-10-07以降",
         "accounts": "500+",
-        "technique": "偽装フォントファイルにインフォスティーラーを隠蔽、第2ワークフローも設置",
-        "note": "2025年9月初出の再活性化",
+        "technique": "500 アカウント波: 第 2 ワークフローの設置。偽装フォント（public/fonts/fa-solid-400.woff2、94 リポジトリ、tasks.json の folderOpen で起動）は別の後続／模倣活動として報告",
+        "note": "2025年9月初出の再活性化。偽装フォント事案とは別件",
         "font_ext": [
           ".ttf",
           ".otf",

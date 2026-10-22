@@ -21,10 +21,12 @@
       "campaign": "hf-lerobot-rce",
       "eco": "pypi",
       "name": "lerobot",
-      "match": "unknown_versions",
-      "bad_versions": [],
+      "match": "versions",
+      "bad_versions": [
+        "<=0.5.1"
+      ],
       "safe_version": null,
-      "note": "<CVE-2026-25874修正版。CVSS 9.8。修正版番号未定義のため要確認"
+      "note": "CVE-2026-25874。CVSS は 9.3（GHSA）と 9.8（CSA）でソース間不一致。公表時点で修正版なし"
     }
   ],
   "iocs": {

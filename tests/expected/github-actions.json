@@ -2,7 +2,7 @@
   "findings": [
     {
       "campaign": "ghostaction-oct2026",
-      "level": "CRITICAL",
+      "level": "HIGH",
       "module": "§21",
       "path": ".github/workflows/pr-target.yml"
     },

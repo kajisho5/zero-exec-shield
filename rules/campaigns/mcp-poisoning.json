@@ -44,22 +44,14 @@
       },
       "neighbor": {
         "alias": "NeighborJack",
-        "behavior": "隣接する脆弱なMCPサーバー経由で間接侵害",
-        "detection": "localhost/127.0.0.1以外の内部IP・未認証MCPエンドポイント登録",
+        "behavior": "MCP サーバーが 0.0.0.0 で待ち受け、同一 LAN から到達できる設定不備（Backslash, 2025-06）",
+        "detection": "0.0.0.0 での待ち受け（一次情報の定義）、およびループバック以外の内部 IP・平文 HTTP の MCP エンドポイント登録（ZES 追加）",
         "internal_ip_regex": "(10\\.[0-9]+\\.[0-9]+\\.[0-9]+|192\\.168\\.[0-9]+\\.[0-9]+|172\\.(1[6-9]|2[0-9]|3[01])\\.[0-9]+\\.[0-9]+)"
       },
       "registry_supply_chain": {
         "tool": "SPECTER MCP-POISON",
-        "cves": [
-          {
-            "id": "CVE-2026-52869",
-            "cvss": 7.6
-          },
-          {
-            "id": "CVE-2026-58500",
-            "title": "MCP Appium XSS-to-RCE"
-          }
-        ]
+        "cves": [],
+        "note": "CVE-2026-52869 / CVE-2026-58500 はレジストリ汚染の事案ではないため mcp_cves に移動"
       },
       "mcp_cves": [
         {
@@ -81,14 +73,33 @@
         {
           "id": "CVE-2026-61559",
           "title": "gitlab-mcp サーバーサイド"
+        },
+        {
+          "id": "CVE-2026-52869",
+          "cvss": 7.1,
+          "title": "MCP Python SDK: セッション ID と認証主体が紐付かない",
+          "eco": "pypi",
+          "package": "mcp",
+          "fixed": "1.27.2",
+          "ghsa": "GHSA-jpw9-pfvf-9f58"
+        },
+        {
+          "id": "CVE-2026-58500",
+          "cvss": 8.2,
+          "title": "appium-mcp: locator UI の XSS",
+          "eco": "npm",
+          "package": "appium-mcp",
+          "fixed": "1.85.10",
+          "ghsa": "GHSA-x975-rgx4-5fh4"
         }
       ],
       "toolhive_ssrf": {
         "cves": [
           "GO-2026-5996",
-          "GO-2026-6002"
+          "GO-2026-6002",
+          "CVE-2026-58197"
         ],
-        "description": "IPv6 NAT64レンジ見逃し、host.docker.internal経由で横移動",
+        "description": "GO-2026-5996: IPv6 NAT64 レンジの見逃し。GO-2026-6002（CVE-2026-58196）: 認証ディスカバリ経路の SSRF。host.docker.internal 経由の横移動は別件の CVE-2026-58197",
         "patterns": [
           "host.docker.internal",
           "64:ff9b::",

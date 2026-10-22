@@ -98,9 +98,9 @@ chmod +x zes-scan.sh
 | GhostAction Oct 2026 | 500+アカウント、偽装フォント | ワークフロー新規追加監査、`secrets.*`数確認 |
 | MCP Poisoning/SymJack/Deadbugz/NeighborJack | `.mcp.json`改ざん | `command`/`args`目視、`readlink -f`検査、Claude Code v2.1.129+ |
 | Quasar Linux (QLNX)/LinkPro/VoidLink | eBPF/LD_PRELOADルートキット | `/etc/ld.so.preload`、`bpftool prog list`、PAM確認 |
-| Cursor RCE | CVE-2026-26268/50548、git.exe zero-day | v2.5+、リポジトリルート`git.exe`確認 |
+| Cursor RCE | CVE-2026-26268/50548、git.exe zero-day | v3.0+（26268 は 2.5、50548 は 3.0 で修正）、リポジトリルート`git.exe`確認 |
 | Hugging Face Jul 2026 | 悪性データセット→クラスタ認証情報 | `trust_remote_code`監査、`subprocess`/`eval`検査、pickle回避 |
-| Sigstore/SLSAバイパス | CVE-2026-22772/22703/39395 | cosign 3.1.3+、`--certificate-identity`必須化 |
+| Sigstore/SLSAバイパス | CVE-2026-22772/22703/39395 | cosign 3.1.3+（2.x は 2.6.5+）、`--certificate-identity`必須化 |
 | コンテナエスケープ | CVE-2026-80521/64564 | カーネル更新、seccompプロファイル、特権コンテナ監査 |
 | Djinn/OmniStealer | 開発者・AI認証情報窃取 | 認証情報ローテーション、不審プロセス監査 |
 | OVHcloud CLI 2026-10-19 | GlassWorm経由でGitHubキー窃取 | 再インストール、GitHubトークンローテーション |
@@ -108,7 +108,7 @@ chmod +x zes-scan.sh
 | SkillPact乖離 | 契約と実態の不一致 | スキル停止、契約の再作成、L2テスト実施 |
 | SkillPactアカウント侵害 | L3署名済みでも差分異常 | 作者への確認、前バージョンとの差分レビュー、必要ならスキル停止 |
 
-> 表の CVE 番号・バージョンは仕様書の値です。一次情報との相違（例: Cursor CVE-2026-50548 の修正版、trivy-action の版番号）は [docs/ioc-verification.md](docs/ioc-verification.md) を参照してください。
+> 表と `rules/ioc.json` の値は、一次情報で確認できた相違を 5.2.1 で反映済みです（[docs/ioc-verification.md](docs/ioc-verification.md) の「5.2.1 での反映」）。確認できなかった値は注記付きで仕様書の値のままです。
 
 ## Blast Radius 手順
 
@@ -219,13 +219,15 @@ SkillPact v0.8 の公式スキーマは一次情報で確認できていませ�
 - **git の呼び出し**（§38/§46）: 検査対象リポジトリの設定（`core.fsmonitor` / `gpg.program` / `core.sshCommand` 等）経由でコマンドが起動されないよう、危険な設定を無効化して実行します。
 - **ZES 自身の除外**: `rules/` や `tests/` は IoC 文字列を含むため、検査ルートが ZES の外側にある場合は ZES ディレクトリを走査対象から除外します。
 - **ネットワーク IoC の無害化**: §13 の運用ルールに合わせ、ioc.json のドメイン・IP・URL はすべて `[.]` / `hxxp` 形式で格納し、照合時に戻します（仕様書の表記は一部が未無害化でした）。
-- **GitHub Actions（§21）**: 受け入れ基準どおり `pull_request_target + actions/checkout(refなし) + secrets` を CRITICAL にしています。加えて、PR の head を checkout する一般的な pwn request（`ref: ${{ github.event.pull_request.head.sha }}`）も CRITICAL にしています。技術的には後者が本来の危険パターンで、ref なし checkout はベースブランチを取得するため危険度は低めです（仕様の見直し候補）。
+- **GitHub Actions（§21）**: PR の head を checkout する pwn request（`ref: ${{ github.event.pull_request.head.sha }}` 等）を CRITICAL、`pull_request_target + actions/checkout(refなし) + secrets` を HIGH にしています（5.2.1 で CRITICAL から変更。ref なし checkout はベースブランチを取得するため、危険度は後続ステップ次第）。
 - **既定の重大度**: npx/uvx の MCP command は普及しているため MEDIUM、curl/wget/bash -c/powershell -enc/node -e は HIGH にしています。
+- **悪用された正規インフラ**（§18）: `seed1/seed2.getsession.org`（Session）と Ethereum RPC（nodereal / getblock / llamarpc）は、名前の出現だけでは侵害と断定できないため MEDIUM で報告します（`rules/ioc.json` の `legit_infra`）。
+- **カーネル**（§23）: upstream の修正版と `uname -r` を比べます。ディストリビューションのバックポートは判定できないため、HIGH の結果は各ディストリのアドバイザリで確認してください。
 
 ## テスト
 
 ```bash
-tests/run-tests.sh            # IoC DB 検証・campaign 同期・27 フィクスチャ照合・横断チェック
+tests/run-tests.sh            # IoC DB 検証・campaign 同期・29 フィクスチャ照合・横断チェック
 tests/run-tests.sh --update   # 期待値の再生成（差分は必ず目視レビュー）
 tests/run-tests.sh --sync-campaigns   # rules/campaigns/*.json を ioc.json から再生成
 tests/zero-exec.sh            # strace で execve を監視し、フィクスチャ・対象ランタイムの実行ゼロを確認（Linux）
