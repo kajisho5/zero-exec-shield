@@ -10,6 +10,13 @@
   - MCP / GitHub Actions / ブラウザ拡張ビューア、テキスト貼り付け判定、findings.json の書き出し・CLI 出力の読み込み
   - 判定エンジンは CLI と同じ `rules/ioc.json`（5.2.1 の legit_infra / eth_contracts / trivy-action safe_tags を含む）を参照
 - テスト: Vitest 23 件（CLI と共通の tests/fixtures を使用）、Playwright 7 件（外部リクエストゼロ・CSP 違反なし・主要操作）、成果物の静的検査（`ui/scripts/verify-no-network.mjs`）
+## 5.2.3 — 2026-10-22
+
+### 修正
+
+- §16: 個別判定のある製品（TeamCity / JFrog Artifactory）に 5.2.2 で追記した CVE（TeamCity CVE-2026-111094 / 106218、Artifactory CVE-2026-42016 / 42018 / 66384）が判定されていなかった。`cves[].generic` で汎用判定の対象にした
+- テスト: `gitlab/compose.safe.yml` を新しい CVE の修正版に更新
+
 ## 5.2.2 — 2026-10-22
 
 `incident_bundle`: `ZES-2026-OCT-EMERGENCY-V5.2`（据え置き）
