@@ -5,6 +5,8 @@ import { checkoutRefs } from '../../src/engine/rules/ciAndExtensions';
 import { parseCodexToml } from '../../src/engine/rules/agentConfig';
 import { refang, versionMatches } from '../../src/engine/util';
 import { loadFixture } from './fixtures';
+import { debianCaFixed, versionBranchVulnerable } from '../../src/engine/rules/intel';
+import { readFileSync } from 'node:fs';
 
 const keys = (r: Awaited<ReturnType<typeof analyzeFiles>>) => r.findings.map((f) => `${f.level} ${f.module} ${f.path ?? ''}`).sort();
 
@@ -161,5 +163,39 @@ describe('内容非出力・決定性・エクスポート', () => {
     const back = parseFindingsDoc(JSON.stringify(doc));
     expect(back.findings.length).toBe(r.findings.length);
     expect(() => parseFindingsDoc('{"schema_version":"9"}')).toThrow();
+  });
+});
+
+describe('ZES 5.2.2 / 5.2.3 の検知データ（CLI と同じフィクスチャ）', () => {
+  // CLI の期待値（tests/expected）のうち、ブラウザで判定できるモジュール（ホスト状態・§14 等を除く）
+  const cli = (name: string, modules: string[]) =>
+    (JSON.parse(readFileSync(new URL(`../../../tests/expected/${name}.json`, import.meta.url), 'utf8')) as { findings: { level: string; module: string; path: string }[] }).findings
+      .filter((f) => modules.includes(f.module) && f.level !== 'INFO').map((f) => `${f.level} ${f.module} ${name}/${f.path}`).sort();
+  const MODS = ['§3', '§4', '§6', '§15', '§16', '§22', '§38'];
+  const ui = (r: Awaited<ReturnType<typeof analyzeFiles>>) => [...new Set(r.findings.filter((f) => MODS.includes(f.module)).map((f) => `${f.level} ${f.module} ${f.path ?? ''}`))].sort();
+  it('intel-2026q3: GitLab / PHP2Shell / eMudhra / Jenkins / Gitea / 脆弱版 / 悪性パッケージ / Actions', async () => {
+    const r = await analyzeFiles(loadFixture('intel-2026q3'));
+    expect(ui(r)).toEqual([...new Set(cli('intel-2026q3', MODS))].sort());
+    expect(r.findings.some((f) => f.module === '§7' && f.campaign === 'actions-cool-reactivation-sep2026')).toBe(true);
+    expect(r.findings.some((f) => f.module === '§18' && f.campaign === 'macsync-icloud-calendar-finder-backdoor')).toBe(true);
+    const vuln = r.findings.find((f) => f.detail.startsWith('脆弱なバージョン @modelcontextprotocol/sdk@1.31.0'));
+    expect(vuln?.level).toBe('HIGH');
+  });
+  it('intel-2026q3-safe: 修正版は検出しない', async () => {
+    const r = await analyzeFiles(loadFixture('intel-2026q3-safe'));
+    expect(ui(r)).toEqual([]);
+  });
+  it('gitlab: TeamCity / Artifactory に追記した CVE も判定（5.2.3）', async () => {
+    const r = await analyzeFiles(loadFixture('gitlab'));
+    expect(ui(r)).toEqual([...new Set(cli('gitlab', ['§3', '§16']))].sort());
+  });
+  it('系列ごとの修正版判定', () => {
+    expect(versionBranchVulnerable('19.4.2', ['19.5.1', '19.4.3'])).toBe(true);
+    expect(versionBranchVulnerable('19.4.3', ['19.5.1', '19.4.3'])).toBe(false);
+    expect(versionBranchVulnerable('18.10.9', ['19.5.1', '18.11.13'])).toBe(true);
+    expect(versionBranchVulnerable('19.6.0', ['19.5.1', '18.11.13'])).toBe(false);
+    expect(debianCaFixed('20250419~deb12u2')).toBe(true);
+    expect(debianCaFixed('20250419~deb12u1')).toBe(false);
+    expect(debianCaFixed('20240203')).toBe(false);
   });
 });

@@ -2,6 +2,7 @@ import type { RuleCtx } from './context';
 import { IOC, type IocDb } from './ioc';
 import { aiAssistantRules, mcpRules } from './rules/agentConfig';
 import { actionsRules, extensionRules } from './rules/ciAndExtensions';
+import { emudhraRules, infraRules, intelRules } from './rules/intel';
 import { buildHookRules, credentialRules, ebpfRules, modelSupplyRules, persistenceRules, sigstoreRules } from './rules/codeAndHost';
 import { analyzePasteText } from './rules/network';
 import { networkRules } from './rules/network';
@@ -42,6 +43,9 @@ export async function analyzeFiles(input: FileInput[], ioc: IocDb = IOC): Promis
   ebpfRules(ctx);
   sigstoreRules(ctx);
   credentialRules(ctx);
+  infraRules(ctx);
+  emudhraRules(ctx);
+  intelRules(ctx);
   blastRadius(ctx);
   const skillpact = skillpactRules(ctx);
 

@@ -41,7 +41,7 @@ export function filenameRules(ctx: RuleCtx): void {
   }
 }
 
-type Dep = { eco: 'npm' | 'pypi'; name: string; version: string; path: string; sha: string | null };
+type Dep = { eco: 'npm' | 'pypi' | 'cargo' | 'packagist' | 'gem'; name: string; version: string; path: string; sha: string | null };
 
 function normPypi(n: string): string {
   return n.toLowerCase().replace(/[_.]/g, '-');
@@ -63,6 +63,24 @@ function collectDeps(ctx: RuleCtx): Dep[] {
         const j = JSON.parse(f.text) as { name?: string; version?: string };
         if (j.name && j.version) out.push({ eco: 'npm', name: j.name, version: j.version, path: f.relPath, sha: f.sha256 });
       } catch { /* noop */ }
+    } else if (f.name === 'Cargo.lock') {
+      // [[package]] ブロックの name / version（CLI build_deps と同じ）
+      for (const b of f.text.split(/^\[\[package\]\]\s*$/m).slice(1)) {
+        const n = /^name\s*=\s*"([^"]+)"/m.exec(b)?.[1];
+        const v = /^version\s*=\s*"([^"]+)"/m.exec(b)?.[1];
+        if (n && v) out.push({ eco: 'cargo', name: n, version: v, path: f.relPath, sha: f.sha256 });
+      }
+    } else if (f.name === 'composer.lock') {
+      try {
+        const j = JSON.parse(f.text) as { packages?: { name?: string; version?: string }[]; 'packages-dev'?: { name?: string; version?: string }[] };
+        for (const p of [...(j.packages ?? []), ...(j['packages-dev'] ?? [])]) {
+          if (p.name && p.version) out.push({ eco: 'packagist', name: p.name, version: p.version.replace(/^v/, ''), path: f.relPath, sha: f.sha256 });
+        }
+      } catch { /* noop */ }
+    } else if (f.name === 'Gemfile.lock') {
+      for (const m of f.text.matchAll(/^ {4}([A-Za-z0-9._-]+) \(([0-9][^)\s]*)\)$/gm)) {
+        if (m[1] && m[2]) out.push({ eco: 'gem', name: m[1], version: m[2], path: f.relPath, sha: f.sha256 });
+      }
     } else if (/^(requirements|constraints).*\.txt$/.test(f.name)) {
       for (const line of f.text.split(/\r?\n/)) {
         const m = /^\s*([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*===?\s*([^\s;,#]+)/.exec(line);
@@ -104,8 +122,8 @@ export function packageRules(ctx: RuleCtx): void {
   }
   const deps = collectDeps(ctx);
   for (const p of ctx.ioc.packages) {
-    if (p.eco !== 'npm' && p.eco !== 'pypi') continue;
-    if (!['versions', 'any_version', 'unknown_versions'].includes(p.match ?? 'versions')) continue;
+    if (!['npm', 'pypi', 'cargo', 'packagist', 'gem'].includes(p.eco)) continue;
+    if (!['versions', 'vulnerable_versions', 'any_version', 'unknown_versions'].includes(p.match ?? 'versions')) continue;
     const want = p.eco === 'pypi' ? normPypi(p.name) : p.name;
     for (const d of deps) {
       if (d.eco !== p.eco) continue;
@@ -117,8 +135,10 @@ export function packageRules(ctx: RuleCtx): void {
 
 function emitPackage(ctx: RuleCtx, p: IocPackage, d: Dep): void {
   const match = p.match ?? 'versions';
-  const hit = match === 'any_version' || (match === 'versions' && (p.bad_versions ?? []).some((s) => versionMatches(d.version, s)));
-  if (hit) {
+  const hit = match === 'any_version' || ((match === 'versions' || match === 'vulnerable_versions') && (p.bad_versions ?? []).some((s) => versionMatches(d.version, s)));
+  if (hit && match === 'vulnerable_versions') {
+    push(ctx, { level: 'HIGH', module: '§15', campaign: p.campaign, path: d.path, detail: `脆弱なバージョン ${d.name}@${d.version}（${d.eco}、悪性ではなく CVE の影響範囲）${p.safe_version ? `。修正版: ${p.safe_version} 以上` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });
+  } else if (hit) {
     push(ctx, { level: 'CRITICAL', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害パッケージ ${d.name}@${d.version} を検出（${d.eco}）${p.safe_version ? `。安全版: ${p.safe_version}` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });
   } else if (match === 'unknown_versions') {
     push(ctx, { level: 'MEDIUM', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害報告のあるパッケージ ${d.name}@${d.version}（侵害版の特定バージョン未定義のため要確認）`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });

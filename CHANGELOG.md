@@ -9,7 +9,9 @@
   - SkillPact タブ: 宣言 / 実態エフェクトの差分（未宣言を赤・破線）、L3 は「署名済みファイル」（安全色・「安全」表記なし）、ポリシー決定、prose 矛盾、差分異常、§49 検出ルール 12 行
   - MCP / GitHub Actions / ブラウザ拡張ビューア、テキスト貼り付け判定、findings.json の書き出し・CLI 出力の読み込み
   - 判定エンジンは CLI と同じ `rules/ioc.json`（5.2.1 の legit_infra / eth_contracts / trivy-action safe_tags を含む）を参照
-- テスト: Vitest 23 件（CLI と共通の tests/fixtures を使用）、Playwright 7 件（外部リクエストゼロ・CSP 違反なし・主要操作）、成果物の静的検査（`ui/scripts/verify-no-network.mjs`）
+  - 5.2.2 / 5.2.3 の検知データにも対応: GitLab（§3）・PHP2Shell（§4）・開発インフラ CVE のイメージタグ判定（§16）、eMudhra（§6: dpkg / apk のパッケージ DB、`.nvmrc` 等の版固定、Node / Deno / Java イメージ）、収集インテル（悪性ファイルのハッシュ・名前、ネットワーク IoC、侵害 Actions、CI / AI 設定の悪性文字列、拡張、LaunchAgent / systemd の痕跡）、Cargo.lock / composer.lock / Gemfile.lock、`vulnerable_versions`（HIGH）。新しい検出は「総合」タブに表示（タブ構成は変更なし）
+  - 同じネットワーク IoC が複数キャンペーンに載っている場合に重複して報告しない
+- テスト: Vitest 27 件（CLI と共通の tests/fixtures を使用）、Playwright 7 件（外部リクエストゼロ・CSP 違反なし・主要操作）、成果物の静的検査（`ui/scripts/verify-no-network.mjs`）
 ## 5.2.3 — 2026-10-22
 
 ### 修正

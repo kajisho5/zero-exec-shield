@@ -29,9 +29,48 @@ export interface SkillPactRules {
   script_extensions: string[];
 }
 
+export interface InfraCve {
+  id: string;
+  cvss?: number | null;
+  fixed?: string[];
+  severity?: string;
+  kev?: boolean;
+  /** 個別判定のある製品に追記した CVE を汎用判定の対象にする */
+  generic?: boolean;
+}
+
+export interface Infrastructure {
+  id: string;
+  generic?: boolean;
+  image_patterns?: string[];
+  binary?: string;
+  cves: InfraCve[];
+}
+
+/** 収集インテル（5.2.2）。CLI の intel_* 関数と同じデータ */
+export interface IntelDb {
+  files?: { campaign: string; severity?: string; sha256?: string[]; names?: string[]; name_severity?: string }[];
+  network?: { campaign: string; domains?: string[]; ips?: string[]; urls?: string[]; legit_infra?: string[] }[];
+  actions?: { campaign: string; action: string; severity?: string; bad_refs?: string[]; safe_refs?: string[] }[];
+  workflow_strings?: { campaign: string; severity?: string; strings?: string[] }[];
+  strings?: { campaign: string; module: string; severity?: string; file_regex?: string; strings?: string[] }[];
+  extensions?: { campaign: string; eco: string; severity?: string; ids?: string[]; bad_versions?: string[] }[];
+  host?: { campaign: string; severity?: string; paths?: string[]; launch_labels?: string[]; systemd_units?: string[]; process_names?: string[] }[];
+  apps?: { campaign: string; bundle: string; cve: string; severity?: string; fixed: string }[];
+}
+
+export interface EmudhraRules {
+  fixed?: { node?: string[]; java?: string[]; java8_update?: number; deno?: string[]; [k: string]: unknown };
+  os_ca_certificates?: { ubuntu_min_upstream?: string; alpine?: string; [k: string]: unknown };
+  [k: string]: unknown;
+}
+
 export interface IocDb {
   incident_bundle: string;
   packages: IocPackage[];
+  infrastructures?: Infrastructure[];
+  intel?: IntelDb;
+  emudhra?: EmudhraRules;
   worm_iocs: {
     chaindrop: { files: string[]; preinstall: string; hashes: { sha256: Record<string, string[]> }; domains: string[]; eth_contracts?: string[]; legit_infra?: string[] };
     teampcp: { c2_ip: string[]; c2_domains: string[]; legit_infra?: string[] };

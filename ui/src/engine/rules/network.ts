@@ -9,14 +9,21 @@ export interface NetIoc { value: string; campaign: string; kind: 'malicious' | '
 export function networkIocs(ioc: IocDb): NetIoc[] {
   const w = ioc.worm_iocs;
   const m = (xs: string[] | undefined, campaign: string, kind: NetIoc['kind']) => (xs ?? []).map((v) => ({ value: refang(v), campaign, kind }));
-  return [
+  const all: NetIoc[] = [
     ...m(w.chaindrop.domains, 'chaindrop-keyv', 'malicious'),
     ...m(w.chaindrop.eth_contracts, 'chaindrop-keyv', 'malicious'),
     ...m(w.teampcp.c2_ip, 'teampcp-mini-shai-hulud', 'malicious'),
     ...m(w.teampcp.c2_domains, 'teampcp-mini-shai-hulud', 'malicious'),
     ...m(w.chaindrop.legit_infra, 'chaindrop-keyv', 'legit'),
     ...m(w.teampcp.legit_infra, 'teampcp-mini-shai-hulud', 'legit'),
+    ...(ioc.intel?.network ?? []).flatMap((n) => [
+      ...m([...(n.domains ?? []), ...(n.ips ?? []), ...(n.urls ?? [])], n.campaign, 'malicious'),
+      ...m(n.legit_infra, n.campaign, 'legit'),
+    ]),
   ];
+  // 同じ値が複数キャンペーンに載っている場合は最初の 1 件（キャンペーン固有の worm_iocs を優先）
+  const seen = new Set<string>();
+  return all.filter((i) => { const k = i.value.toLowerCase(); return seen.has(k) ? false : (seen.add(k), true); });
 }
 
 export function networkRules(ctx: RuleCtx): void {
