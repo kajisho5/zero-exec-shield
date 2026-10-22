@@ -11,7 +11,8 @@
 - `findings[].skillpact` フィールド（findings.json schema 1.0）
 - `rules/ioc.json`（Master Spec §3 の全データ、`skillpact` セクション）と `rules/campaigns/*.json`（11 ファイル、ioc.json から生成）
 - `SKILL.md`（検知スキル / IoC 抽出モード / マージルール）
-- `docs/skill-contracts.md`（vuln-triage / remediation の契約、SkillPact 不変条件）
+- `docs/skill-contracts.md`（ZET / GER の契約、SkillPact 不変条件）
+- `schemas/findings.schema.json`（findings.json の JSON Schema。判断層 ZET は `schema_version` を固定して参照）
 - `tests/run-tests.sh`（IoC DB 検証・campaign 同期・フィクスチャ照合・横断チェック）、`tests/zero-exec.sh`（strace による execve 監視）
 - `docs/ioc-verification.md`（IoC の一次情報照合レポート）
 - `docs/design/`（index.html の設計書と SVG デザイン。実装は承認待ち）
@@ -19,7 +20,7 @@
 ### 未実装
 
 - `index.html`（設計レビュー後に実装）
-- vuln-triage / remediation スキル本体（今後実装予定。インターフェースは docs/skill-contracts.md で定義済み）
+- ZET / GER スキル本体（今後実装予定。インターフェースは docs/skill-contracts.md で定義済み）
 
 ## 5.1 以前
 

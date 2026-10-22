@@ -1,6 +1,7 @@
 # ZES スキル契約書（Skill Contracts）— 判断層・修復層
 
-- **対象**: `vuln-triage`（判断層） / `remediation`（修復層）
+- **対象**: ZET — Zero-Exec Triage（判断層、リポジトリ [kajisho5/zero-exec-triage](https://github.com/kajisho5/zero-exec-triage)） / GER — Gated-Exec Remediation（修復層、リポジトリ [kajisho5/gated-exec-remediation](https://github.com/kajisho5/gated-exec-remediation)）
+- **スキーマの所有**: 出力する層がスキーマを持ち、受け取る層は `schema_version` を固定して参照する（findings.json → ZES [`schemas/findings.schema.json`](../schemas/findings.schema.json) / remediation-plan.json → ZET / remediation-log.json → GER）
 - **前段**: 検知層 `zes-scan`（[SKILL.md](../SKILL.md)）が出力する findings.json
 - **位置づけ**: 判断層・修復層スキルは今後実装予定。本書はその実装に先立つインターフェース定義であり、検知層（ZES）は §9 の出力保証でこれに準拠する
 - **版**: ZES v5.2（`incident_bundle`: `ZES-2026-OCT-EMERGENCY-V5.2`）
@@ -8,9 +9,9 @@
 ```
 [検知層] zes-scan … read-only、契約検証、乖離検出
       ↓ findings.json（skillpactフィールド付き）
-[判断層] vuln-triage … 乖離の影響判定、例外承認
+[判断層] ZET（Zero-Exec Triage） … 乖離の影響判定、例外承認
       ↓ remediation-plan.json
-[修復層] remediation … 明示承認後のみ実行
+[修復層] GER（Gated-Exec Remediation） … 明示承認後のみ実行
 ```
 
 ## 1. 共通契約
@@ -22,7 +23,7 @@
 - 検知ログと修復ログは別ファイル・別リテンション
 - 判断層は read-only、修復層は許可リスト方式
 
-## 2. `vuln-triage` 入力
+## 2. ZET 入力
 
 ```json
 {
@@ -41,7 +42,7 @@
 }
 ```
 
-## 3. `vuln-triage` 出力 `remediation-plan.json`
+## 3. ZET 出力 `remediation-plan.json`
 
 ```json
 {
@@ -67,7 +68,7 @@
 }
 ```
 
-## 4. `vuln-triage` 不変条件
+## 4. ZET 不変条件
 
 - 全 finding に判断を付与する（`held` は明示的保留であり未判断ではない）
 - `exception` には `exception_type` / `reason` / `recheck_at` / 判断者以外の `approved_by` が必須
@@ -82,7 +83,7 @@
   - `skillpact_policy.l3_trusted` は既定 `false`。L3 署名を信頼の根拠にしない（差分異常と併せて評価）
   - L3 署名の検証（`cosign verify` 等）が必要な場合は、判断層で人間が実行する（検知層は存在確認のみ）
 
-## 5. `remediation` 入力
+## 5. GER 入力
 
 ```json
 {
@@ -99,7 +100,7 @@
 }
 ```
 
-## 6. `remediation` 出力 `remediation-log.json`
+## 6. GER 出力 `remediation-log.json`
 
 ```json
 {
@@ -123,7 +124,7 @@
 }
 ```
 
-## 7. `remediation` 不変条件
+## 7. GER 不変条件
 
 - 承認なき実行禁止、`plan_id` 不一致は拒否
 - dry-run を経ない apply 禁止

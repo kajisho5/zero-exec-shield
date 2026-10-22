@@ -132,6 +132,29 @@ done
 
 # ---------------------------------------------------------------------------
 echo "== 横断チェック =="
+# schemas/findings.schema.json による検証（python3 + jsonschema がある場合。無ければ SKIP と明示）
+if python3 -I -c 'import jsonschema' 2>/dev/null; then
+  for m in full skillpact; do run_scan "$FIX" "$m" "$FIX/_home" >"$TMP/schema-$m.json"; done
+  run_scan "$FIX/chaindrop" quick "$FIX/_home" env ZES_FORCE_NO_JQ=1 >"$TMP/schema-nojq.json"
+  if out="$(python3 -I - "$REPO/schemas/findings.schema.json" "$TMP"/schema-*.json <<'PY' 2>&1
+import json, sys
+from jsonschema import Draft202012Validator
+schema = json.load(open(sys.argv[1], encoding="utf-8"))
+Draft202012Validator.check_schema(schema)
+v = Draft202012Validator(schema)
+bad = 0
+for f in sys.argv[2:]:
+    for e in v.iter_errors(json.load(open(f, encoding="utf-8"))):
+        bad += 1
+        print(f"{f.rsplit('/', 1)[-1]}: {'/'.join(map(str, e.absolute_path))}: {e.message}"[:300])
+sys.exit(1 if bad else 0)
+PY
+)"; then ok "出力が schemas/findings.schema.json に適合（full / skillpact / jq なし）"
+  else ng "出力が schemas/findings.schema.json に不適合" "$(printf '%s' "$out" | head -n 20)"; fi
+else
+  printf '  SKIP schemas/findings.schema.json の検証（python3 の jsonschema が未導入）\n'
+fi
+
 # 決定的 ID（再スキャンで同一）
 run_scan "$FIX/skillpact-divergence" skillpact "$FIX/_home" | jq -r '[.findings[].id] | sort | join(",")' >"$TMP/id1"
 run_scan "$FIX/skillpact-divergence" skillpact "$FIX/_home" | jq -r '[.findings[].id] | sort | join(",")' >"$TMP/id2"

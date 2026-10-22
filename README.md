@@ -18,15 +18,16 @@
 | `rules/ioc.json` / `rules/campaigns/*.json` — IoC データベース | 実装済み（値は仕様書からの転記。照合結果は [docs/ioc-verification.md](docs/ioc-verification.md)） |
 | `SKILL.md` — 検知スキル / IoC 抽出モード | 実装済み |
 | `tests/` — フィクスチャ・期待値・`run-tests.sh`・`zero-exec.sh` | 実装済み |
-| `docs/skill-contracts.md` — 判断層・修復層のスキル契約書 | 契約定義済み（vuln-triage / remediation スキル本体は今後実装予定） |
+| `schemas/findings.schema.json` — findings.json の出力契約（JSON Schema 2020-12、strict） | 実装済み（ZET はこれで入力を検証） |
+| `docs/skill-contracts.md` — 判断層・修復層のスキル契約書 | 契約定義済み（ZET / GER スキル本体は今後実装予定） |
 | `index.html` — Web Scanner UI | **設計レビュー待ち**（[設計書](docs/design/ui-design.md) と SVG デザイン [総合](docs/design/ui-overview.svg) / [SkillPact](docs/design/ui-skillpact.svg) / [部品](docs/design/ui-components.svg)。承認後に React 実装） |
 
 ```
 [検知層] ZES（zes-scan.sh / index.html / rules）
       ↓ findings.json
-[判断層] vuln-triage（影響判定・例外承認・期限付与）
+[判断層] ZET（Zero-Exec Triage）（影響判定・例外承認・期限付与）
       ↓ remediation-plan.json
-[修復層] remediation（明示承認後のみ実行）
+[修復層] GER（Gated-Exec Remediation）（明示承認後のみ実行）
 ```
 
 ## 動作要件

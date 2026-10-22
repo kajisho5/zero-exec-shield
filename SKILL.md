@@ -1,6 +1,6 @@
 ---
 name: zes-scan
-description: Zero-Exec Shield (ZES) v5.2 の検知スキル。サプライチェーン攻撃・CA危殆化・インフラRCE・AI開発環境トラップ・SkillPact契約乖離を、対象を一切実行しない静的解析で検疫し findings.json を出力する。新規脅威インテリジェンスから IoC を抽出して rules/ioc.json を拡張する「IoC抽出モード」も持つ。検知のみ（read-only）で、判断は vuln-triage、修復は remediation スキルが担う。
+description: Zero-Exec Shield (ZES) v5.2 の検知スキル。サプライチェーン攻撃・CA危殆化・インフラRCE・AI開発環境トラップ・SkillPact契約乖離を、対象を一切実行しない静的解析で検疫し findings.json を出力する。新規脅威インテリジェンスから IoC を抽出して rules/ioc.json を拡張する「IoC抽出モード」も持つ。検知のみ（read-only）で、判断は ZET（zero-exec-triage）、修復は GER（gated-exec-remediation）が担う。
 ---
 
 # ZES 検知スキル（zes-scan）
@@ -11,9 +11,9 @@ description: Zero-Exec Shield (ZES) v5.2 の検知スキル。サプライチェ
 ```
 [検知スキル] zes-scan … read-only、契約検証、乖離検出
       ↓ findings.json（skillpactフィールド付き）
-[判断スキル] vuln-triage … 乖離の影響判定、例外承認
+[判断スキル] ZET（zero-exec-triage） … 乖離の影響判定、例外承認
       ↓ remediation-plan.json
-[修復スキル] remediation … 明示承認後のみ実行
+[修復スキル] GER（gated-exec-remediation） … 明示承認後のみ実行
 ```
 
 ## 絶対ルール
@@ -40,7 +40,7 @@ description: Zero-Exec Shield (ZES) v5.2 の検知スキル。サプライチェ
 2. `--json` で実行し、標準出力の findings.json を保存する（標準エラーは人間向けログ）。
 3. 結果を報告する: `status`、重大度別件数、CRITICAL/HIGH の `module`・`campaign`・`path`・`detail`、`errors[]`（未確定モジュール）。
 4. SkillPact の finding は `skillpact.divergence`・`policy_decision`・`l2_tested`・`signed`・`diff_anomaly` を併記する。`signed: true` を「安全」と表現しない。
-5. 修復手順を提案する場合も実行はしない。vuln-triage に渡す findings.json のパスを示して終える。
+5. 修復手順を提案する場合も実行はしない。ZET に渡す findings.json のパスを示して終える。
 
 報告に含めないもの: ファイルの中身、シークレットの値、トークン文字列。
 
@@ -72,5 +72,5 @@ description: Zero-Exec Shield (ZES) v5.2 の検知スキル。サプライチェ
 
 ## 判断層・修復層への受け渡し
 
-- 検知スキルは findings.json を出力して終わる。例外承認・期限設定は vuln-triage、変更操作は remediation の責務。
+- 検知スキルは findings.json を出力して終わる。例外承認・期限設定は ZET、変更操作は GER の責務。
 - 判断層は findings の `id` / `level` / `module` を改変しない。修復層は findings.json を直接読まない（`docs/skill-contracts.md` 参照）。
