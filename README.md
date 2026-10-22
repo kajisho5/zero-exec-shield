@@ -18,7 +18,7 @@
 | `rules/ioc.json` / `rules/campaigns/*.json` — IoC データベース | 実装済み（値は仕様書からの転記。照合結果は [docs/ioc-verification.md](docs/ioc-verification.md)） |
 | `SKILL.md` — 検知スキル / IoC 抽出モード | 実装済み |
 | `tests/` — フィクスチャ・期待値・`run-tests.sh`・`zero-exec.sh` | 実装済み |
-| `docs/skill-contracts.md` — 判断層・修復層のスキル契約書 | 実装済み |
+| `docs/skill-contracts.md` — 判断層・修復層のスキル契約書 | 契約定義済み（vuln-triage / remediation スキル本体は今後実装予定） |
 | `index.html` — Web Scanner UI | **設計レビュー待ち**（[設計書](docs/design/ui-design.md) と SVG デザイン [総合](docs/design/ui-overview.svg) / [SkillPact](docs/design/ui-skillpact.svg) / [部品](docs/design/ui-components.svg)。承認後に React 実装） |
 
 ```

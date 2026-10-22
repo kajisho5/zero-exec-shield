@@ -19,7 +19,7 @@
 ### 未実装
 
 - `index.html`（設計レビュー後に実装）
-- vuln-triage / remediation スキルの実装（契約書のみ）
+- vuln-triage / remediation スキル本体（今後実装予定。インターフェースは docs/skill-contracts.md で定義済み）
 
 ## 5.1 以前
 

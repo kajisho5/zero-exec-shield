@@ -2,6 +2,7 @@
 
 - **対象**: `vuln-triage`（判断層） / `remediation`（修復層）
 - **前段**: 検知層 `zes-scan`（[SKILL.md](../SKILL.md)）が出力する findings.json
+- **位置づけ**: 判断層・修復層スキルは今後実装予定。本書はその実装に先立つインターフェース定義であり、検知層（ZES）は §9 の出力保証でこれに準拠する
 - **版**: ZES v5.2（`incident_bundle`: `ZES-2026-OCT-EMERGENCY-V5.2`）
 
 ```
