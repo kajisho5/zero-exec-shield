@@ -23,7 +23,8 @@ set -u
 set -o pipefail
 umask 077
 
-ZES_VERSION="5.2"
+ZES_VERSION="0.1.0"      # ソフトウェアの版
+ZES_SPEC_VERSION="5.2"   # 準拠する Master Specification の版
 INCIDENT_BUNDLE="ZES-2026-OCT-EMERGENCY-V5.2"
 FINDINGS_SCHEMA_VERSION="1.0"
 
@@ -2842,7 +2843,7 @@ main() {
   if [ "$ib" != "$INCIDENT_BUNDLE" ]; then
     record_error "core" "incident_bundle_mismatch:${ib:-none}"
   fi
-  printf '%sZero-Exec Shield v%s%s  bundle=%s  mode=%s  root=%s  os=%s  jq=%s\n' "$C_CYN" "$ZES_VERSION" "$C_OFF" "$INCIDENT_BUNDLE" "$MODE" "$ROOT" "$OS_NAME" "$HAVE_JQ" >&3
+  printf '%sZero-Exec Shield v%s（仕様 v%s）%s  bundle=%s  mode=%s  root=%s  os=%s  jq=%s\n' "$C_CYN" "$ZES_VERSION" "$ZES_SPEC_VERSION" "$C_OFF" "$INCIDENT_BUNDLE" "$MODE" "$ROOT" "$OS_NAME" "$HAVE_JQ" >&3
   [ "$HAVE_JQ" -eq 1 ] || log_info "jq が見つかりません。grep フォールバックで実行します（§48/§49 は未確定扱い）"
   build_inventory
   local n

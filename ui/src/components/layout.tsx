@@ -9,7 +9,7 @@ export function Header({ onExport, onClear, canExport }: { onExport(): void; onC
       <Icon name="brand" size={32} className="text-accent" />
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-semibold">Zero-Exec Shield</h1>
-        <span className="rounded-md border border-border-strong bg-surface-2 px-1.5 text-xs text-muted">v5.2</span>
+        <span className="rounded-md border border-border-strong bg-surface-2 px-1.5 text-xs text-muted" title="準拠仕様 v5.2">v0.1.0</span>
       </div>
       <div className="ml-4 leading-tight">
         <div className="text-[11px] text-subtle">incident_bundle</div>
