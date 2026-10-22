@@ -46,5 +46,7 @@ jobs:
         run: npm run build
       - name: コミット済みの index.html がソースから再現できること
         run: git diff --exit-code -- ../index.html
-      - name: e2e
-        run: npx playwright install --with-deps chromium && npm run test:e2e
+      - name: e2e（Chromium / Firefox / WebKit）
+        run: npx playwright install --with-deps chromium firefox webkit && npm run test:e2e
+        env:
+          E2E_ALL_BROWSERS: '1'
