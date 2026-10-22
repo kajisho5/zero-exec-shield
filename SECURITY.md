@@ -1,6 +1,6 @@
 # セキュリティポリシー
 
-ZES（Zero-Exec Shield） 自体の脆弱性は、公開の Issue ではなく、GitHub の非公開報告で知らせてください。
+ZES（Zero-Exec Shield）自体の脆弱性は、公開の Issue ではなく、GitHub の非公開報告で知らせてください。
 
 1. リポジトリの **Security** タブを開く
 2. **Report a vulnerability** を選ぶ
