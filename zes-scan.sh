@@ -1856,24 +1856,31 @@ check_s20() {
 
 # GitHub Actions ワークフロー一覧
 workflow_files() { files_path '/\.github/workflows/[^/]+\.ya?ml$'; }
-# ワークフロー本文の正規化（CRLF・BOM 除去、"uses: >-" / "uses: |" のブロックスカラーを 1 行に畳む）
-#   uses: >-
-#     actions/checkout@v4      →   uses: actions/checkout@v4
+# ワークフロー本文の正規化（CRLF・BOM 除去、値が次行以降に続くキーを 1 行に畳む）
+#   - ブロックスカラー（"key: >-" / "key: |" 等）: より深くインデントされた後続行を全て空白区切りで連結
+#   - 値が空のキーの後にプレーンスカラーが続く場合（"- uses:" の次行に値）: マッピング/シーケンスでない
+#     より深い後続行を連結（YAML のプレーンスカラーの複数行折り返し）
+#   uses: >-                              - uses:
+#     actions/checkout@v4   → uses: actions/checkout@v4      actions/checkout@v4 → - uses: actions/checkout@v4
 workflow_text() {
   text_lines "$1" | awk '
     pend != "" {
-      if ($0 ~ /^[[:space:]]*$/) next
+      if ($0 ~ /^[[:space:]]*$/ || (!blk && $0 ~ /^[[:space:]]*#/)) next
       match($0, /^[[:space:]]*/)
-      if (RLENGTH > pind) { v = $0; sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+#.*$/, "", v); sub(/[[:space:]]+$/, "", v); print pend v; pend = ""; next }
-      print pend; pend = ""
+      if (RLENGTH > pind && (blk || $0 !~ /^[[:space:]]*(-([[:space:]]|$)|["\047]?[A-Za-z0-9_.$-]+["\047]?:([[:space:]]|$))/)) {
+        v = $0; sub(/^[[:space:]]+/, "", v); if (!blk) sub(/[[:space:]]+#.*$/, "", v); sub(/[[:space:]]+$/, "", v)
+        acc = acc (acc == "" ? "" : " ") v; next }
+      print pend (acc != "" ? " " acc : ""); pend = ""; acc = ""
     }
-    /uses:[[:space:]]*[>|][-+0-9]*[[:space:]]*(#.*)?$/ {
+    /^[[:space:]]*(-[[:space:]]+)?["\047]?[A-Za-z0-9_.$-]+["\047]?:[[:space:]]*([>|][-+0-9]*)?[[:space:]]*(#.*)?$/ {
       match($0, /^[[:space:]]*/); pind = RLENGTH
       if ($0 ~ /^[[:space:]]*-[[:space:]]/) { t = $0; sub(/^[[:space:]]*-[[:space:]]+/, "", t); pind = length($0) - length(t) - 1 }
-      pend = $0; sub(/[>|][-+0-9]*[[:space:]]*(#.*)?$/, "", pend); next
+      pend = $0; sub(/[[:space:]]*(#.*)?$/, "", pend)
+      blk = (pend ~ /:[[:space:]]*[>|][-+0-9]*$/)
+      sub(/[[:space:]]*[>|][-+0-9]*$/, "", pend); acc = ""; next
     }
     { print }
-    END { if (pend != "") print pend }'
+    END { if (pend != "") print pend (acc != "" ? " " acc : "") }'
 }
 
 # §21 GitHub Actions 危険パターン
@@ -1887,12 +1894,19 @@ check_s21() {
       local refs
       refs="$(awk '
         function flush(){ if (inchk) { print (ref=="" ? "noref" : ref) } inchk=0; ref="" }
-        tolower($0) ~ /uses:[[:space:]]*["'"'"']?actions\/checkout@/ { flush(); inchk=1; match($0,/^[[:space:]]*/); ind=RLENGTH; next }
+        # ref はブロックマッピング（行頭の ref:）とフローマッピング（{ ref: … } / , ref: …）の両方を見る
+        function getref(s,   r, q, k) {
+          if (!match(s, /^[[:space:]]*ref:/) && !match(s, /[{,][[:space:]]*ref:/)) return
+          r = substr(s, RSTART + RLENGTH); sub(/^[[:space:]]*/, "", r)
+          if (r ~ /^["\047]/) { q = substr(r, 1, 1); r = substr(r, 2); k = index(r, q); if (k) r = substr(r, 1, k - 1) }
+          else sub(/[,}].*$/, "", r)
+          ref = (r ~ /github\.(event\.pull_request\.head|head_ref)/) ? "prhead" : "otherref" }
+        tolower($0) ~ /^[[:space:]]*(-[[:space:]]+)?(\{([^}#]*,)?[[:space:]]*)?uses:[[:space:]]*["'"'"']?actions\/checkout@/ { flush(); inchk=1; match($0,/^[[:space:]]*/); ind=RLENGTH
+          s = $0; sub(/.*actions\/checkout@/, "", s); getref(s); next }
         inchk {
           match($0,/^[[:space:]]*/)
           if ($0 ~ /^[[:space:]]*-[[:space:]]/ && RLENGTH <= ind) { flush(); next }
-          if ($0 ~ /^[[:space:]]*ref:/) { r=$0; sub(/^[[:space:]]*ref:[[:space:]]*/,"",r)
-            ref = (r ~ /github\.(event\.pull_request\.head|head_ref)/) ? "prhead" : "otherref" }
+          getref($0)
         }
         END{ flush() }' < <(workflow_text "$f"))"
       if printf '%s\n' "$refs" | grep -q -x 'prhead'; then
