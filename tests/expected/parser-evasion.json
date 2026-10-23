@@ -1,10 +1,64 @@
 {
   "findings": [
     {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "c-yarn-crlf/yarn.lock"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "f-nm-min/node_modules/keyv/package.json"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "f-nm-nested/node_modules/flat-cache/package.json"
+    },
+    {
+      "campaign": "litellm-oct2026",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "h-egg-pytag/site-packages/litellm-1.107.0-py3.11.egg-info"
+    },
+    {
+      "campaign": "sleepergem-rubygems-jul2026",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "c-gem-crlf/Gemfile.lock"
+    },
+    {
+      "campaign": "sleepergem-rubygems-jul2026",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "i-gem-platform/Gemfile.lock"
+    },
+    {
       "campaign": "solana-typosquat",
       "level": "CRITICAL",
       "module": "§15",
       "path": "g-nm-noversion/node_modules/@solana-labs/web3js/package.json"
+    },
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "c-req-crlf/requirements.txt"
+    },
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "d-req-bom/requirements.txt"
+    },
+    {
+      "campaign": "teampcp-mini-shai-hulud",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "h-egg-nover/site-packages/mistralai.egg-info"
     },
     {
       "campaign": "overlord-fake-zoom-dotnet",

@@ -424,6 +424,37 @@ tsv_us() { tr '\t' '\037'; }
 DEPS_TSV="$TMP_DIR/deps.tsv"
 DEPS_BUILT=0
 norm_pypi() { printf '%s' "$1" | tr 'A-Z_.' 'a-z--' | tr -s '-'; }
+# 行ベースのパーサへ渡す前の正規化: 行末 CR（CRLF）と先頭の UTF-8 BOM を除去（検出回避の防止）
+text_lines() { awk '{ sub(/\r$/, "") } NR == 1 { sub(/^\357\273\277/, "") } { print }' "$1" 2>/dev/null; }
+# package.json のトップレベル "version"（jq 不在時）。文字列外の波括弧の深さを数え、深さ 1 のキーだけを見る
+json_top_version() {
+  awk 'BEGIN { RS = "\001" }
+    { n = length($0); depth = 0; ins = 0; esc = 0; tok = ""; key = ""; expect = 0
+      for (i = 1; i <= n; i++) {
+        ch = substr($0, i, 1)
+        if (ins) {
+          if (esc) { esc = 0; tok = tok ch; continue }
+          if (ch == "\\") { esc = 1; continue }
+          if (ch == "\"") { ins = 0
+            if (expect && depth == 1) { print tok; exit }
+            last = tok; continue }
+          tok = tok ch; continue }
+        if (ch == "\"") { ins = 1; tok = ""; continue }
+        if (ch == "{" || ch == "[") { depth++; expect = 0; continue }
+        if (ch == "}" || ch == "]") { depth--; expect = 0; continue }
+        if (ch == ":") { expect = (depth == 1 && last == "version"); continue }
+        if (ch == ",") { expect = 0; last = ""; continue }
+        if (ch !~ /[ \t\r\n]/) expect = 0
+      } }' "$1" 2>/dev/null
+}
+# PKG-INFO / METADATA（RFC 822 形式）の先頭ヘッダから Name<TAB>Version を読む
+pkg_info_name_version() {
+  text_lines "$1" | awk '
+    /^$/ { exit }
+    tolower($0) ~ /^name:/ && n == "" { n = $0; sub(/^[^:]*:[ \t]*/, "", n); sub(/[ \t]+$/, "", n) }
+    tolower($0) ~ /^version:/ && v == "" { v = $0; sub(/^[^:]*:[ \t]*/, "", v); sub(/[ \t]+$/, "", v) }
+    END { if (n != "") print n "\t" v }'
+}
 build_deps() {
   [ "$DEPS_BUILT" -eq 1 ] && return 0
   DEPS_BUILT=1
@@ -450,44 +481,51 @@ build_deps() {
   # npm: yarn.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '
+    text_lines "$f" | awk -v src="$f" '
       /^[^ #].*:$/ { h=$0; sub(/:$/,"",h); split(h,parts,/, */); n=parts[1]; gsub(/"/,"",n);
                      if (n ~ /^@/) { sub(/^@/,"",n); sub(/@.*/,"",n); n="@" n } else { sub(/@.*/,"",n) } ; next }
-      /^  version:? / { v=$0; sub(/^  version:? +/,"",v); gsub(/"/,"",v); if (n!="") print "npm\t" n "\t" v "\t" src; n="" }' "$f" >>"$DEPS_TSV"
+      /^  version:? / { v=$0; sub(/^  version:? +/,"",v); gsub(/"/,"",v); if (n!="") print "npm\t" n "\t" v "\t" src; n="" }' >>"$DEPS_TSV"
   done < <(files_named '^yarn\.lock$')
   # npm: pnpm-lock.yaml（"/name@1.2.3:" / "name@1.2.3:" 形式）
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '
+    text_lines "$f" | awk -v src="$f" '
       /^  ['"'"'\/]?@?[^ @]+@[0-9][^:]*:/ {
         s=$0; sub(/^  /,"",s); gsub(/'"'"'/,"",s); sub(/^\//,"",s); sub(/:.*$/,"",s); sub(/\(.*$/,"",s)
         if (s ~ /^@/) { at=index(substr(s,2),"@")+1 } else { at=index(s,"@") }
-        if (at>1) print "npm\t" substr(s,1,at-1) "\t" substr(s,at+1) "\t" src }' "$f" >>"$DEPS_TSV"
+        if (at>1) print "npm\t" substr(s,1,at-1) "\t" substr(s,at+1) "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^pnpm-lock\.yaml$')
   # npm: node_modules/<pkg>/package.json（実体のバージョン）
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     local n v
     n="$(printf '%s' "$f" | sed -E 's#.*/node_modules/((@[^/]+/)?[^/]+)/package\.json$#\1#')"
-    v="$(grep -m1 -E '^\s*"version"\s*:' "$f" 2>/dev/null | sed -E 's/.*"version"\s*:\s*"([^"]*)".*/\1/')"
+    # トップレベルの .version のみ（最小化 JSON・入れ子の "version" に対応）
+    if [ "$HAVE_JQ" -eq 1 ]; then
+      v="$(jq -r 'if type == "object" and (.version | type) == "string" then .version else "" end' "$f" 2>/dev/null)" \
+        || { record_error "§15" "lockfile_parse_failed:$f"; v=""; }
+    else
+      v="$(json_top_version "$f")"
+    fi
+    v="$(printf '%s' "$v" | tr -d '\t\r\n')"
     printf 'npm\t%s\t%s\t%s\n' "$n" "$v" "$f" >>"$DEPS_TSV"
   done < <(files_path '/node_modules/(@[^/]+/)?[^/]+/package\.json$')
   # pypi: requirements*.txt / constraints*.txt
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '
+    text_lines "$f" | awk -v src="$f" '
       { line=$0; sub(/#.*/,"",line); gsub(/[ \t]/,"",line) }
       line ~ /^[A-Za-z0-9][A-Za-z0-9._-]*(\[[^]]*\])?===?[^;,]+/ {
         n=line; sub(/(\[[^]]*\])?===?.*/,"",n); v=line; sub(/^[^=]*===?/,"",v); sub(/[;,].*/,"",v)
-        n=tolower(n); gsub(/[-_.]+/,"-",n); print "pypi\t" n "\t" v "\t" src }' "$f" >>"$DEPS_TSV"
+        n=tolower(n); gsub(/[-_.]+/,"-",n); print "pypi\t" n "\t" v "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^(requirements.*|constraints.*)\.txt$')
   # pypi: poetry.lock / uv.lock / pdm.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '
+    text_lines "$f" | awk -v src="$f" '
       /^\[\[package\]\]/ { n=""; next }
       /^name = "/ { n=$0; sub(/^name = "/,"",n); sub(/".*/,"",n); n=tolower(n); gsub(/[-_.]+/,"-",n); next }
-      /^version = "/ && n!="" { v=$0; sub(/^version = "/,"",v); sub(/".*/,"",v); print "pypi\t" n "\t" v "\t" src; n="" }' "$f" >>"$DEPS_TSV"
+      /^version = "/ && n!="" { v=$0; sub(/^version = "/,"",v); sub(/".*/,"",v); print "pypi\t" n "\t" v "\t" src; n="" }' >>"$DEPS_TSV"
   done < <(files_named '^(poetry\.lock|uv\.lock|pdm\.lock)$')
   # pypi: Pipfile.lock
   while IFS= read -r f; do
@@ -500,32 +538,43 @@ build_deps() {
     fi
   done < <(files_named '^Pipfile\.lock$')
   # pypi: site-packages の *.dist-info / *.egg-info（インストール実体）
+  #   Name / Version は METADATA・PKG-INFO のヘッダを正とする（name-1.0-py3.11.egg-info や
+  #   バージョンを含まない name.egg-info もあるため、ディレクトリ名はヘッダが無い場合の代替のみ）
+  #   egg-info は単一ファイル（PKG-INFO と同形式）の場合もある
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    local d n v
-    d="$(basename -- "$(dirname -- "$f")")"
-    d="${d%.dist-info}"; d="${d%.egg-info}"
-    n="${d%-*}"; v="${d##*-}"
-    [ "$n" != "$d" ] || continue
-    printf 'pypi\t%s\t%s\t%s\n' "$(norm_pypi "$n")" "$v" "$(dirname -- "$f")" >>"$DEPS_TSV"
-  done < <(files_path '/[^/]+-[^/-]+\.(dist-info|egg-info)/(METADATA|PKG-INFO)$')
+    local d n v src nv
+    if [ -d "$f" ]; then continue; fi
+    case "$f" in *.egg-info) src="$f"; d="$(basename -- "$f")" ;; *) src="$(dirname -- "$f")"; d="$(basename -- "$src")" ;; esac
+    nv="$(pkg_info_name_version "$f")"
+    n="${nv%%$'\t'*}"; v=""; [[ "$nv" == *$'\t'* ]] && v="${nv#*$'\t'}"
+    if [ -z "$n" ]; then
+      d="${d%.dist-info}"; d="${d%.egg-info}"
+      d="$(printf '%s' "$d" | sed -E 's/-py[0-9]+(\.[0-9]+)*(-[^-]+)?$//')"
+      n="${d%-*}"; v="${d##*-}"
+      [ "$n" != "$d" ] || { n="$d"; v=""; }
+    fi
+    [ -n "$n" ] || continue
+    printf 'pypi\t%s\t%s\t%s\n' "$(norm_pypi "$n")" "$v" "$src" >>"$DEPS_TSV"
+  done < <(files_path '/[^/]+\.(dist-info|egg-info)/(METADATA|PKG-INFO)$|\.egg-info$')
   # cargo: Cargo.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '
+    text_lines "$f" | awk -v src="$f" '
       /^\[\[package\]\]/ { n=""; next }
       /^name = "/ { n=$0; sub(/^name = "/,"",n); sub(/".*/,"",n); next }
-      /^version = "/ && n!="" { v=$0; sub(/^version = "/,"",v); sub(/".*/,"",v); print "cargo\t" n "\t" v "\t" src; n="" }' "$f" >>"$DEPS_TSV"
+      /^version = "/ && n!="" { v=$0; sub(/^version = "/,"",v); sub(/".*/,"",v); print "cargo\t" n "\t" v "\t" src; n="" }' >>"$DEPS_TSV"
   done < <(files_named '^Cargo\.lock$')
   # go: go.sum
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '{ v=$2; sub(/\/go\.mod$/,"",v); print "go\t" $1 "\t" v "\t" src }' "$f" >>"$DEPS_TSV"
+    text_lines "$f" | awk -v src="$f" 'NF >= 2 { v=$2; sub(/\/go\.mod$/,"",v); print "go\t" $1 "\t" v "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^go\.sum$')
   # ruby: Gemfile.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '/^    [A-Za-z0-9_.-]+ \([0-9][^)]*\)$/ { n=$1; v=$2; gsub(/[()]/,"",v); print "gem\t" n "\t" v "\t" src }' "$f" >>"$DEPS_TSV"
+    # プラットフォーム付き（nokogiri (1.16.0-x86_64-linux)）はバージョン部分のみで比較する
+    text_lines "$f" | awk -v src="$f" '/^    [A-Za-z0-9_.-]+ \([0-9][^)]*\)$/ { n=$1; v=$2; gsub(/[()]/,"",v); sub(/-[A-Za-z].*$/,"",v); print "gem\t" n "\t" v "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^Gemfile\.lock$')
   # packagist: composer.lock
   while IFS= read -r f; do
