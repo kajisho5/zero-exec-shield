@@ -1,24 +1,26 @@
-# セキュリティポリシー
+English | [日本語](SECURITY.ja.md)
 
-ZES（Zero-Exec Shield）自体の脆弱性は、公開の Issue ではなく、GitHub の非公開報告で知らせてください。
+# Security policy
 
-1. リポジトリの **Security** タブを開く
-2. **Report a vulnerability** を選ぶ
+Please report vulnerabilities in ZES (Zero-Exec Shield) itself through GitHub's private reporting, not through a public issue.
 
-## 対象
+1. Open the repository's **Security** tab
+2. Choose **Report a vulnerability**
 
-- 最新の main ブランチ（過去のバージョンへの修正は行いません）
+## Scope
 
-報告してほしいもの（例）:
+- The latest main branch (fixes are not made to past versions)
 
-- `zes-scan.sh` が検査対象のファイルやプログラムを実行してしまう（Zero-Exec の破れ）
-- 検査対象のリポジトリの内容によって、スキャナの動作を乗っ取れる（コマンド注入、パスの細工など）
-- `index.html` からファイル内容が外部に送信される、または画面に表示される
+What we want reported (examples):
 
-公開 Issue で受け付けるもの:
+- `zes-scan.sh` executes a file or program in the scan target (a break of Zero-Exec)
+- The contents of a scanned repository can take over the scanner's behavior (command injection, crafted paths, and so on)
+- `index.html` sends file contents to an external party, or displays them on screen
 
-- 検知漏れ・誤検知、IoC データの誤り（一次情報の URL を添えてください）
+What we accept as public issues:
 
-## 対応
+- Missed detections, false positives, and errors in the IoC data (please include the URL of the primary source)
 
-個人で保守しているため、対応は可能な範囲で行います。応答期限の保証はありません。修正を公開したあとに、報告内容と修正を CHANGELOG に記載します（報告者の名前は希望があれば記載します）。
+## Response
+
+This project is maintained by one person, so responses are made as far as possible. There is no guaranteed response time. After a fix is published, the report and the fix are recorded in the CHANGELOG (the reporter's name is included if they wish).
