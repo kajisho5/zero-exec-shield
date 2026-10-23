@@ -113,7 +113,8 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
+  "scan_roots": ["/--root の/実パス"],
   "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
   "scan_started_at": "2026-10-22T00:00:00Z",
   "scan_finished_at": "2026-10-22T00:01:30Z",
@@ -128,6 +129,11 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
       "path": "/abs/path",
       "detail": "…",
       "evidence_hash": "sha256:<通常ファイルはその SHA-256（100MB 超はパス・サイズ・mtime の SHA-256）、それ以外は detail の SHA-256>",
+      "evidence": { "kind": "file|large_file|symlink|tree|detail", "hash": "sha256:…" },
+      "kind": "pkg.compromised",
+      "subject": { "ecosystem": "npm", "package": "keyv", "version": "6.0.0", "safe_version": "latest 5.x", "fixed_versions": [] },
+      "locators": [{ "format": "json", "pointer": "/mcpServers/evil" }, { "format": "text", "line": 3, "line_sha256": "sha256:…" }],
+      "related": [{ "relation": "npm_installed", "path": "/abs/path/node_modules/keyv" }],
       "skillpact": { "…": "§49 の finding のみ" }
     }
   ],
@@ -136,6 +142,14 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
 ```
 
 - `id` は内容から決定的に生成します（再スキャンで同じ検出なら同じ ID）。同じ ID は 1 回だけ出力します。
+- 形式 1.1（ZES 0.4.0）は 1.0 に任意の項目を足しただけで、`id` と `evidence_hash` の作り方は変わりません。未知の項目を無視する 1.0 の読み手はそのまま動きます（strict に検証する読み手は 1.1 のスキーマに切り替えてください）。どの項目もファイルの内容は含まず、修復（ZET を通した GER）が finding を正確に扱えるようにするためのものです。
+  - `scan_roots`: `--root` の実パス。ZET は計画の検査範囲（scope）にします。
+  - `evidence`: `evidence_hash` の種類つき版。`file`（100MB 超は `large_file`）は `evidence_hash` と同じ値、`symlink` はリンクの値（`readlink`）の SHA-256、`tree` はディレクトリの [ger-tree-v1](https://github.com/kajisho5/gated-exec-remediation/blob/main/docs/design/design.md)（種類・相対パス・mode・サイズ・内容のハッシュ・リンクの値。時刻・所有者は含まない）、`detail` はそれ以外（検査ルート・ホームそのものの finding を含む）です。
+  - `kind`（任意）: 機械可読な種別。`pkg.compromised` / `pkg.vulnerable` / `pkg.lockfile_compromised`（§15）、`mcp.dangerous_command` / `mcp.unpinned`（§17）、`gha.pwn_request`（§21）、`gha.unpinned`（§22・§28）、`secret.token`（§47）、`runtime.cve`（CVE の影響範囲の版。§3・§5・§6・§16・§37・§41 と intel の表）。
+  - `subject`（任意、§15）: パッケージ・版・安全版・修正版（`rules/ioc.json` から）。
+  - `locators`（任意）: ファイルの中の該当箇所。JSON・JSONC・TOML は RFC 6901 の pointer（MCP サーバー・フックのエントリ・`runOn` ごと）、テキストは行番号と、改行・行末の CR・先頭の UTF-8 BOM を除いた行の SHA-256（§10・§26・§31・§4 の php.ini）。行そのものは出しません。
+  - `related`（任意）: finding の path から導いた別のパス。`npm_installed`（ロックファイルの隣にインストールされた `node_modules/<name>`）、`ext_dir`（§24・§42 の拡張のディレクトリ）、`skill_dir`（§49 の契約のあるスキルのディレクトリ）。
+- GER の隔離ストアのマーカー `.ger-quarantine-store` があるディレクトリ（所有者が実行ユーザーで mode 0700）は走査せず、`errors[]` に `quarantine_store_skipped:<dir>` として記録します（`status` は変えません）。条件を満たさないマーカーは無視して走査し、`quarantine_marker_untrusted:<dir>` を記録します。
 - `campaign` はキャンペーンに紐づかない一般検査では `null`。`path` は絶対パスか `null`（ファイルのないホスト検査の結果）です。
 - `errors[].reason` の例: `skipped_offline` / `network_timeout` / `jq_unavailable` / `module_failed` / `lockfile_parse_failed:<path>` / `git_timeout` / `special_file:<path>` / `non_utf8_path:<path>` / `incident_bundle_mismatch:<値>`。
 - 0.3.1 で追加した理由:
@@ -156,7 +170,7 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
   | `lockfile_unparsed:<path>` | ZES が解析しない形式のロックファイル（`bun.lockb`） |
   | `archive_not_inspected:<path>` | アーカイブ（`.whl`・`.tgz`・`.tar.gz`・`.zip`・`.jar`・`.war`・`.pyz`・`.egg`・`.gem`・`.crate`・`.nupkg`・`.vsix`・`.crx`・`.xpi`）を展開していない。`status` は変えない |
 - 文字列はすべて valid な UTF-8 です。制御文字は `\u00XX` でエスケープします。ファイル名の不正な UTF-8 バイトは `\xHH` というテキストに置き換え、そのパスを `errors[]` に `non_utf8_path` として記録します。FIFO・ソケット・デバイスファイルは開かず、`special_file` として記録します。
-- ブラウザ UI が書き出す findings.json のパスは、投入フォルダからの相対パスに `/` を前置したものです。`errors[]` に `ui:host_checks_not_performed` を記録します。`status` は `partial` で、取り込んだ CLI の findings.json が `status: error` だった場合は `error` です。
+- ブラウザ UI が書き出す findings.json のパスは、投入フォルダからの相対パスに `/` を前置したものです。`errors[]` に `ui:host_checks_not_performed` を記録します。1.1 の項目は CLI と同じものを付けますが、ブラウザが知りえない値は除きます（`scan_roots` は出さない、ディレクトリの `evidence` は `detail`〔ファイルの mode が分からない〕、シンボリックリンクは 0 バイトのファイルとして渡される）。UI は 1.0 と 1.1 のどちらの文書も読み込めます。`status` は `partial` で、取り込んだ CLI の findings.json が `status: error` だった場合は `error` です。
 - ブラウザ UI が生成する `id` は、上の CLI の式とは別の作り方です（`module|campaign|path|規則 ID` から生成し、`path` は相対パス）。UI の中でだけ安定し（同じフォルダを投入し直せば同じ `id`）、同じファイルの CLI の `id` とは一致しません。揃えると既存の `id` が変わるため、このままにしています。CLI の findings.json から取り込んだ finding の `id` はそのまま保ちます。
 
 後段のツールが依存してよい性質は、[docs/skill-contracts.md](docs/skill-contracts.md) の §9 にまとめています。

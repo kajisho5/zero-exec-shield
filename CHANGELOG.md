@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.0 — 2026-10-23
+
+findings.json の形式を 1.1 にしました。修復層（ZET を通した GER）が finding を正確に扱えるよう、どこを・何を直せばよいかを機械可読な任意の項目で出します。ファイルの内容は今までどおり出しません。あわせて、負荷の高いときに finding の `detail` と `id` が実行ごとに変わることがあった競合を直しました。
+
+### 形式の変更（findings 1.1）と後方互換
+
+- `schema_version` は `"1.1"`。1.1 は 1.0 に**任意の項目を足しただけ**で、既存の項目の意味は変わりません。`id`（`module|campaign|path|detail` の SHA-256）と `evidence_hash` の作り方は 1.0 と同じで、同じ finding の `id` は 0.3.1 と一致します（例外: 下の `rules/ioc.json` の 2 件の `safe_version` を ASCII にしたため、その値を `detail` に含む §15 の finding だけ `detail` と `id` が変わります）
+- 未知の項目を無視する 1.0 の読み手はそのまま動きます。`additionalProperties: false` で 1.0 のスキーマを使って検証している読み手は、1.1 の `schemas/findings.schema.json` に切り替えてください（ZET はすでに 1.0 と 1.1 の両方を受け付けます）
+- トップレベル: `scan_roots`（`--root` の実パスの配列。ZET は計画の検査範囲にする）
+- finding（`evidence` 以外は任意）:
+  - `evidence`: `evidence_hash` の種類つき版 `{kind, hash}`。通常ファイルは `file`（100MB 超は `large_file`。`evidence_hash` と同じ値）、シンボリックリンクは `symlink`（`readlink` の値の SHA-256）、ディレクトリは `tree`（GER と共通のツリーハッシュ ger-tree-v1。GER のテストベクタ `sha256:a0330bed…958e` と一致することを `tests/run-tests.sh` で確かめる）、それ以外は `detail`。検査ルート・ホームそのものの finding（「同居」など）は全体のハッシュが高価で修復の対象にもならないため `detail`
+  - `kind`: 機械可読な種別。§15 の `pkg.compromised`（インストール実体）/ `pkg.vulnerable` / `pkg.lockfile_compromised`（ロックファイル・依存の宣言）、§17 の `mcp.dangerous_command` / `mcp.unpinned`、§21 の `gha.pwn_request`、§22・§28 の `gha.unpinned`、§47 の `secret.token`、CVE の影響範囲の版（§3・§5・§6・§16・§37・§41 と intel の表）の `runtime.cve`。ZET の I-13 が使う文字列と同じ
+  - `subject`（§15）: `{ecosystem, package, version, safe_version, fixed_versions}`
+  - `locators`: 同じファイルの該当箇所。§17 は危険な MCP サーバーごとに `{format: json|jsonc|toml, pointer}`（`/mcpServers/<name>`・`/servers/<name>`・TOML は `/mcp_servers/<name>`。同じファイルの同じ種類の問題は今までどおり 1 件の finding で、該当するサーバーを並べる）。§7 はフックのエントリ `/hooks/<Event>/<i>` と `/tasks/<i>/runOptions/runOn`。§10・§26・§31・§4 の php.ini は `{format: text, line, line_sha256}`（改行・行末の CR・1 行目の BOM を除いた行の SHA-256。GER の `remove_line` と同じ）
+  - `related`: finding の path から導いた別の対象。ロックファイル（npm）の隣にインストールされた `node_modules/<name>` は `npm_installed`、§24・§42 の拡張は `ext_dir`（`…/Extensions/<id>`）、§49 の `skill.contract.json` の finding は `skill_dir`
+- GER の隔離ストア（マーカー `.ger-quarantine-store` のあるディレクトリ）を走査しない。マーカーを置くだけで検査を逃れられないよう、GER が作るストアの条件（マーカーが通常ファイル・所有者が実行ユーザー・グループ / 他者の権限なし）を満たすものだけを外し、`errors[]` に `quarantine_store_skipped:<dir>` を記録する（`status` は変えない）。条件を満たさないマーカーは無視して走査し、`quarantine_marker_untrusted:<dir>` を記録する
+- `docs/skill-contracts.md`: GER の対象を「finding の path そのものか、`relation` で導ける対象だけ」と改めた（ファイル内容を出さない原則は変えない）
+- Web Scanner UI: 同じ finding に同じ 1.1 の項目を付けて書き出す（`schema_version` 1.1）。ブラウザが知りえない値だけ異なる: `scan_roots` は出さない（パスが投入フォルダからの相対パスのため）、ディレクトリの `evidence` は `detail`（ファイルの mode が分からず ger-tree-v1 を計算できない）、シンボリックリンクは 0 バイトのファイルとして渡されるため `file`。1.0 と 1.1 のどちらの findings.json も読み込める。CLI とのパリティのテストで kind / subject / locators / related / evidence.kind も比べる
+
+### 修正
+
+- 負荷の高いときに `detail` と `id` が変わることがあった: パイプの末尾の `grep -q` は最初の一致で終了するため、上流（`printf` 等）が書き終える前に終わると上流が SIGPIPE で失敗し、`set -o pipefail` の下では「一致したのに偽」になっていた。§24 の危険パーミッションの列挙で 1 つ取りこぼすと、level・module・path は同じまま `detail`（＝ `id`）だけが変わる（GER の E2E を 8 並列で回したときに、browser-ext の §24 の finding の `id` が 1 回だけ変わった件）。入力を最後まで読む `grep_q` に置き換えた（53 箇所）。`tests/run-tests.sh` は 4 フィクスチャを並列 8 回ずつ走査して `id`・`evidence`・`locators` が一致することと、パイプの末尾に `grep -q` が無いことを確かめる
+- `emit()` の中で同じ `id` を落とすとき、生のパスが違う（正規形だけが衝突した）なら `errors[]` に `duplicate_finding_id` を記録する（§17 を 1 ファイル 1 件にまとめたため、従来 `dedup_findings` が拾っていた重複が `emit()` の中で黙って落ちていた）
+- Web Scanner UI: finding の `evidence_hash` は、その path が読めたファイルなら内容のハッシュにする（§42 の更新時の昇格・§49 の契約ファイル等で detail のハッシュになっていた。CLI と同じ。UI の `id` は変わらない）
+- テスト: ロックファイルの隣に侵害版がインストールされたフィクスチャ `lockfile-installed` を追加（`related` の `npm_installed`）
+- `rules/ioc.json` の `safe_version` を出力に載る値として ASCII にした（`5.x最新` → `latest 5.x`、`3.0.2 (系列別: …)` → `3.0.2 (per release line: …)`）
+
 ## 0.3.1 — 2026-10-23
 
 0.3.0 の 3 回目のバグ探しの修正です。CLI のゼロ実行の破れ（`PATH` 経由）と多数の検出回避を塞ぎ、同じ修正をブラウザのエンジンにも入れました。Web Scanner UI・文書・CI の修正も含みます。findings.json の形式（`schema_version` 1.0）は変わりませんが、検出は増えます（下記）。

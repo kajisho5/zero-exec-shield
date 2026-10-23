@@ -113,7 +113,8 @@ Rules and output of §49 may change.
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
+  "scan_roots": ["/abs/real/path/of/--root"],
   "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
   "scan_started_at": "2026-10-22T00:00:00Z",
   "scan_finished_at": "2026-10-22T00:01:30Z",
@@ -128,6 +129,11 @@ Rules and output of §49 may change.
       "path": "/abs/path",
       "detail": "...",
       "evidence_hash": "sha256:<SHA-256 of the file (over 100 MB: of path, size and mtime), or of detail when there is no regular file>",
+      "evidence": { "kind": "file|large_file|symlink|tree|detail", "hash": "sha256:..." },
+      "kind": "pkg.compromised",
+      "subject": { "ecosystem": "npm", "package": "keyv", "version": "6.0.0", "safe_version": "latest 5.x", "fixed_versions": [] },
+      "locators": [{ "format": "json", "pointer": "/mcpServers/evil" }, { "format": "text", "line": 3, "line_sha256": "sha256:..." }],
+      "related": [{ "relation": "npm_installed", "path": "/abs/path/node_modules/keyv" }],
       "skillpact": { "...": "§49 findings only" }
     }
   ],
@@ -136,6 +142,14 @@ Rules and output of §49 may change.
 ```
 
 - `id` is deterministic: the same finding gets the same id on every scan, and each id appears once.
+- Format 1.1 (ZES 0.4.0) only adds optional fields to 1.0, so `id` and `evidence_hash` are computed as before. A reader of 1.0 that ignores unknown fields keeps working; strict 1.0 validators must switch to the 1.1 schema. The fields exist so that remediation (GER, through ZET) can act on a finding precisely, without ZES ever writing file contents:
+  - `scan_roots`: the real paths of `--root`. ZET uses them as the plan's scope.
+  - `evidence`: a typed version of `evidence_hash`. `file` (`large_file` over 100 MB) has the same hash as `evidence_hash`; `symlink` is the SHA-256 of the link value (`readlink`); `tree` is the [ger-tree-v1](https://github.com/kajisho5/gated-exec-remediation/blob/main/docs/design/design.md) hash of a directory (entry types, relative paths, modes, sizes, content hashes, link values; no times or owners); `detail` is everything else, including findings whose path is the scan root or the home directory itself.
+  - `kind` (optional): a machine-readable category: `pkg.compromised`, `pkg.vulnerable`, `pkg.lockfile_compromised` (§15), `mcp.dangerous_command`, `mcp.unpinned` (§17), `gha.pwn_request` (§21), `gha.unpinned` (§22, §28), `secret.token` (§47), `runtime.cve` (version in a CVE range: §3, §5, §6, §16, §37, §41 and the intel tables).
+  - `subject` (optional, §15): the package, its version, the safe version and the fixed versions from `rules/ioc.json`.
+  - `locators` (optional): where in the file. JSON, JSONC and TOML use an RFC 6901 pointer (one per MCP server, hook entry or `runOn` key); text files use the line number and the SHA-256 of that line without the line break, a trailing CR or a leading UTF-8 BOM (§10, §26, §31, §4 php.ini). Never the line itself.
+  - `related` (optional): another path derived from the finding: `npm_installed` (a lockfile's installed `node_modules/<name>`), `ext_dir` (§24/§42 extension directory), `skill_dir` (§49 contract's skill directory).
+- Directories that contain GER's quarantine store marker `.ger-quarantine-store` (owned by the scanning user, mode 0700) are not scanned and are listed in `errors[]` as `quarantine_store_skipped:<dir>` (does not change `status`). A marker that does not meet those conditions is ignored and recorded as `quarantine_marker_untrusted:<dir>`.
 - `campaign` is `null` for general checks. `path` is an absolute path or `null` (host findings without a file).
 - `errors[].reason` examples: `skipped_offline`, `network_timeout`, `jq_unavailable`, `module_failed`, `lockfile_parse_failed:<path>`, `git_timeout`, `special_file:<path>`, `non_utf8_path:<path>`, `incident_bundle_mismatch:<value>`.
 - Reasons added in 0.3.1:
@@ -156,7 +170,7 @@ Rules and output of §49 may change.
   | `lockfile_unparsed:<path>` | A lockfile format ZES does not parse (`bun.lockb`) |
   | `archive_not_inspected:<path>` | An archive (`.whl`, `.tgz`, `.tar.gz`, `.zip`, `.jar`, `.war`, `.pyz`, `.egg`, `.gem`, `.crate`, `.nupkg`, `.vsix`, `.crx`, `.xpi`) was not unpacked; does not change `status` |
 - All strings are valid UTF-8. Control characters are escaped as `\u00XX`. Invalid UTF-8 bytes in a file name are written as the text `\xHH` and the path is also recorded in `errors[]` as `non_utf8_path`. FIFOs, sockets and device files are not opened and are recorded as `special_file`.
-- Findings exported by the browser UI use paths relative to the dropped folder with a leading `/`, and record `ui:host_checks_not_performed` in `errors[]`. Their `status` is `partial`, or `error` when a loaded CLI findings.json had `status: error`.
+- Findings exported by the browser UI use paths relative to the dropped folder with a leading `/`, and record `ui:host_checks_not_performed` in `errors[]`. They carry the same 1.1 fields as the CLI except where the browser cannot know a value: no `scan_roots`, directory evidence is `detail` (file modes are not available) and symlinks arrive as 0-byte files. The UI loads both 1.0 and 1.1 documents. Their `status` is `partial`, or `error` when a loaded CLI findings.json had `status: error`.
 - Ids generated by the browser UI are derived differently from the CLI formula above: from `module|campaign|path|rule id`, where `path` is the relative path. They are stable only within the UI (the same folder dropped again gives the same ids) and do not match the CLI's ids for the same file. Unifying the two would change existing ids, so they are kept as they are. Ids of findings loaded from a CLI findings.json are kept unchanged.
 
 The guarantees that downstream tools may rely on are listed in section 9 of [docs/skill-contracts.md](docs/skill-contracts.md).
