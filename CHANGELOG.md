@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.5.0 — 2026-10-23
+
+ZES is now English-first. The CLI and the browser UI speak English by default, with Japanese one switch away, and findings.json is always English. Every message has a language-neutral `code`, so ids no longer depend on wording or language.
+
+**Breaking: all finding ids change once.** Decisions and approvals made with ZET / GER on 0.4.x findings need a new scan and a new triage. After 0.5.0, rewording a message never changes an id again.
+
+### Format (findings 1.2)
+
+- `schema_version` is `"1.2"`. Every finding has `code` (the message id: key `f.<code>` in `i18n/en.json` / `i18n/ja.json`) and `params` (the values in the message, strings only, never file contents).
+- `detail` is the English message with `params` filled in. It is the same for `--lang en`, `--lang ja`, any locale, and with or without jq.
+- id v2: SHA-256 of `zes-id-v2|module|campaign|path|code|params`, with `params` as `key=value` in C-locale key order joined by U+001F, and a `null` campaign or path as the empty string. `evidence_hash` is unchanged (the file hash, otherwise the SHA-256 of the English `detail`).
+- ZET accepts 1.2 as of kajisho5/zero-exec-triage#17. It never recomputes ids, so a plan stays tied to the findings.json it was made from.
+
+### CLI
+
+- Message catalog `i18n/en.json` / `i18n/ja.json`: 327 finding messages, 77 log lines (including 49 section titles), 27 help and error texts. They are read once at start-up with awk (no jq); `ZES_I18N_DIR` overrides the location.
+- `--lang en|ja` and `ZES_LANG`, then `LC_ALL` / `LC_MESSAGES` / `LANG`: a UTF-8 Japanese locale gives Japanese, anything else English. `--lang` with another value exits 64.
+- The Japanese wording is unchanged: with `--lang ja` the terminal log of every fixture is byte-identical to 0.4.0 (apart from times and pids).
+- No finding was lost or added: the (level, module, campaign, path) sets of all fixtures are unchanged, and the new `tests/expected-codes/` pins code and params per fixture.
+
+### Browser UI
+
+- English UI with a language menu next to the theme (in the "…" menu below 640 px). It follows the browser language until you choose; `?lang=en` / `?lang=ja` also work, and the choice is saved when the browser allows it.
+- The scanning engine uses the CLI's codes. 173 of its 181 codes are the CLI's own, and the second parity layer compares (level, module, campaign, path, code, params) with the CLI on all 53 fixtures. Findings, SkillPact rules, paste checks and import errors follow the selected language. The UI's ids use the v2 formula over the path relative to the dropped folder.
+- The sample record stays on one row only from 1440 px; at 1280–1439 px the status text used to wrap one character per line. Labels are 12 px and never wrap; below 360 px the four fields form a 2 × 2 grid.
+
+### Docs
+
+- README, SECURITY, brand, `docs/skill-contracts`, `docs/ioc-verification` and the UI design documents are English, with Japanese as `*.ja.md`. SKILL.md is English and tells agents to answer in the user's language. Code comments are English.
+- This changelog is bilingual from 0.5.0; earlier entries stay in Japanese.
+
+### 日本語
+
+ZES を英語優先にしました。CLI とブラウザ UI は英語が既定で、日本語にも切り替えられます。findings.json は常に英語です。すべての文に言語に依らない `code` を付けたため、id は文言や言語で変わらなくなりました。
+
+**互換性のない変更: すべての finding の id が 1 回だけ変わります。** 0.4.x の findings で行った ZET の判断・GER の承認は、再スキャンと再トリアージが必要です。0.5.0 以降は文言を直しても id は変わりません。
+
+- **形式 1.2**: finding に `code`（文の識別子。`i18n/*.json` のキー `f.<code>`）と `params`（文に入る値。文字列だけ、ファイルの内容は入れない）を足しました。`detail` は英語の文に params を入れたもので、`--lang`・ロケール・jq の有無に依りません。id v2 は `zes-id-v2|module|campaign|path|code|params` の SHA-256 です。`evidence_hash` の作り方は変わりません。ZET は zero-exec-triage#17 で 1.2 を受け付けます
+- **CLI**: メッセージカタログ（検出の文 327、ログ 77、ヘルプ・エラー 27）を起動時に awk で 1 回だけ読みます（jq は使いません）。言語は `--lang en|ja`、`ZES_LANG`、ロケールの順に決め、UTF-8 の日本語ロケールなら日本語、それ以外は英語です。日本語の文言は変えていません（`--lang ja` の端末ログは全フィクスチャで 0.4.0 と同じ）。検出の集合も全フィクスチャで変わりません
+- **ブラウザ UI**: 英語の画面と、テーマの隣の言語メニュー（640px 未満は「…」の中）を追加しました。ブラウザの言語に従い、選んだ言語を保存します（`?lang=` でも指定できます）。検査エンジンも CLI と同じ code を使い、全 53 フィクスチャで code と params まで CLI と一致することを確かめています。検体票は 1440px 以上でだけ 1 段にしました（1280〜1439px で状態の文字が 1 字ずつ折り返していたため）
+- **文書**: README・SECURITY・brand・`docs/skill-contracts`・`docs/ioc-verification`・UI の設計書は英語を正とし、日本語版を `*.ja.md` に置きました。SKILL.md は英語です（利用者の言語で答えるよう指示）。コードのコメントは英語にしました。この CHANGELOG は 0.5.0 から英語と日本語の両方で書きます
+
 ## 0.4.0 — 2026-10-23
 
 findings.json の形式を 1.1 にしました。修復層（ZET を通した GER）が finding を正確に扱えるよう、どこを・何を直せばよいかを機械可読な任意の項目で出します。ファイルの内容は今までどおり出しません。あわせて、負荷の高いときに finding の `detail` と `id` が実行ごとに変わることがあった競合を直しました。
