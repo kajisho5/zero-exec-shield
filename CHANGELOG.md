@@ -1,8 +1,27 @@
 # Changelog
 
-## 0.1.0 — 2026-10-22
+## 0.3.0 — 2026-10-23
 
-初回リリース。ZES v5.2 Master Specification に準拠しています。この下にある 5.2〜5.2.4 の項目は、仕様書に追従する開発中の記録です（リリースはしていません）。0.1.0 にはそのすべてを含みます。
+Web Scanner UI を「検疫台」デザインに作り直しました。検出ロジック（CLI・ブラウザのエンジン）と findings.json の形式は 0.2.0 から変わりません。
+
+### 変更（Web Scanner UI）
+
+- 見た目を「検疫台」に刷新: 検体票（検査したフォルダ・ファイル数・判定時間・未判定・実行 0 回）、絞り込みを兼ねる重大度の集計、余白の注記、署名の紫印（「署名あり（未検証）」）。色は重大度と署名の印だけに使う
+- ライトテーマを追加（既定は OS の設定に従い、指定がなければダーク）。選択はブラウザに保存し、保存できない環境でも動く
+- 「すべてのタブ」をタブ検索に変更（PC はポップオーバー、640px 未満は下からのシート）。タブは ←→ で移動し Enter で選ぶ（手動切り替え）
+- スマホでは検出一覧をカード型にし、押すと詳細のシートを開く（ファイルの場所が画面外に出ない）。320px でもタブ列に 3 枚分の幅を確保
+- 部品を shadcn/ui（MIT、ソースを手で取り込み再スタイル）と Radix に移行し、React 19 に更新。依存はすべて版を固定
+- CSP は変更なし: Radix のスクロール固定が実行時に `<style>` を差し込まないよう、CSSOM で固定する実装に置き換え。ビルド時に実行時のスタイル注入と複数の `<style>` を検出したら失敗させる
+- `index.html` は約 489 KB から約 774 KB に増加
+
+### テスト
+
+- e2e を追加: 全タブ・タブ検索・メニュー・シートを開いても CSP 違反ゼロ（Chromium / Firefox / WebKit）、テーマ切り替えと保存、タブ検索、スマホの詳細シート、フォーカス表示、320px / 375px で横スクロールしない、署名の印の色
+- 重大度の文字色のコントラストを設計値（4.5:1 以上）と照合
+
+## 0.2.0 — 2026-10-23
+
+0.1.0 以降の 2 回のバグ探し（検査の回避・誤検知・ゼロ実行の破れ）の修正と、§49 の SkillPact 0.8 形式への作り直しです。findings.json の `schema_version` は 1.0 のままですが、§49 の効果名が変わります（下記）。
 
 ### 変更（§49 SkillPact、実験的）
 
@@ -14,6 +33,50 @@
 - ポリシーは `policy_version` を持つ JSON を名前に関係なく検出して構造のみ検査（allow/ask/deny の評価は TODO）
 - 独自形式（`.skillpact/contract.json`、`schema_version`、`effects[]`、L2 記録、`.sig` ファイル、prose 照合、破壊的マーカー、`reversible`）を削除。`schemas/findings.schema.json` の `$defs.effect` を 6 効果に変更
 - テストのフィクスチャを SkillPact の conformance ケース・例の複製と、実形式の合成例に置き換え
+
+### 修正（CLI: ゼロ実行・堅牢化）
+
+- バージョン確認のプローブを `env -i`（空の一時 HOME・DOCKER_CONFIG・XDG_CONFIG_HOME、固定の PATH）で起動する。§23 は Docker デーモンに接続する `docker version` をやめ、`docker --version` を読む（`~/.docker` の ssh:// context や `DOCKER_HOST` 経由で ssh が起動していた）
+- git に検査対象リポジトリの `.git/config` を読ませない（ZES が作る影の `GIT_DIR` を使う）。`include.path` / `includeIf` で FIFO を読ませて走査が止まる問題を解消。git の呼び出しはすべて `ZES_GIT_TIMEOUT`（既定 60 秒）で打ち切り、超過は `errors[]` に `git_timeout`
+- §46 は署名を git に検証させず、コミットオブジェクトの `gpgsig` ヘッダから判定する（`gpg.x509.program` 経由で検査対象の設定のプログラムが起動していた）。プログラムを値に取る git 設定をすべて無効化
+- `--root` を `cd --` で解決し、`CDPATH` を無視する（`-` で始まるルートが空のルートとして検査されていた）
+- findings.json を任意のパス名で valid に保つ: 制御文字・C1 制御文字は `\u00XX`、不正な UTF-8 バイトは `\xHH` に置き換えて `errors[]` に `non_utf8_path`。`id` は出力した値の SHA-256 と一致する。人間向けログは端末エスケープを出さない。`ZES_HOME` / `HOME` を実パスに正規化
+- 検査ルート内の FIFO・ソケット・デバイスファイルを開かず、`errors[]` に `special_file` を記録する
+- ホスト検査の結果で、絶対パスでない擬似パス（`crontab:<user>` 等）や URL を `path` に出さず `null` にする（スキーマ違反だった）
+- `intel.host` のパスは、存在しうる場所だけで照合する（`~/…` は検査対象 HOME の下、絶対パスはホスト検査が有効なときの実パスのみ）。どのマシンにもある `~/.bashrc` 等は存在だけでは報告しない。`.intel.host` の jq フィルタの誤りで §30 のホスト IoC 照合が無効になっていたのを修正し、`intel_jq` の失敗を `errors[]` に記録
+- 依存関係の解析: CRLF・BOM、PEP 503 の名前正規化、`node_modules/*/package.json` のトップレベル `version`、`dist-info` / `egg-info` のメタデータ、Gem のプラットフォーム接尾辞、pnpm lockfile v5 のキー、yarn の `npm:` エイリアス、空の TSV 列
+- MCP 設定: JSONC（`.vscode/mcp.json`）と Codex の `config.toml`（TOML トークナイザで解析）を読み、文字列の `args` を受け付ける。解析できない設定は `errors[]`（`mcp_config_parse_failed` / `codex_toml_unparsed`）
+- GitHub Actions（§21 / §22）: 引用符・大文字小文字の違う `actions/checkout`、フローマッピングの `ref`、複数行に続く値（`uses: >-`・`ref: >-`・次の行の値）を読む。`run:` ブロック内の `uses:` は数えない
+- certifi（eMudhra の最小版未満）と lerobot（CVE-2026-25874）を悪性版（CRITICAL）ではなく脆弱版（HIGH）として報告
+
+### 追加・修正（PHP2Shell、§4）
+
+- openai/php2shell-checker（Apache-2.0）の判定に合わせた: プレリリース版（dev / alpha / beta / RC）と修正版一覧にないブランチ（8.6 以降・9.x）は MEDIUM「要確認」、5.4〜8.1 は脆弱
+- `rules/ioc.json` の `php2shell_distro`: Debian / Ubuntu / RHEL のベンダー修正版とアドバイザリ。dpkg のパッケージ DB（ホストと検査ルート内のコンテナ rootfs）を静的に読み、`php*-fpm` / `-cgi` / `-cli`・`libapache2-mod-php*` を Debian の版順序で比較。RHEL 系は rpm DB を読めないため MEDIUM の案内
+- `--url`: `Server` / `X-Powered-By` の `PHP/x.y.z` を判定し、HIGH「ヘッダ申告版で潜在的に脆弱」。HEAD（405/501 のときだけ GET）、リダイレクトは追わない、`~/.curlrc` を読まない
+
+### 修正（Web Scanner UI）
+
+- 判定を CLI に合わせた: PHP2Shell（§4）、§8 / §28 / §37 / §48 のファイル検査、依存関係の一覧（ロックファイル各形式・`node_modules`・`dist-info`）、Codex `config.toml` と MCP の文字列 `args`、ワークフロー YAML の正規化（§21 / §22）、`intel.host` のパスの範囲（HOME と見なせるフォルダでは §10 / §12 の HOME 検査も実行）、§36 の lerobot、§6 の certifi、§18 の履歴の curl|sh、ChainDrop の `setup.mjs`、`~/.claude.json` と Windsurf の MCP 設定
+- CLI の期待値（`tests/expected/*.json`）と UI の判定結果の一致を Vitest で固定（違いは SymJack のみ: ブラウザにはシンボリックリンクが 0 バイトのファイルとして渡るため HIGH）
+- 読み込んだ findings.json をスキーマで検証し、不正な項目は捨てて件数を表示。書き出しに読み込み元の `errors[]` と `incident_bundle` を引き継ぐ。表示の例外を捕捉して白画面にしない
+- 同じ `id` の検出を、フォルダ・貼り付け・読み込みをまたいで 1 件にまとめる。新しい検査の開始時・クリア時に前の検査を取り消す。検査中は書き出しを無効にする
+- 375px / 320px の画面幅で横スクロールしない（ヘッダ・サマリ・検出一覧・SkillPact・MCP・Actions ビューア）。「すべてのタブ」メニューを Esc・外側クリック・キーボードで操作できるようにした。320px でタブを押せなかったため、sm 未満ではタブ列のスクロールボタンを隠し、メニューの文言を視覚的に隠す（読み上げ名は残す）
+- 成果物の静的検査で、引用符のない・単一引用符の `<link href>` / `<img src>` も外部読み込みとして検出する
+
+### 追加
+
+- ロゴ・アプリアイコン・ファビコン・ソーシャル画像（`brand/`）
+- テスト: フィクスチャ `codex-toml` / `codex-toml-broken` / `host-paths-home` / `host-paths-safe` / `lockfile-formats` / `php2shell` / `parser-evasion` ほか。`tests/zero-exec.sh` に ssh:// の Docker context と、プログラムを値に取る git 設定の罠を追加
+- README を英語に（日本語版は README.ja.md）
+
+### CI
+
+- ui ジョブのタイムアウトを 40 分に延長
+
+## 0.1.0 — 2026-10-22
+
+初回リリース。ZES v5.2 Master Specification に準拠しています。この下にある 5.2〜5.2.4 の項目は、仕様書に追従する開発中の記録です（リリースはしていません）。0.1.0 にはそのすべてを含みます。
 
 ### 追加
 

@@ -26,7 +26,7 @@ umask 077
 # CDPATH が export されていると相対パスの cd が別ディレクトリへ解決され、パスも標準出力へ出るため無効化
 unset CDPATH
 
-ZES_VERSION="0.1.0"      # ソフトウェアの版
+ZES_VERSION="0.3.0"      # ソフトウェアの版
 ZES_SPEC_VERSION="5.2"   # 準拠する Master Specification の版
 INCIDENT_BUNDLE="ZES-2026-OCT-EMERGENCY-V5.2"
 FINDINGS_SCHEMA_VERSION="1.0"
