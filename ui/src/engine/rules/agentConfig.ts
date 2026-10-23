@@ -1,7 +1,7 @@
 // §7 / §17 / §20 / §37: MCP・エージェント設定、SymJack、IDE フック、ツール定義の注入語
 import { push, readable, type RuleCtx } from '../context';
 import type { McpServerView } from '../types';
-import { clip } from '../util';
+import { clip, parseJsonc } from '../util';
 
 const MCP_CONFIG = /(^|\/)(\.mcp\.json|mcp\.json|\.cursor\/mcp\.json|\.vscode\/mcp\.json|\.claude\/settings(\.local)?\.json|\.gemini\/settings\.json|claude_desktop_config\.json|\.claude\.json|\.codeium\/windsurf\/mcp_config\.json|\.codex\/config\.toml)$/;
 const HIGH_CMD = /(^|[\s"/])(curl|wget)([\s"]|$)|bash -c|sh -c|powershell(\.exe)? .*-(e|enc|encodedcommand)\s|node -e|python[0-9.]* -c|base64/;
@@ -46,7 +46,13 @@ export function mcpRules(ctx: RuleCtx): void {
     let parseError = false;
     if (f.relPath.endsWith('.toml')) servers = parseCodexToml(f.text);
     else {
-      try { collectServers(JSON.parse(f.text), servers); } catch { parseError = true; }
+      // VS Code 等はコメント・末尾カンマを許すため JSONC として読む
+      try { collectServers(parseJsonc(f.text), servers); } catch { parseError = true; }
+    }
+    if (parseError) {
+      // 解析できない設定を「検出なし」にしない（fail closed）
+      ctx.errors.push({ module: '§17', reason: `mcp_config_parse_failed:${f.relPath}` });
+      push(ctx, { level: 'MEDIUM', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'MCP/エージェント設定を解析できません（未判定。command/args を手動または CLI で確認）', ruleId: 's17-mcp-command:parse-error', evidenceSha: f.sha256 });
     }
     const views: McpServerView[] = servers.map((s) => {
       const line = `${s.command} ${s.args.join(' ')}`;
