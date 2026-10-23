@@ -1,7 +1,7 @@
 // §10 / §26 / §27 / §28 / §30 / §31 / §32 / §33 / §35 / §36 / §40 / §43 / §48
 // ブラウザで判定できるのは「投入されたファイルの中身」まで。ホスト状態は CliOnlyNotice で CLI に案内する。
 import { HOME_RC_FILES, homeLike, named, push, readable, rootRel, type RuleCtx } from '../context';
-import { extname } from '../util';
+import { extname, textLocators } from '../util';
 import { collectDeps } from './supplyChain';
 
 const RC = /(^|\/)(\.bashrc|\.bash_profile|\.profile|\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bash_login)$/;
@@ -59,23 +59,23 @@ export function persistenceRules(ctx: RuleCtx): void {
   for (const f of readable(ctx)) {
     const p = f.relPath;
     if (RC.test(p)) {
-      if (/(curl|wget)[^|#\n]*\|\s*(ba|z)?sh/.test(f.text)) push(ctx, { level: 'HIGH', module: '§10', campaign: null, path: p, detail: 'シェル設定に curl|sh 形式のリモート実行', ruleId: 's10-rc:curlsh', evidenceSha: f.sha256 });
-      if (/base64\s+(-d|--decode)/.test(f.text)) push(ctx, { level: 'HIGH', module: '§10', campaign: null, path: p, detail: 'シェル設定に難読化コード（base64 -d）', ruleId: 's10-rc:base64', evidenceSha: f.sha256 });
-      if (/(^|\s|export\s+)LD_PRELOAD=/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§31', campaign: 'ebpf-rootkit', path: p, detail: 'シェル設定で LD_PRELOAD を設定（ライブラリ注入による永続化）', ruleId: 's31-ldpreload:rc', evidenceSha: f.sha256 });
+      if (/(curl|wget)[^|#\n]*\|\s*(ba|z)?sh/.test(f.text)) push(ctx, { level: 'HIGH', module: '§10', campaign: null, path: p, detail: 'シェル設定に curl|sh 形式のリモート実行', ruleId: 's10-rc:curlsh', evidenceSha: f.sha256, locators: textLocators(f.text, /(curl|wget)[^|#]*\|\s*(ba|z)?sh/) });
+      if (/base64\s+(-d|--decode)/.test(f.text)) push(ctx, { level: 'HIGH', module: '§10', campaign: null, path: p, detail: 'シェル設定に難読化コード（base64 -d）', ruleId: 's10-rc:base64', evidenceSha: f.sha256, locators: textLocators(f.text, /base64\s+(-d|--decode)|\\x[0-9a-f]{2}\\x[0-9a-f]{2}\\x[0-9a-f]{2}/) });
+      if (/(^|\s|export\s+)LD_PRELOAD=/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§31', campaign: 'ebpf-rootkit', path: p, detail: 'シェル設定で LD_PRELOAD を設定（ライブラリ注入による永続化）', ruleId: 's31-ldpreload:rc', evidenceSha: f.sha256, locators: textLocators(f.text, /(^|\s|export\s+)LD_PRELOAD=/) });
       if (/DYLD_INSERT_LIBRARIES/.test(f.text)) push(ctx, { level: 'HIGH', module: '§30', campaign: null, path: p, detail: 'DYLD_INSERT_LIBRARIES の設定（ライブラリインジェクション）', ruleId: 's30-dyld', evidenceSha: f.sha256 });
       if (/(^|\s)PROMPT_COMMAND=/m.test(f.text)) push(ctx, { level: /PROMPT_COMMAND=.*(curl|wget|base64|nc |\/dev\/tcp)/.test(f.text) ? 'HIGH' : 'MEDIUM', module: '§33', campaign: null, path: p, detail: 'PROMPT_COMMAND が設定されています（プロンプト表示ごとに実行）', ruleId: 's33-prompt', evidenceSha: f.sha256 });
       if (/(HISTFILE=\/dev\/null|HISTSIZE=0([^0-9]|$)|HISTFILESIZE=0([^0-9]|$)|SAVEHIST=0([^0-9]|$)|unset\s+HISTFILE)/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§35', campaign: null, path: p, detail: 'シェル履歴の無効化（HISTFILE=/dev/null / HISTSIZE=0）', ruleId: 's35-history', evidenceSha: f.sha256 });
     }
     if (f.name === 'ld.so.preload' && f.text.split(/\r?\n/).some((l) => l.trim() && !l.trim().startsWith('#'))) {
-      push(ctx, { level: 'CRITICAL', module: '§31', campaign: 'ebpf-rootkit', path: p, detail: 'ld.so.preload が空ではありません（全プロセスへのライブラリ注入）', ruleId: 's31-ldpreload:file', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§31', campaign: 'ebpf-rootkit', path: p, detail: 'ld.so.preload が空ではありません（全プロセスへのライブラリ注入）', ruleId: 's31-ldpreload:file', evidenceSha: f.sha256, locators: textLocators(f.text, /.*/, /^\s*(#|$)/) });
     }
     if (/(^|\/)(\.gitconfig|\.git\/config)$/.test(p) || /(^|\/)\.config\/git\/config$/.test(p)) {
-      if (/^\s*fsmonitor\s*=/im.test(f.text) && !/^\s*fsmonitor\s*=\s*(true|false)\s*$/im.test(f.text)) push(ctx, { level: 'CRITICAL', module: '§26', campaign: null, path: p, detail: 'core.fsmonitor に外部コマンド（git 操作のたびに実行）', ruleId: 's26-gitconfig:fsmonitor', evidenceSha: f.sha256 });
-      if (/^\s*sshCommand\s*=/im.test(f.text)) push(ctx, { level: 'HIGH', module: '§26', campaign: null, path: p, detail: 'core.sshCommand が設定されています', ruleId: 's26-gitconfig:ssh', evidenceSha: f.sha256 });
-      if (/^\s*hooksPath\s*=/im.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§26', campaign: null, path: p, detail: 'core.hooksPath が設定されています（フック置き場の付け替え）', ruleId: 's26-gitconfig:hooks', evidenceSha: f.sha256 });
+      if (/^\s*fsmonitor\s*=/im.test(f.text) && !/^\s*fsmonitor\s*=\s*(true|false)\s*$/im.test(f.text)) push(ctx, { level: 'CRITICAL', module: '§26', campaign: null, path: p, detail: 'core.fsmonitor に外部コマンド（git 操作のたびに実行）', ruleId: 's26-gitconfig:fsmonitor', evidenceSha: f.sha256, locators: textLocators(f.text, /^\s*fsmonitor\s*=/i, /^\s*fsmonitor\s*=\s*(true|false)\s*$/i) });
+      if (/^\s*sshCommand\s*=/im.test(f.text)) push(ctx, { level: 'HIGH', module: '§26', campaign: null, path: p, detail: 'core.sshCommand が設定されています', ruleId: 's26-gitconfig:ssh', evidenceSha: f.sha256, locators: textLocators(f.text, /^\s*sshCommand\s*=/i) });
+      if (/^\s*hooksPath\s*=/im.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§26', campaign: null, path: p, detail: 'core.hooksPath が設定されています（フック置き場の付け替え）', ruleId: 's26-gitconfig:hooks', evidenceSha: f.sha256, locators: textLocators(f.text, /^\s*hooksPath\s*=/i) });
     }
     if (f.name === '.envrc' && /(curl|wget)[^|#\n]*\|\s*(ba|z)?sh|eval\s+"?\$\((curl|wget)/.test(f.text)) {
-      push(ctx, { level: 'HIGH', module: '§26', campaign: null, path: p, detail: '.envrc がリモートスクリプトを実行（direnv: curl|bash）', ruleId: 's26-envrc', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§26', campaign: null, path: p, detail: '.envrc がリモートスクリプトを実行（direnv: curl|bash）', ruleId: 's26-envrc', evidenceSha: f.sha256, locators: textLocators(f.text, /(curl|wget)[^|#]*\|\s*(ba|z)?sh|eval\s+\"?\$\((curl|wget)/) });
     }
     if (/(^|\/)LaunchAgents\/[^/]+\.plist$|(^|\/)LaunchDaemons\/[^/]+\.plist$/.test(p)) {
       const label = /<key>Label<\/key>\s*<string>([^<]*)<\/string>/.exec(f.text)?.[1];
@@ -83,7 +83,7 @@ export function persistenceRules(ctx: RuleCtx): void {
       if (/<string>(\/tmp\/|\/private\/tmp\/|\/Users\/Shared\/|\/var\/tmp\/)|<string>[^<]*\/\.[^/<]+\/[^<]*<\/string>/.test(f.text)) push(ctx, { level: 'HIGH', module: '§30', campaign: null, path: p, detail: 'LaunchAgent/Daemon が一時領域/隠しディレクトリのプログラムを起動', ruleId: 's30-launchagent:path', evidenceSha: f.sha256 });
     }
     if (/(^|\/)systemd\/user\/[^/]+\.service$|(^|\/)autostart\/[^/]+\.desktop$/.test(p) && /^\s*(ExecStart|ExecStartPre|Exec)\s*=[^#\n]*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/|\/\.[^/\s]+\/|curl|wget|base64|bash -c|sh -c)/m.test(f.text)) {
-      push(ctx, { level: 'HIGH', module: '§31', campaign: 'ebpf-rootkit', path: p, detail: '自動起動エントリが一時領域/隠しパス/通信コマンドを実行', ruleId: 's31-autostart', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§31', campaign: 'ebpf-rootkit', path: p, detail: '自動起動エントリが一時領域/隠しパス/通信コマンドを実行', ruleId: 's31-autostart', evidenceSha: f.sha256, locators: textLocators(f.text, /^\s*(ExecStart|ExecStartPre|Exec)\s*=[^#]*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/|\/\.[^/\s]+\/|curl|wget|base64|bash -c|sh -c)/) });
     }
   }
 }
@@ -122,12 +122,12 @@ export function sigstoreRules(ctx: RuleCtx): void {
   if (builds && !verifies) push(ctx, { level: 'MEDIUM', module: '§28', campaign: null, path: rootPath(ctx), detail: 'コンテナイメージを公開しているが cosign verify の実行が見当たりません', ruleId: 's28-no-verify' });
   for (const f of readable(ctx).filter((x) => DOCKERFILE.test(x.name))) {
     if (fromImages(f.text).some((img) => !/^(scratch|\$)/.test(img) && !img.includes('@sha256:'))) {
-      push(ctx, { level: 'MEDIUM', module: '§28', campaign: null, path: f.relPath, detail: 'FROM がダイジェスト固定されていません（@sha256: 推奨）', ruleId: 's28-from-digest', evidenceSha: f.sha256 });
+      push(ctx, { level: 'MEDIUM', module: '§28', campaign: null, path: f.relPath, detail: 'FROM がダイジェスト固定されていません（@sha256: 推奨）', ruleId: 's28-from-digest', evidenceSha: f.sha256, kind: 'gha.unpinned' });
     }
   }
   for (const f of readable(ctx).filter((x) => /\.ya?ml$/.test(x.name))) {
     if (/imagePullPolicy:\s*Always/.test(f.text) && !/image:[ \t]*[^\s]+@sha256:/.test(f.text)) {
-      push(ctx, { level: 'MEDIUM', module: '§28', campaign: null, path: f.relPath, detail: 'imagePullPolicy: Always かつダイジェスト未固定（可変タグを毎回取得）', ruleId: 's28-pull-always', evidenceSha: f.sha256 });
+      push(ctx, { level: 'MEDIUM', module: '§28', campaign: null, path: f.relPath, detail: 'imagePullPolicy: Always かつダイジェスト未固定（可変タグを毎回取得）', ruleId: 's28-pull-always', evidenceSha: f.sha256, kind: 'gha.unpinned' });
     }
   }
 
@@ -221,10 +221,10 @@ export function credentialRules(ctx: RuleCtx): void {
   ctx.checks.add('s47-github-token').add('s47-history-export');
   for (const f of readable(ctx)) {
     if (/(ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36})/.test(f.text)) {
-      push(ctx, { level: 'CRITICAL', module: '§47', campaign: null, path: f.relPath, detail: 'GitHub トークンがファイルに含まれます（内容は表示しません。即時失効）', ruleId: 's47-github-token', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§47', campaign: null, path: f.relPath, detail: 'GitHub トークンがファイルに含まれます（内容は表示しません。即時失効）', ruleId: 's47-github-token', evidenceSha: f.sha256, kind: 'secret.token' });
     }
     if (/(^|\/)\.(bash|zsh)_history$/.test(f.relPath) && /export\s+[A-Za-z0-9_]*(_TOKEN|_KEY|_SECRET|PASSWORD)=/.test(f.text)) {
-      push(ctx, { level: 'HIGH', module: '§47', campaign: null, path: f.relPath, detail: 'シェル履歴に export *_TOKEN= 等（平文の認証情報）', ruleId: 's47-history-export', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§47', campaign: null, path: f.relPath, detail: 'シェル履歴に export *_TOKEN= 等（平文の認証情報）', ruleId: 's47-history-export', evidenceSha: f.sha256, kind: 'secret.token' });
     }
   }
 }

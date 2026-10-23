@@ -4,7 +4,7 @@
 import { push, readable, type RuleCtx } from '../context';
 import type { IocDb } from '../ioc';
 import type { Severity } from '../types';
-import { versionCmp } from '../util';
+import { textLocators, versionCmp } from '../util';
 
 export type PhpStatus = 'fixed' | 'vulnerable' | 'prerelease' | 'unknown_branch' | 'unparsed';
 
@@ -124,8 +124,8 @@ export function phpRules(ctx: RuleCtx): void {
   }
   // php*.ini
   for (const f of readable(ctx).filter((x) => /^php.*\.ini$/.test(x.name))) {
-    if (/^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\s;]/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§4', campaign: null, path: f.relPath, detail: 'php.ini の auto_prepend_file が設定されています（全リクエストで実行）', ruleId: 's4-php-ini:auto_prepend', evidenceSha: f.sha256 });
-    if (/^[ \t]*disable_functions[ \t]*=[ \t]*\r?$/m.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, detail: 'php.ini の disable_functions が空欄', ruleId: 's4-php-ini:disable_functions', evidenceSha: f.sha256 });
+    if (/^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\s;]/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§4', campaign: null, path: f.relPath, detail: 'php.ini の auto_prepend_file が設定されています（全リクエストで実行）', ruleId: 's4-php-ini:auto_prepend', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\s;]/) });
+    if (/^[ \t]*disable_functions[ \t]*=[ \t]*\r?$/m.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, detail: 'php.ini の disable_functions が空欄', ruleId: 's4-php-ini:disable_functions', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*disable_functions[ \t]*=[ \t]*$/) });
   }
   // dpkg のパッケージ DB（ベンダー修正版表。OS は同じルートの etc/os-release / usr/lib/os-release）
   const note = 'パッケージが修正済みでも、稼働中の PHP-FPM / Apache ワーカーが更新後に再起動されたか（配信中のバイナリ）を確認';

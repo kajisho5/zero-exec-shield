@@ -1,5 +1,5 @@
 // schemas/findings.schema.json で使っているキーワードだけを解釈する最小の JSON Schema 検証器（テスト専用）。
-// 対応: $ref（#/$defs/...）, type, const, enum, pattern, required, properties, additionalProperties:false, items, uniqueItems, if/then/else, not
+// 対応: $ref（#/$defs/...）, type, const, enum, pattern, minimum, required, properties, additionalProperties:false, items, uniqueItems, if/then/else, not
 import { readFileSync } from 'node:fs';
 
 type S = Record<string, unknown>;
@@ -10,7 +10,7 @@ const typeOf = (v: unknown) => (v === null ? 'null' : Array.isArray(v) ? 'array'
 /** 違反の JSON Pointer 風の位置と理由の一覧（空なら妥当）。 */
 export function validate(v: unknown, schema: S = FINDINGS_SCHEMA, root: S = FINDINGS_SCHEMA, at = ''): string[] {
   const errs: string[] = [];
-  const known = new Set(['$schema', '$id', 'title', 'description', '$defs', '$ref', 'type', 'const', 'enum', 'pattern', 'required', 'properties', 'additionalProperties', 'items', 'uniqueItems', 'if', 'then', 'else', 'not']);
+  const known = new Set(['$schema', '$id', 'title', 'description', '$defs', '$ref', 'type', 'const', 'enum', 'pattern', 'required', 'properties', 'additionalProperties', 'items', 'uniqueItems', 'if', 'then', 'else', 'not', 'minimum']);
   for (const k of Object.keys(schema)) if (!known.has(k)) throw new Error(`unsupported keyword ${k} at ${at}`);
   if (typeof schema['$ref'] === 'string') {
     const target = (schema['$ref'] as string).replace(/^#\//, '').split('/').reduce<unknown>((o, k) => (o as S)[k], root) as S;
@@ -23,6 +23,7 @@ export function validate(v: unknown, schema: S = FINDINGS_SCHEMA, root: S = FIND
   }
   if ('const' in schema && JSON.stringify(v) !== JSON.stringify(schema['const'])) errs.push(`${at}: const`);
   if (Array.isArray(schema['enum']) && !(schema['enum'] as unknown[]).some((e) => JSON.stringify(e) === JSON.stringify(v))) errs.push(`${at}: enum ${JSON.stringify(v)}`);
+  if (typeof schema['minimum'] === 'number' && typeof v === 'number' && v < (schema['minimum'] as number)) errs.push(`${at}: minimum ${schema['minimum']}`);
   if (typeof schema['pattern'] === 'string' && typeof v === 'string' && !new RegExp(schema['pattern'] as string, 'u').test(v)) errs.push(`${at}: pattern ${schema['pattern']} ${JSON.stringify(v)}`);
   if (v && typeof v === 'object' && !Array.isArray(v)) {
     const o = v as S;

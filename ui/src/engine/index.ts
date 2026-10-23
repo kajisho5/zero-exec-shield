@@ -57,6 +57,16 @@ export async function analyzeFiles(input: FileInput[], ioc: IocDb = IOC): Promis
 
   const findings: Finding[] = [];
   const ids = new Set<string>();
+  // CLI の emit と同じく、evidence は path にあるものから決める: 読めたファイルはその内容のハッシュ（file）、
+  // ディレクトリ（投入ファイルの親）は directory（ブラウザは ger-tree-v1 を計算できないため detail）
+  const dirs = new Set<string>();
+  for (const f of files) for (let d = f.relPath; d.includes('/');) { d = d.slice(0, d.lastIndexOf('/')); dirs.add(d); }
+  for (const s of ctx.specs) {
+    if (s.path === null) continue;
+    const fi = ctx.byPath.get(s.path);
+    if (fi && s.evidenceSha === undefined && fi.sha256) s.evidenceSha = fi.sha256;
+    if (!fi && dirs.has(s.path)) s.directory = true;
+  }
   for (const s of ctx.specs) {
     const f = await makeFinding(s);
     if (ids.has(f.id)) continue;

@@ -1,7 +1,8 @@
 // §2 / §15 / §25 / §36 / §41: ファイル名・ハッシュ・package.json・ロックファイル照合
 import { atRoot, push, readable, type RuleCtx } from '../context';
 import type { IocPackage } from '../ioc';
-import { dirname, parseJsonc, versionMatches } from '../util';
+import { basename, dirname, parseJsonc, versionMatches } from '../util';
+import type { FindingRelated } from '../types';
 
 export function filenameRules(ctx: RuleCtx): void {
   ctx.checks.add('s2-malicious-files').add('s15-worm-files').add('s25-binaries').add('s36-pyz').add('s41-gitexe');
@@ -340,16 +341,36 @@ export function packageRules(ctx: RuleCtx): void {
   }
 }
 
+/** CLI の pkg_kind と同じ: インストール実体は pkg.compromised、ロックファイル・依存の宣言は pkg.lockfile_compromised */
+function pkgKind(path: string): string {
+  return /\/node_modules\/.+\/package\.json$/.test('/' + path) || /\.(dist-info|egg-info)$/.test(path) ? 'pkg.compromised' : 'pkg.lockfile_compromised';
+}
+
+/** CLI の pkg_related と同じ: npm のロックファイルの隣にインストールされた実体 <dir>/node_modules/<name> */
+function pkgRelated(ctx: RuleCtx, eco: string, name: string, src: string): FindingRelated[] | undefined {
+  if (eco !== 'npm' || !/^(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lock)$/.test(basename(src))) return undefined;
+  if (!name || name.startsWith('.') || name.includes('..') || name.split('/').length > 2 || (name.includes('/') && !name.startsWith('@'))) return undefined;
+  const d = dirname(src);
+  const t = (d ? d + '/' : '') + 'node_modules/' + name;
+  return ctx.files.some((f) => f.relPath.startsWith(t + '/')) ? [{ relation: 'npm_installed', path: t }] : undefined;
+}
+
 function emitPackage(ctx: RuleCtx, p: IocPackage, d: Dep): void {
   const match = p.match ?? 'versions';
+  const safe = p.safe_version || null;
+  const x = match === 'vulnerable_versions'
+    ? { kind: 'pkg.vulnerable', subject: { ecosystem: d.eco, package: d.name, version: d.version || null, safe_version: safe, fixed_versions: safe ? [safe] : [] } }
+    : { kind: pkgKind(d.path), subject: { ecosystem: d.eco, package: d.name, version: d.version || null, safe_version: safe, fixed_versions: [] } };
+  const related = pkgRelated(ctx, d.eco, d.name, d.path);
+  const base = { ...x, ...(related ? { related } : {}), directory: /\.(dist-info|egg-info)$/.test(d.path) && !ctx.byPath.has(d.path) };
   // 版が分からない依存（version なしの node_modules/*/package.json 等）は版指定の IoC に一致させない（CLI と同じ）
   const hit = match === 'any_version' || ((match === 'versions' || match === 'vulnerable_versions') && d.version !== '' && (p.bad_versions ?? []).some((s) => s !== '' && versionMatches(d.version, s)));
   if (hit && match === 'vulnerable_versions') {
-    push(ctx, { level: 'HIGH', module: '§15', campaign: p.campaign, path: d.path, detail: `脆弱なバージョン ${d.name}@${d.version || '?'}（${d.eco}、悪性ではなく CVE の影響範囲）${p.safe_version ? `。修正版: ${p.safe_version} 以上` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });
+    push(ctx, { level: 'HIGH', module: '§15', campaign: p.campaign, path: d.path, detail: `脆弱なバージョン ${d.name}@${d.version || '?'}（${d.eco}、悪性ではなく CVE の影響範囲）${p.safe_version ? `。修正版: ${p.safe_version} 以上` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
   } else if (hit) {
-    push(ctx, { level: 'CRITICAL', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害パッケージ ${d.name}@${d.version || '?'} を検出（${d.eco}）${p.safe_version ? `。安全版: ${p.safe_version}` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });
+    push(ctx, { level: 'CRITICAL', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害パッケージ ${d.name}@${d.version || '?'} を検出（${d.eco}）${p.safe_version ? `。安全版: ${p.safe_version}` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
   } else if (match === 'unknown_versions') {
-    push(ctx, { level: 'MEDIUM', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害報告のあるパッケージ ${d.name}@${d.version || '?'}（侵害版の特定バージョン未定義のため要確認）`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });
+    push(ctx, { level: 'MEDIUM', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害報告のあるパッケージ ${d.name}@${d.version || '?'}（侵害版の特定バージョン未定義のため要確認）`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
   }
 }
 

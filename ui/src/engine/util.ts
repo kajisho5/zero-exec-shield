@@ -1,4 +1,4 @@
-import type { Finding, Severity, SkillPactFindingField } from './types';
+import type { Finding, FindingLocator, FindingRelated, FindingSubject, LocatorFormat, Severity, SkillPactFindingField } from './types';
 
 /** [.] / hxxp 形式で無害化された IoC を照合用に戻す（メモリ内のみ）。 */
 export function refang(s: string): string {
@@ -63,6 +63,10 @@ export function clip(s: string, max = 120): string {
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
 
+/** text locator の元（行番号と、ハッシュを取る行の内容）。内容は makeFinding でハッシュにし、出力には入れない */
+export interface TextLocatorSpec { format: 'text'; line: number; text: string }
+export type LocatorSpec = { format: LocatorFormat; pointer: string } | TextLocatorSpec;
+
 export interface FindingSpec {
   level: Severity;
   module: string;
@@ -72,13 +76,68 @@ export interface FindingSpec {
   ruleId: string;
   evidenceSha?: string | null;
   skillpact?: SkillPactFindingField;
+  /** findings 1.1（CLI の emit の 6 番目の引数と同じ項目） */
+  kind?: string;
+  subject?: FindingSubject;
+  locators?: LocatorSpec[];
+  related?: FindingRelated[];
+  /** path がディレクトリ（ブラウザはツリーハッシュ ger-tree-v1 の mode を知らないため evidence は detail にする） */
+  directory?: boolean;
+}
+
+/** RFC 6901 の JSON pointer（~ → ~0、/ → ~1）。 */
+export function jsonPointer(keys: (string | number)[]): string {
+  return keys.map((k) => '/' + String(k).replace(/~/g, '~0').replace(/\//g, '~1')).join('');
+}
+
+/** text の行（\n 区切り。行末の CR と 1 行目の BOM を除く。GER の remove_line・CLI の text_locators と同じ）のうち re に一致するもの（最大 64 行）。 */
+export function textLocators(text: string, re: RegExp, exclude?: RegExp): TextLocatorSpec[] {
+  const out: TextLocatorSpec[] = [];
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length && out.length < 64; i++) {
+    let l = lines[i]!;
+    if (l.endsWith('\r')) l = l.slice(0, -1);
+    if (i === 0 && l.charCodeAt(0) === 0xfeff) l = l.slice(1);
+    if (i === lines.length - 1 && l === '' ) continue;
+    if (re.test(l) && !(exclude && exclude.test(l))) out.push({ format: 'text', line: i + 1, text: l });
+  }
+  return out;
+}
+
+/** module と path だけで決まる related（CLI の default_related と同じ）。 */
+export function defaultRelated(module: string, path: string | null): FindingRelated[] {
+  if (!path) return [];
+  if (module === '§24' || module === '§42') {
+    const m = /^(.*\/Extensions\/[^/]+)(\/[^/]+)?\/manifest\.json$/.exec('/' + path);
+    if (m) return [{ relation: 'ext_dir', path: m[1]!.slice(1) }];
+  }
+  if (module === '§49' && /(^|\/)skill\.contract\.json$/.test(path)) return [{ relation: 'skill_dir', path: dirname(path) }];
+  return [];
 }
 
 /** id = SHA-256(module|campaign|path|ruleId)。同じ入力なら同じ ID（決定的）。 */
 export async function makeFinding(s: FindingSpec): Promise<Finding> {
   const id = 'sha256:' + (await sha256Hex(`${s.module}|${s.campaign ?? ''}|${s.path ?? ''}|${s.ruleId}`));
-  const ev = 'sha256:' + (s.evidenceSha ?? (await sha256Hex(s.detail)));
+  const detailSha = await sha256Hex(s.detail);
+  const ev = 'sha256:' + (s.evidenceSha ?? detailSha);
   const f: Finding = { id, level: s.level, module: s.module, campaign: s.campaign, path: s.path, detail: s.detail, evidence_hash: ev, ruleId: s.ruleId, source: 'ui' };
+  if (s.kind) f.kind = s.kind;
+  if (s.subject) f.subject = { ...s.subject, fixed_versions: [...s.subject.fixed_versions] };
+  if (s.locators?.length) {
+    const seen = new Set<string>();
+    const locs: FindingLocator[] = [];
+    for (const l of s.locators) {
+      const o: FindingLocator = 'pointer' in l ? { format: l.format, pointer: l.pointer } : { format: 'text', line: l.line, line_sha256: 'sha256:' + (await sha256Hex(l.text)) };
+      const k = JSON.stringify(o);
+      if (!seen.has(k)) { seen.add(k); locs.push(o); }
+    }
+    f.locators = locs;
+  }
+  const rel = s.related ?? defaultRelated(s.module, s.path);
+  if (rel.length) f.related = rel.map((r) => ({ ...r }));
+  // 通常ファイル（内容を読めた）は file。ディレクトリ・path なし・読めなかったファイルは detail（ブラウザはツリーの mode と
+  // シンボリックリンクの値を知らない。シンボリックリンクは 0 バイトのファイルとして渡されるため file になる）
+  f.evidence = s.evidenceSha && !s.directory ? { kind: 'file', hash: ev } : { kind: 'detail', hash: 'sha256:' + detailSha };
   if (s.skillpact) f.skillpact = s.skillpact;
   return f;
 }
