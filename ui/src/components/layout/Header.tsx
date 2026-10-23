@@ -22,7 +22,7 @@ export function Header({ onExport, onClear, onImport, canExport }: { onExport():
         <Wordmark height={15.5} className="max-sm:h-[14.5px] max-sm:w-auto max-[359px]:hidden" />
       </h1>
       <Tip label={<>準拠仕様 v5.2<span className="xl:hidden"><br />bundle {IOC.incident_bundle}</span></>}>
-        <span tabIndex={0} className="shrink-0 rounded-sm text-xs text-muted-foreground tabular-nums max-sm:hidden">v0.3.0</span>
+        <span tabIndex={0} className="shrink-0 rounded-sm text-xs text-muted-foreground tabular-nums max-sm:hidden">v{__ZES_UI_VERSION__}</span>
       </Tip>
       <span className="min-w-0 truncate font-mono text-[13px] text-muted-foreground max-xl:hidden" data-testid="bundle">{IOC.incident_bundle}</span>
       <div className="ml-auto flex shrink-0 items-center gap-1">
