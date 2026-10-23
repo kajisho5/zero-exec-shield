@@ -319,7 +319,23 @@ function frontmatterName(text: string): string {
   return '';
 }
 
-function observe(ctx: RuleCtx, files: FileInput[], policyPaths: Set<string>): Observed {
+/** 契約の entry.cli / tests.cases[].run / tests.setup が $SKILL_DIR/… で参照するファイル（スキル相対。CLI sp_must と同じ） */
+function mustRefs(text: string | null | undefined): Set<string> {
+  const out = new Set<string>();
+  if (!text) return out;
+  let c: unknown;
+  try { c = JSON.parse(text.replace(/^\uFEFF/, '')); } catch { return out; }
+  if (!isObj(c)) return out;
+  const toks: unknown[] = [];
+  for (const cap of arr(c['capabilities'])) { const cli = isObj(cap) && isObj(cap['entry']) ? cap['entry']['cli'] : undefined; if (Array.isArray(cli)) toks.push(...cli); }
+  const t = isObj(c['tests']) ? c['tests'] : {};
+  for (const tc of arr(t['cases'])) { const r = isObj(tc) ? tc['run'] : undefined; if (Array.isArray(r)) toks.push(...r); else toks.push(r); }
+  for (const st of arr(t['setup'])) { if (Array.isArray(st)) toks.push(...st); else toks.push(st); }
+  for (const tok of toks.filter(isStr)) for (const m of tok.matchAll(/\$SKILL_DIR\/([^\s'"]+)/g)) out.add(m[1]!);
+  return out;
+}
+
+function observe(ctx: RuleCtx, files: FileInput[], policyPaths: Set<string>, prefix = '', must: Set<string> = new Set()): Observed {
   const R = ctx.ioc.skillpact;
   let code = '';
   let tools = '';
@@ -344,10 +360,14 @@ function observe(ctx: RuleCtx, files: FileInput[], policyPaths: Set<string>): Ob
         }
         if (infence) code += l + '\n';
       }
-    } else if (R.script_extensions.includes(f.name.split('.').pop() ?? '') || f.text.startsWith('#!')) {
+    } else if (must.has(f.relPath.slice(prefix.length)) || R.script_extensions.includes(f.name.split('.').pop() ?? '') || f.text.startsWith('#!')) {
+      // 契約が実行すると宣言したファイルは拡張子・シバンの有無に依らずスクリプトとして扱う
       shell = true;
       code += f.text + '\n';
     } else if (/\.(json|ya?ml|toml|ini|cfg)$/.test(f.name)) {
+      code += f.text + '\n';
+    } else if (!f.text.slice(0, 8192).includes('\0')) {
+      // 拡張子から種別が分からないテキストもコードスコープに含める（実行の効果は付けない。CLI と同じ）
       code += f.text + '\n';
     }
   }
@@ -442,7 +462,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
       for (let i = 0; i < rest.length - 1; i++) { sub = sub ? `${sub}/${rest[i]}` : rest[i]!; if (skillDirSet.has(sub)) return false; }
       return true;
     });
-    const obs = observe(ctx, own, policyPaths);
+    const obs = observe(ctx, own, policyPaths, prefix, mustRefs(cfile?.text));
     const observed = EFF.filter((e) => obs[e as keyof Observed]);
     const a: SkillPactAnalysis = {
       skillId: dir || '.', name: basename(dir) || '.',

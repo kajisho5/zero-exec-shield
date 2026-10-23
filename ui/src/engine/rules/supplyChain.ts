@@ -1,7 +1,7 @@
 // §2 / §15 / §25 / §36 / §41: ファイル名・ハッシュ・package.json・ロックファイル照合
 import { atRoot, push, readable, type RuleCtx } from '../context';
 import type { IocPackage } from '../ioc';
-import { dirname, versionMatches } from '../util';
+import { dirname, parseJsonc, versionMatches } from '../util';
 
 export function filenameRules(ctx: RuleCtx): void {
   ctx.checks.add('s2-malicious-files').add('s15-worm-files').add('s25-binaries').add('s36-pyz').add('s41-gitexe');
@@ -38,6 +38,29 @@ export function filenameRules(ctx: RuleCtx): void {
     if (n.toLowerCase() === 'git.exe' && atRoot(ctx, f)) {
       push(ctx, { level: 'CRITICAL', module: '§41', campaign: null, path: f.relPath, detail: 'リポジトリルートの git.exe（IDE/エージェントが自動実行する未パッチ zero-day）', ruleId: 's41-gitexe', evidenceSha: f.sha256 });
     }
+  }
+}
+
+/** 標準の .pth の import 行（CLI PTH_SAFE_RE と同じ。行全体で一致したものだけを許可） */
+const PTH_SAFE = [
+  /^\s*import\s+_virtualenv\s*$/,
+  /^import os; var = 'SETUPTOOLS_USE_DISTUTILS'; enabled = os\.environ\.get\(var, '(local|stdlib)'\) == 'local'; enabled and __import__\('_distutils_hack'\)\.add_shim\(\); *$/,
+  /^\s*import\s+(__editable___[A-Za-z0-9_]+_finder|_editable_impl_[A-Za-z0-9_]+)\s*(;\s*(__editable___[A-Za-z0-9_]+_finder|_editable_impl_[A-Za-z0-9_]+)\.install\([^()]*\)\s*)?$/,
+];
+const PTH_DANGER = /(^|[^A-Za-z0-9_])(exec|eval|compile|getattr|popen|system|__import__)\s*\(|b64decode|subprocess|urllib|socket|fromhex|marshal|zlib|codecs|pickle|ctypes|requests/;
+
+/** §2 .pth の import 行（Python 起動のたびに exec される。CLI check_s2 と同じ）。標準形以外は MEDIUM、実行・通信を伴うものは HIGH */
+export function pthRules(ctx: RuleCtx): void {
+  ctx.checks.add('s2-pth');
+  for (const f of readable(ctx).filter((x) => x.name.endsWith('.pth'))) {
+    const imports = f.text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => /^\s*import\s/.test(l) && !PTH_SAFE.some((r) => r.test(l)));
+    if (!imports.length) continue;
+    const bad = imports.some((l) => PTH_DANGER.test(l));
+    push(ctx, {
+      level: bad ? 'HIGH' : 'MEDIUM', module: '§2', campaign: 'litellm-oct2026', path: f.relPath,
+      detail: bad ? '.pth ファイルに起動時実行コード（import + exec/eval/system/通信）' : '.pth ファイルに起動時に実行される import 行（標準の virtualenv / editable 形式以外。内容を確認）',
+      ruleId: bad ? 's2-pth:high' : 's2-pth:medium', evidenceSha: f.sha256,
+    });
   }
 }
 
@@ -213,6 +236,34 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
       }
     } else if (f.name === 'poetry.lock' || f.name === 'uv.lock' || f.name === 'pdm.lock') {
       add('pypi', tomlLockDeps(f.text));
+    } else if (f.name === 'bun.lock') {
+      // bun.lock（JSONC。"packages": { "<名前>": ["<実名>@<版>", …] }。CLI build_deps と同じく npm エイリアスは実名で照合）
+      try {
+        const j = parseJsonc(f.text) as { packages?: unknown };
+        const pk = j && typeof j === 'object' ? j.packages : undefined;
+        if (pk && typeof pk === 'object' && !Array.isArray(pk)) {
+          for (const v of Object.values(pk as Record<string, unknown>)) {
+            const spec = Array.isArray(v) ? v[0] : undefined;
+            const m = typeof spec === 'string' ? /^(@?[^@]+)@(.+)$/.exec(spec) : null;
+            if (m?.[1] && m[2]) out.push({ eco: 'npm', name: m[1], version: m[2], path: f.relPath, sha: f.sha256 });
+          }
+        }
+      } catch { parseFailed(f.relPath); }
+    } else if (f.name === 'deno.lock') {
+      // deno.lock（v3: packages.npm、v4 以降: npm。キーは "<名前>@<版>"、"_" 以降は peer 接尾辞）
+      try {
+        const j = JSON.parse(noBom(f.text)) as { npm?: unknown; packages?: { npm?: unknown } };
+        const secs = [j?.npm, j?.packages && typeof j.packages === 'object' ? j.packages.npm : undefined];
+        for (const sec of secs) {
+          if (!sec || typeof sec !== 'object' || Array.isArray(sec)) continue;
+          for (const k of Object.keys(sec)) {
+            const m = /^(@?[^@]+)@([^_]+)/.exec(k);
+            if (m?.[1] && m[2]) out.push({ eco: 'npm', name: m[1], version: m[2], path: f.relPath, sha: f.sha256 });
+          }
+        }
+      } catch { parseFailed(f.relPath); }
+    } else if (f.name === 'bun.lockb') {
+      ctx.errors.push({ module: '§15', reason: `lockfile_unparsed:${f.relPath}` });
     } else if (f.name === 'Pipfile.lock') {
       try {
         const j = JSON.parse(noBom(f.text)) as Record<string, unknown>;
@@ -250,15 +301,24 @@ export function packageRules(ctx: RuleCtx): void {
     if (pre && f.text.includes(pre)) {
       push(ctx, { level: 'CRITICAL', module: '§15', campaign: 'chaindrop-keyv', path: f.relPath, detail: `ChainDrop の preinstall フック（${pre}）`, ruleId: 's15-preinstall', evidenceSha: f.sha256 });
     }
-    let j: { scripts?: Record<string, unknown> };
-    try { j = JSON.parse(f.text.replace(/^\uFEFF/, '')); } catch { continue; }
-    const scripts = j.scripts ?? {};
-    const hooks = ['preinstall', 'install', 'postinstall'].map((k) => scripts[k]).filter((v): v is string => typeof v === 'string');
+    // install 系と prepare 系（CLI PKG_HOOK_RE と同じ）。厳密な JSON として読めなければ JSONC（BOM・末尾カンマ）として、
+    // それでも駄目なら該当キーの行をそのまま見る（CLI の grep フォールバックと同じ）
+    const HOOK = /^(pre|post)?(install|prepare)$/;
+    let hooks: string[];
+    try {
+      const j = parseJsonc(f.text) as { scripts?: unknown };
+      const sc = j && typeof j === 'object' && !Array.isArray(j) ? j.scripts ?? {} : {};
+      hooks = sc && typeof sc === 'object' && !Array.isArray(sc)
+        ? Object.entries(sc as Record<string, unknown>).filter(([k]) => HOOK.test(k)).map(([, v]) => (typeof v === 'string' ? v : JSON.stringify(v)))
+        : [];
+    } catch {
+      hooks = f.text.split(/\r?\n/).filter((l) => /"(pre|post)?(install|prepare)"\s*:/.test(l));
+    }
     if (hooks.length) {
       if (hooks.some((h) => /(curl|wget|bash|sh -c|base64|eval|node -e|\.mjs|https?:\/\/)/.test(h))) {
-        push(ctx, { level: 'HIGH', module: '§2', campaign: null, path: f.relPath, detail: 'install ライフサイクルスクリプトに不審なコマンド', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
+        push(ctx, { level: 'HIGH', module: '§2', campaign: null, path: f.relPath, detail: 'install / prepare ライフサイクルスクリプトに不審なコマンド', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
       } else if (!f.relPath.includes('node_modules/')) {
-        push(ctx, { level: 'MEDIUM', module: '§2', campaign: null, path: f.relPath, detail: 'install ライフサイクルスクリプトが定義されています（ignore-scripts 推奨）', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
+        push(ctx, { level: 'MEDIUM', module: '§2', campaign: null, path: f.relPath, detail: 'install / prepare ライフサイクルスクリプトが定義されています（ignore-scripts 推奨）', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
       }
     }
   }

@@ -86,10 +86,21 @@ export function emudhraRules(ctx: RuleCtx): void {
   const os = e.os_ca_certificates ?? {};
   for (const f of readable(ctx)) {
     if (/(^|\/)var\/lib\/dpkg\/status$/.test(f.relPath)) {
-      const v = /^Package: ca-certificates\n(?:[^\n]+\n)*?Version: (\S+)/m.exec(f.text)?.[1];
+      // 段落（パッケージ）単位で読み、Status がインストール済みのものだけ（削除済み・config-files は除く。CLI と同じ）
+      let v: string | undefined;
+      for (const para of f.text.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
+        const field = (k: string) => new RegExp(`^${k}: (.*)$`, 'm').exec(para)?.[1];
+        const st = field('Status') ?? '';
+        if (field('Package') !== 'ca-certificates' || !/installed$/.test(st) || /not-installed|config-files/.test(st)) continue;
+        v = field('Version'); break;
+      }
       if (!v) continue;
       const ubMin = os.ubuntu_min_upstream ?? '20260816';
-      const bad = v.includes('ubuntu') ? Number(v.slice(0, 8)) < Number(ubMin) : !debianCaFixed(v);
+      // ベンダーは同じイメージの os-release から判定（Ubuntu の SRU 版 20260601~24.04.1 は "ubuntu" を含まない）
+      const base = f.relPath.replace(/(^|\/)var\/lib\/dpkg\/status$/, '$1');
+      const osr = ctx.byPath.get(`${base}etc/os-release`) ?? ctx.byPath.get(`${base}usr/lib/os-release`);
+      const osid = /^ID=["']?([^"'\r\n]*)/m.exec(osr?.text ?? '')?.[1] ?? '';
+      const bad = v.includes('ubuntu') || osid === 'ubuntu' ? Number(v.slice(0, 8)) < Number(ubMin) : !debianCaFixed(v);
       if (bad) push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, detail: `ca-certificates ${v}（dpkg）は eMudhra 侵害 CA を含む`, ruleId: 's6-emudhra-os:dpkg', evidenceSha: f.sha256 });
     } else if (/(^|\/)lib\/apk\/db\/installed$/.test(f.relPath)) {
       const v = /^P:ca-certificates\n(?:[^\n]+\n)*?V:(\S+)/m.exec(f.text)?.[1];

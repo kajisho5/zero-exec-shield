@@ -8,7 +8,20 @@ import { collectDeps } from './supplyChain';
 export { parseCodexToml };
 
 const MCP_CONFIG = /(^|\/)(\.mcp\.json|mcp\.json|\.cursor\/mcp\.json|\.vscode\/mcp\.json|\.claude\/settings(\.local)?\.json|\.gemini\/settings\.json|claude_desktop_config\.json|\.claude\.json|\.codeium\/windsurf\/mcp_config\.json|\.codex\/config\.toml)$/;
-const HIGH_CMD = /(^|[\s"/])(curl|wget)([\s"]|$)|bash -c|sh -c|powershell(\.exe)? .*-(e|enc|encodedcommand)\s|node -e|python[0-9.]* -c|base64/;
+// CLI MCP_DANGER_RE と同じ（大文字小文字を区別しない）: curl / wget / base64、シェルの -c（-xc・--norc 等の前置オプション可）、
+// node / bun の -e・--eval・-p・--print、deno eval、python -c、perl / ruby -e、php -r、osascript / lua -e、pwsh -Command 等、cmd /c
+const OPTS = String.raw`(\s+-\S*)*\s+`;
+const B = String.raw`(^|[\s"/])`;
+const HIGH_CMD = new RegExp([
+  String.raw`${B}(curl|wget)([\s"]|$)|base64`,
+  String.raw`${B}(ba|z|da|k|a|fi)?sh(\.exe)?${OPTS}-[a-z]*c[a-z]*(\s|$)`,
+  String.raw`${B}(node|nodejs|bun)(\.exe)?${OPTS}(-e|--eval|-p|--print)([\s=]|$)|${B}deno(\.exe)?\s+ev[a]l(\s|$)`,
+  String.raw`${B}python[0-9.]*(\.exe)?${OPTS}-[a-z]*c(\s|$)`,
+  String.raw`${B}(perl|ruby)[0-9.]*(\.exe)?${OPTS}-[a-z]*e(\s|$)`,
+  String.raw`${B}php[0-9.]*(\.exe)?${OPTS}-r(\s|$)|${B}(osascript|lua[0-9.]*)${OPTS}-e(\s|$)`,
+  String.raw`${B}(pwsh|powershell)(\.exe)?(\s+\S+)*\s+[-/](c|command|e|ec|enc|encodedcommand)(\s|$)`,
+  String.raw`${B}cmd(\.exe)?\s+/[ck](\s|$)`,
+].join('|'), 'i');
 const MED_CMD = /(^|[\s"/])(npx|uvx|bunx|pnpm dlx)([\s"]|$)/;
 
 function collectServers(obj: unknown, out: { name: string; command: string; args: string[] }[], name = ''): void {
@@ -51,7 +64,7 @@ export function mcpRules(ctx: RuleCtx): void {
     });
     ctx.viewers.mcp.push({ path: f.relPath, servers: views, parseError });
     if (views.some((v) => v.risk === 'high')) {
-      push(ctx, { level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'MCP/エージェント設定の command/args に危険なコマンド（curl/wget/bash -c/powershell -enc/node -e）', ruleId: 's17-mcp-command:high', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'MCP/エージェント設定の command/args に危険なコマンド（curl/wget/シェル -c/インタプリタの -e・--eval/powershell -Command 等）', ruleId: 's17-mcp-command:high', evidenceSha: f.sha256 });
     }
     if (views.some((v) => v.risk === 'medium')) {
       push(ctx, { level: 'MEDIUM', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'MCP の command が npx/uvx（実行時に最新版を取得。バージョン固定を確認）', ruleId: 's17-mcp-command:medium', evidenceSha: f.sha256 });
@@ -94,12 +107,18 @@ export function mcpRules(ctx: RuleCtx): void {
   }
 }
 
+/** AI エージェント/エディタの指示ファイル（CLI ai_instruction_files と同じ）。 */
+export const isAiInstruction = (f: { name: string; relPath: string }) =>
+  /^(\.cursorrules|CLAUDE\.md|CLAUDE\.local\.md|AGENTS\.md|GEMINI\.md|copilot-instructions\.md|\.windsurfrules|\.clinerules)$/.test(f.name)
+  || /(^|\/)\.cursor\/rules\/[^/]+$|(^|\/)\.clinerules\/.+|(^|\/)\.github\/instructions\/.+|(^|\/)\.claude\/(.+\/)?[^/]+\.md$/.test(f.relPath);
+
 /** §7 AI 指示ファイルの不可視文字・BiDi 制御文字・ホモグリフ。 */
 export function aiAssistantRules(ctx: RuleCtx): void {
   ctx.checks.add('s7-invisible').add('s7-homoglyph');
-  const targets = readable(ctx).filter((x) => /^(\.cursorrules|CLAUDE\.md|copilot-instructions\.md)$/.test(x.name) || /(^|\/)\.cursor\/rules\/[^/]+$/.test(x.relPath));
+  const targets = readable(ctx).filter(isAiInstruction);
   for (const f of targets) {
-    if (/[​-‏‪-‮⁠-⁤⁦-⁩]|[\u{E0000}-\u{E007F}]/u.test(f.text)) {
+    // 異体字セレクタ（U+FE00–FE0D、U+E0100–E01EF、U+FE00–FE0F の 2 連続以上）による埋め込みも対象（CLI §7 と同じ）
+    if (/[​-‏‪-‮⁠-⁤⁦-⁩]|[\u{E0000}-\u{E007F}]|[\u{FE00}-\u{FE0D}]|[\u{E0100}-\u{E01EF}]|[\u{FE00}-\u{FE0F}]{2}/u.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§7', campaign: null, path: f.relPath, detail: 'AI 指示ファイルに不可視文字 / Unicode BiDi 制御文字', ruleId: 's7-invisible', evidenceSha: f.sha256 });
     }
     if (/[A-Za-z][Ͱ-ϿЀ-ӿ]|[Ͱ-ϿЀ-ӿ][A-Za-z]/u.test(f.text)) {

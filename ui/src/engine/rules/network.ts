@@ -49,6 +49,19 @@ export function networkRules(ctx: RuleCtx): void {
     }
   }
   const iocs = networkIocs(ctx.ioc);
+  // §34 hosts ファイル（CLI check_s34 のうちファイルで判定できる部分）: レジストリ/GitHub の上書きと C2 ドメイン。大文字小文字を区別しない
+  ctx.checks.add('s34-hosts');
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const f of readable(ctx).filter((x) => x.name === 'hosts')) {
+    const body = f.text.split(/\r?\n/).filter((l) => !/^\s*#/.test(l)).join('\n');
+    for (const h of ctx.ioc.protected_hosts ?? []) {
+      if (new RegExp(`[ \\t]${esc(h)}([ \\t]|$)`, 'im').test(body)) push(ctx, { level: 'HIGH', module: '§34', campaign: null, path: f.relPath, detail: `hosts でレジストリ/GitHub（${h}）を上書き`, ruleId: `s34-hosts:${h}`, evidenceSha: f.sha256 });
+    }
+    const low = body.toLowerCase();
+    for (const i of iocs.filter((x) => x.kind === 'malicious' && !/^[0-9.]+$/.test(x.value))) {
+      if (low.includes(i.value.toLowerCase())) push(ctx, { level: 'CRITICAL', module: '§34', campaign: null, path: f.relPath, detail: `hosts に C2 ドメイン（${i.value}）`, ruleId: `s34-hosts-c2:${i.value}`, evidenceSha: f.sha256 });
+    }
+  }
   for (const f of readable(ctx)) {
     const low = f.text.toLowerCase();
     const hits = iocs.filter((i) => low.includes(i.value.toLowerCase()));

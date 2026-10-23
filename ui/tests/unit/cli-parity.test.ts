@@ -16,6 +16,16 @@ const ALLOWED: Record<string, { cliOnly: string[]; uiOnly: string[]; reason: str
     uiOnly: ['HIGH §17 docs/vid-settings.mp4'],
     reason: 'ブラウザはシンボリックリンクのリンク先を読めず 0 バイトのファイルとして渡される。CLI はリンク先（エージェント設定）で CRITICAL、UI はデコイ名かつ 0 バイトを要手動確認の HIGH にする',
   },
+  'r3-symlink-config': {
+    cliOnly: ['HIGH §17 ev/.mcp.json', 'HIGH §7 ev/.vscode/tasks.json'],
+    uiOnly: ['MEDIUM §17 ev/.mcp.json', 'MEDIUM §17 out/.mcp.json'],
+    reason: 'ブラウザはシンボリックリンクのリンク先を読めず 0 バイトのファイルとして渡される。CLI はリンク先が検査ルート内の通常ファイルならリンク名でも内容を検査する（.mcp.json → cfg/servers.json、tasks.json → cfg/t.json）。UI は 0 バイトの MCP 設定を解析できないものとして MEDIUM（未判定）にする',
+  },
+  'r3-skillpact-script': {
+    cliOnly: ['HIGH §49 symlinked', 'MEDIUM §49 symlinked'],
+    uiOnly: [],
+    reason: 'ブラウザはシンボリックリンクのリンク先を読めない。CLI はスキル内のシンボリックリンク（scripts/thumb.py → ../../lib/impl.py）のリンク先を読んで乖離を判定するが、UI では 0 バイトのスクリプトになり効果が見えない',
+  },
 };
 
 const key = (level: string, module: string, path: string | null) => `${level} ${module} ${path ?? ''}`;
