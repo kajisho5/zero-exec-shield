@@ -158,3 +158,15 @@ test('敵対的な findings.json の取り込みで画面が消えない・書�
   expect(out.errors).toContainEqual({ module: '§6', reason: 'network_timeout' });
   expect(errors).toEqual([]);
 });
+
+test('375px 幅でページ全体が横スクロールしない', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
+  await open(page);
+  await scan(page, 'chaindrop');
+  await expect(page.getByTestId('finding-row').first()).toBeVisible();
+  for (const tab of [/^総合/, /^SkillPact/, /^MCP/]) {
+    await page.getByRole('tab', { name: tab }).click();
+    const { sw, cw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
+    expect(sw, `${tab}`).toBeLessThanOrEqual(cw);
+  }
+});

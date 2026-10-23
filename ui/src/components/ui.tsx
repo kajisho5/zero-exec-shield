@@ -100,7 +100,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={show}>
       {children}
-      <div aria-live="polite" role="status" className="fixed bottom-6 right-6 z-50 flex w-[360px] flex-col gap-2">
+      <div aria-live="polite" role="status" className="fixed bottom-4 right-4 z-50 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2 sm:bottom-6 sm:right-6">
         {list.map((t) => (
           <div key={t.id} className={`rounded-xl border px-4 py-3 text-sm ${t.tone === 'ok' ? 'border-border-strong bg-surface-2' : 'border-critical bg-critical-bg'}`}>
             <div className="flex items-center gap-2">

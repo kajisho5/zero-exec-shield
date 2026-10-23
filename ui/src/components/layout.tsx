@@ -5,17 +5,17 @@ import { Button, Icon, SEV_STYLE } from './ui';
 
 export function Header({ onExport, onClear, canExport }: { onExport(): void; onClear(): void; canExport: boolean }) {
   return (
-    <header className="flex h-16 items-center gap-4 border-b border-border px-8">
+    <header className="flex min-h-16 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-3 sm:px-8">
       <Icon name="brand" size={32} className="text-accent" />
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-semibold">Zero-Exec Shield</h1>
         <span className="rounded-md border border-border-strong bg-surface-2 px-1.5 text-xs text-muted" title="準拠仕様 v5.2">v0.1.0</span>
       </div>
-      <div className="ml-4 leading-tight">
+      <div className="min-w-0 leading-tight sm:ml-4">
         <div className="text-[11px] text-subtle">incident_bundle</div>
-        <div className="font-mono text-xs text-muted" data-testid="bundle">{IOC.incident_bundle}</div>
+        <div className="break-all font-mono text-xs text-muted" data-testid="bundle">{IOC.incident_bundle}</div>
       </div>
-      <div className="ml-auto flex items-center gap-3">
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
         <span className="inline-flex h-7 items-center gap-2 rounded-full border border-safe bg-safe-bg px-3 text-xs text-safe" title="この画面は外部と一切通信しません（CSP connect-src 'none'）">
           <span className="h-2 w-2 rounded-full bg-safe" aria-hidden="true" />
           オフライン・外部通信ゼロ
@@ -47,7 +47,7 @@ export function TabBar({ active, findings, onSelect }: { active: TabId; findings
   const scrollBy = (d: number) => scroller.current?.scrollBy({ left: d, behavior: 'smooth' });
 
   return (
-    <nav className="relative flex h-12 items-stretch border-b border-border px-8">
+    <nav className="relative flex h-12 items-stretch border-b border-border px-4 sm:px-8">
       <Button variant="icon" className="my-auto mr-2 shrink-0" aria-label="タブを左へスクロール" onClick={() => scrollBy(-320)}><Icon name="chevron-left" /></Button>
       <div ref={scroller} role="tablist" aria-label="検査カテゴリ" className="scrollbar-none flex min-w-0 flex-1 snap-x items-stretch overflow-x-auto [mask-image:linear-gradient(to_right,transparent,black_24px,black_calc(100%-24px),transparent)]">
         {TABS.map((t, i) => {
