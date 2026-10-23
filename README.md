@@ -63,7 +63,7 @@ chmod +x zes-scan.sh
 | `--full` | §1〜49 |
 | `--worm` | §15/18/25/45 のみ |
 | `--skillpact` | §49 のみ |
-| `--url <URL>` | §4 の非侵襲 URL チェック（`curl -sI` で `X-Powered-By` ヘッダのみ取得。http/https のみ受理） |
+| `--url <URL>` | §4 の非侵襲 URL チェック（`HEAD` でヘッダのみ取得し、405/501 のときだけ `GET`。リダイレクトは追わない。`Server` / `X-Powered-By` の `PHP/x.y.z` を PHP2Shell の修正版と照合し、該当すれば HIGH「ヘッダ申告版で潜在的に脆弱」。http/https のみ受理） |
 | `--json` | findings.json を標準出力へ（人間向けログは標準エラーへ） |
 | `--skillpact-cache <dir>` | §49 差分異常検出用の前バージョン契約キャッシュ |
 

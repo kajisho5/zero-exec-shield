@@ -60,7 +60,7 @@ Usage: zes-scan.sh [--quick|--standard|--full|--worm|--skillpact] [--root <dir>]
   --quick        §1〜19（既定）
   --worm         §15/18/25/45 のみ
   --skillpact    §49 のみ
-  --url <URL>    §4 の非侵襲URLチェック（X-Powered-By ヘッダのみ取得）
+  --url <URL>    §4 の非侵襲URLチェック（Server / X-Powered-By ヘッダのみ取得。HEAD、405/501 時のみ GET、リダイレクト非追従）
   --json         findings.json を標準出力へ（人間向けログは標準エラーへ）
   --skillpact-cache <dir>  §49 差分異常検出用の前バージョン契約キャッシュ
 
@@ -1223,34 +1223,149 @@ check_s3() {
 }
 
 # §4 PHP
+# php_status VERSION → vulnerable / fixed / prerelease / unknown_branch / unparsed（PHP2Shell、upstream 版番号での判定）
+#   判定は openai/php2shell-checker（Apache-2.0）の versionStatus と同じ意味論:
+#   - x.y.z の後ろが -,+,~ 以外で始まる・x.y.z でない → unparsed（要確認）
+#   - dev / alpha / beta / RC 等のプレリリース → prerelease（x.y.z 部分だけで修正済みと判断しない）
+#   - 5.4〜8.1（公式の修正リリースなし）→ vulnerable、修正版のあるブランチ（8.2〜8.5）→ パッチ番号で判定
+#   - 修正版一覧にない新しいブランチ（8.6+ / 9.x 等）や 5.3 以前 → unknown_branch（修正済み扱いにしない）
+php_status() {
+  local v="${1#v}" maj min pat suf br fx
+  [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(.*)$ ]] || { echo unparsed; return 0; }
+  maj="${BASH_REMATCH[1]}"; min="${BASH_REMATCH[2]}"; pat="${BASH_REMATCH[3]}"; suf="${BASH_REMATCH[4]}"
+  if printf '%s' "$suf" | grep -q -i -E '(^|[-+~.])(dev|alpha|beta|rc)'; then echo prerelease; return 0; fi
+  case "$suf" in ''|[-+~]*) ;; *) echo unparsed; return 0 ;; esac
+  br="$((10#$maj)).$((10#$min))"
+  if read_ioc '.php2shell_distro.older_branches' | grep -q -x -F -- "$br"; then echo vulnerable; return 0; fi
+  fx="$(read_ioc '.php2shell_distro.upstream_fixed' | awk -F. -v b="$br" '$1 "." $2 == b { print $3; exit }')"
+  [ -n "$fx" ] || { echo unknown_branch; return 0; }
+  if [ "$((10#$pat))" -lt "$fx" ]; then echo vulnerable; else echo fixed; fi
+}
+
+# deb_version_lt A B … Debian のバージョン順序（epoch:upstream-revision、~ は空より前）で A < B なら真
+deb_version_lt() {
+  awk -v a="$1" -v b="$2" '
+    function ord(c) { if (c == "~") return -1; if (c ~ /[A-Za-z]/) return O[c]; return O[c] + 256 }
+    function isd(c) { return c ~ /^[0-9]$/ }
+    function vrc(x, y,   cx, cy, dx, dy) {
+      while (x != "" || y != "") {
+        while ((x != "" && !isd(substr(x, 1, 1))) || (y != "" && !isd(substr(y, 1, 1)))) {
+          cx = (x != "" && !isd(substr(x, 1, 1))) ? ord(substr(x, 1, 1)) : 0
+          cy = (y != "" && !isd(substr(y, 1, 1))) ? ord(substr(y, 1, 1)) : 0
+          if (cx != cy) return cx < cy ? -1 : 1
+          x = substr(x, 2); y = substr(y, 2) }
+        match(x, /^[0-9]*/); dx = substr(x, 1, RLENGTH); x = substr(x, RLENGTH + 1)
+        match(y, /^[0-9]*/); dy = substr(y, 1, RLENGTH); y = substr(y, RLENGTH + 1)
+        sub(/^0+/, "", dx); sub(/^0+/, "", dy)
+        if (length(dx) != length(dy)) return length(dx) < length(dy) ? -1 : 1
+        if (dx != dy) return dx < dy ? -1 : 1 }
+      return 0 }
+    function split3(v, P,   k) {
+      P[1] = 0; if (match(v, /^[0-9]+:/)) { P[1] = substr(v, 1, RLENGTH - 1) + 0; v = substr(v, RLENGTH + 1) }
+      P[3] = ""; k = 0; while (match(substr(v, k + 1), /-/)) k += RSTART
+      if (k > 0) { P[3] = substr(v, k + 1); v = substr(v, 1, k - 1) }
+      P[2] = v }
+    BEGIN { for (k = 33; k < 127; k++) O[sprintf("%c", k)] = k
+      split3(a, A); split3(b, B)
+      r = (A[1] != B[1]) ? (A[1] < B[1] ? -1 : 1) : vrc(A[2], B[2]); if (r == 0) r = vrc(A[3], B[3])
+      exit (r < 0 ? 0 : 1) }'
+}
+
+# os-release（通常ファイルのみ）から ID<TAB>VERSION_ID
+os_release_id() {
+  local f
+  for f in "$1/etc/os-release" "$1/usr/lib/os-release"; do
+    [ -f "$f" ] || continue
+    awk -F= '$1 == "ID" || $1 == "VERSION_ID" { v = $2; gsub(/^["\047]|["\047]$/, "", v); r[$1] = v }
+      END { print r["ID"] "\t" r["VERSION_ID"] }' "$f" 2>/dev/null
+    return 0
+  done
+  printf '\t\n'
+}
+
+# PHP2Shell: dpkg のパッケージ DB（/var/lib/dpkg/status。ROOT 内のコンテナイメージ展開物も対象）を静的に読み、
+# 実際に配信に使われるパッケージ（php*-fpm / libapache2-mod-php* / php*-cgi / php*-cli）をベンダー修正版と比較する
+#   出力: php_distro_packages が判定したパッケージ数（ホストの dpkg を判定できたら 0 以外）
+php_distro_packages() {
+  local f base id vid pkg ver src row fixed adv url note n=0
+  note="パッケージが修正済みでも、稼働中の PHP-FPM / Apache ワーカーが更新後に再起動されたか（配信中のバイナリ）を確認"
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    awk 'BEGIN { RS = "" } {
+        p = ""; v = ""; s = ""; st = ""
+        n = split($0, L, "\n")
+        for (i = 1; i <= n; i++) {
+          if (L[i] ~ /^Package: /) p = substr(L[i], 10)
+          else if (L[i] ~ /^Version: /) v = substr(L[i], 10)
+          else if (L[i] ~ /^Source: /) { s = substr(L[i], 9); sub(/ .*/, "", s) }
+          else if (L[i] ~ /^Status: /) st = substr(L[i], 9) }
+        if (st !~ /installed$/ || st ~ /not-installed|config-files/) next
+        if (p !~ /^(php[0-9.]*-(fpm|cgi|cli)|libapache2-mod-php[0-9.]*)$/) next
+        if (s == "") { s = p; sub(/^libapache2-mod-/, "", s); sub(/-(fpm|cgi|cli)$/, "", s) }
+        print p "\t" v "\t" s }' "$f" >"$TMP_DIR/php-dpkg.tsv" 2>/dev/null
+    [ -s "$TMP_DIR/php-dpkg.tsv" ] || continue
+    if [ "$HAVE_JQ" -ne 1 ]; then record_error "§4" "php_distro_table_jq_unavailable:$f"; continue; fi
+    base="${f%/var/lib/dpkg/status}"
+    IFS=$'\t' read -r id vid < <(os_release_id "$base")
+    while IFS=$'\t' read -r pkg ver src; do
+      [ -n "$pkg" ] || continue
+      n=$((n + 1))
+      row="$(jq -r --arg v "$id" --arg r "$vid" --arg s "$src" '.php2shell_distro.packages[]? | select(.vendor == $v and .release == $r and .source_package == $s) | [.fixed, .advisory, .url] | @tsv' "$IOC_FILE" 2>/dev/null | head -n1)"
+      if [ -z "$row" ]; then
+        medium "" "$f" "${pkg} ${ver}（${id:-OS 不明} ${vid}、ソース ${src}）: PHP2Shell（CVE-2026-109618/109619）の対応するベンダー勧告を特定できません。修正状況は不明（ベンダーの勧告で確認）。${note}"
+        continue
+      fi
+      IFS=$'\t' read -r fixed adv url <<<"$row"
+      if deb_version_lt "$ver" "$fixed"; then
+        high "" "$f" "${pkg} ${ver}（${id} ${vid}）は PHP2Shell（CVE-2026-109618/109619）のベンダー修正版 ${fixed}（${adv} ${url}）未満。潜在的に脆弱。${note}"
+      else
+        info "" "$f" "${pkg} ${ver}（${id} ${vid}）は PHP2Shell のベンダー修正版 ${fixed}（${adv}）以上。${note}"
+      fi
+    done <"$TMP_DIR/php-dpkg.tsv"
+  done < <(host_enabled && echo /var/lib/dpkg/status; files_path '/var/lib/dpkg/status$')
+  echo "$n"
+}
+
 check_s4() {
   log_section "§4" "PHP"
   local f
   local -a pfix; mapfile -t pfix < <(infra_fixed php CVE-2026-109618)
-  php_judge() {  # php_judge VERSION PATH SOURCE(upstream|distro)
-    local ver="$1" path="$2" src="$3" core
-    core="$(printf '%s' "$ver" | grep -o -E '^[0-9]+\.[0-9]+\.[0-9]+')"
-    [ -n "$core" ] && [ "${#pfix[@]}" -gt 0 ] || return 0
-    version_branch_vulnerable "$core" "${pfix[@]}" || return 0
-    local eol=""; version_lt "$core" "8.2.0" && eol="（8.1 以前は公式の修正リリースなし。サポート版へ移行）"
-    if [ "$src" = "distro" ]; then
-      high "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の upstream 修正版（${pfix[*]}）未満${eol}。ディストリビューションのバックポート有無を確認"
-    else
-      critical "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の影響範囲（修正版: ${pfix[*]}）${eol}"
-    fi
+  php_judge() {  # php_judge VERSION PATH SOURCE(upstream|distro|header)
+    local ver="$1" path="$2" src="$3" st
+    st="$(php_status "$ver")"
+    local eol=""; [[ "$ver" =~ ^v?([0-9]+)\.([0-9]+)\. ]] && version_lt "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.0" "8.2.0" && eol="（8.1 以前は公式の修正リリースなし。サポート版へ移行）"
+    case "$src:$st" in
+      *:fixed) [ "$src" = "header" ] && safe "PHP ${ver}（ヘッダ申告）は upstream 修正版以上（インストール自体は未検証）" ;;
+      *:prerelease) medium "" "$path" "PHP ${ver} はプレリリース版（dev/alpha/beta/RC）。PHP2Shell（CVE-2026-109618/109619）の修正有無を版番号から判断できません（要確認）" ;;
+      *:unknown_branch) medium "" "$path" "PHP ${ver} は PHP2Shell の修正版一覧（${pfix[*]}）にないブランチ。修正済みとは判断できません（要確認）" ;;
+      *:unparsed) medium "" "$path" "PHP のバージョン表記（${ver}）を解釈できません。PHP2Shell（CVE-2026-109618/109619）の修正状況は不明（要確認）" ;;
+      distro:vulnerable) high "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の upstream 修正版（${pfix[*]}）未満${eol}。ディストリビューションのバックポート有無を確認" ;;
+      header:vulnerable) high "" "$path" "PHP ${ver}（HTTP ヘッダで申告された版）は PHP2Shell（CVE-2026-109618/109619）の影響範囲の可能性（潜在的に脆弱）${eol}。ヘッダではバックポートの有無を判断できないため、サーバー上のパッケージを確認" ;;
+      *:vulnerable) critical "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の影響範囲（修正版: ${pfix[*]}）${eol}" ;;
+    esac
   }
+  local ndeb; ndeb="$(php_distro_packages)"
   if host_enabled; then
     local v
     v="$(safe_probe php -n -v | head -n1 | awk '{print $2}')"
     if [ -n "$v" ]; then
       info "" "" "PHP ${v} がインストールされています"
-      case "$v" in *ubuntu*|*deb*|*el[0-9]*|*fc[0-9]*|*-[0-9]*) php_judge "$v" "$(command -v php)" distro ;; *) php_judge "$v" "$(command -v php)" upstream ;; esac
+      case "$v" in
+        *ubuntu*|*deb*|*el[0-9]*|*fc[0-9]*|*-[0-9]*)
+          # dpkg のパッケージ DB でベンダー修正版と比較できた場合は、版番号だけの判定（バックポート不明）を重ねない
+          if [ "${ndeb:-0}" -gt 0 ]; then log_info "PHP ${v}: dpkg のパッケージ版で判定済み"; else php_judge "$v" "$(command -v php)" distro; fi ;;
+        *) php_judge "$v" "$(command -v php)" upstream ;;
+      esac
+      if [ -f /etc/redhat-release ]; then
+        local rows; rows="$(intel_jq '.php2shell_distro.packages[]? | select(.vendor == "rhel") | "RHEL \(.release) \(.source_package) ≥ \(.fixed)（\(.advisory)）"' | paste -sd'/' -)"
+        medium "" "/etc/redhat-release" "RHEL 系: rpm DB は静的に読めないため PHP2Shell の修正状況を判定できません。配信中の php-fpm / mod_php の所有パッケージを rpm -qf で確認し、ベンダー修正版と比較（${rows:-Red Hat の CVE-2026-109618/109619 情報を参照}）"
+      fi
     fi
   fi
   local ver
   while IFS=$'\t' read -r ver f; do
     [ -n "$ver" ] && php_judge "$ver" "$f" upstream
-  done < <(detect_service_version '(^|[[:space:]/"=])php' | sed -E 's/^[^0-9]*//')
+  done < <(detect_service_version '(^|[[:space:]/"=])php' | awk -F'\t' '{ v = $1; sub(/^[^0-9]*/, "", v); if (v != "") print v "\t" $2 }')  # latest 等の浮動タグは下の FROM 検査で扱う
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     ver="$(grep -E '^php[[:space:]]+[0-9]' "$f" | head -n1 | awk '{print $2}')"
@@ -1272,10 +1387,31 @@ check_s4() {
   done < <(files_named '^php.*\.ini$'; host_enabled && ls /etc/php*/php.ini /etc/php/*/*/php.ini /usr/local/etc/php/php.ini 2>/dev/null)
   if [ -n "$TARGET_URL" ]; then
     if [ "$OFFLINE" = "1" ]; then record_error "§4" "skipped_offline"; return 0; fi
-    local hdr
-    hdr="$(curl -sI --connect-timeout 5 --max-time 10 --proto '=http,https' -- "$TARGET_URL" 2>/dev/null | tr -d '\r' | grep -i '^x-powered-by:' | head -n1)"
-    if [ -n "$hdr" ]; then medium "" "" "${TARGET_URL}: X-Powered-By ヘッダでバージョンを露出: ${hdr#*: }"
-    else safe "X-Powered-By ヘッダなし（$TARGET_URL）"; fi
+    # ヘッダのみ取得（HEAD。405/501 のときだけ GET）。リダイレクトは追わない・本文は読まない・~/.curlrc は読まない（-q）
+    local hdrs code
+    hdrs="$(curl -q -sS -I --connect-timeout 5 --max-time 10 --proto '=http,https' -- "$TARGET_URL" 2>/dev/null | tr -d '\r')"
+    code="$(printf '%s\n' "$hdrs" | awk '/^HTTP\// { c = $2 } END { print c }')"
+    if [ "$code" = "405" ] || [ "$code" = "501" ]; then
+      hdrs="$(curl -q -sS -o /dev/null -D - --connect-timeout 5 --max-time 10 --max-filesize 1048576 --proto '=http,https' -- "$TARGET_URL" 2>/dev/null | tr -d '\r')"
+      code="$(printf '%s\n' "$hdrs" | awk '/^HTTP\// { c = $2 } END { print c }')"
+    fi
+    if [ -z "$code" ]; then record_error "§4" "url_fetch_failed"; return 0; fi
+    local xpb srv pv st best="" bst=""
+    # 同名ヘッダが複数ある場合は全て見る（最後の応答のヘッダのみ。値は "; " で連結）
+    hdrs="$(printf '%s\n' "$hdrs" | awk '/^HTTP\// { b = "" } { b = b $0 "\n" } END { printf "%s", b }')"
+    xpb="$(printf '%s\n' "$hdrs" | grep -i '^x-powered-by:' | sed -E 's/^[^:]*:[[:space:]]*//' | paste -sd';' - | sed 's/;/; /g')"
+    srv="$(printf '%s\n' "$hdrs" | grep -i '^server:' | sed -E 's/^[^:]*:[[:space:]]*//' | paste -sd';' - | sed 's/;/; /g')"
+    [ -n "$xpb" ] && medium "" "" "${TARGET_URL}: X-Powered-By ヘッダでバージョンを露出: ${xpb}"
+    printf '%s' "$srv" | grep -q -i -E '(^|[^A-Za-z])PHP[ /]' && medium "" "" "${TARGET_URL}: Server ヘッダで PHP のバージョンを露出: ${srv}"
+    # 両ヘッダの PHP/x.y.z を全て判定し、警告（vulnerable）> 不明 > 修正済み の順で最も悪いものを採用（安心材料を優先しない）
+    while IFS= read -r pv; do
+      [ -n "$pv" ] || continue
+      st="$(php_status "$pv")"
+      if [ -z "$best" ] || [ "$st" = "vulnerable" ] || { [ "$bst" = "fixed" ] && [ "$st" != "fixed" ]; }; then best="$pv"; bst="$st"; fi
+      [ "$bst" = "vulnerable" ] && break
+    done < <(printf '%s\n%s\n' "$srv" "$xpb" | grep -o -i -E '(^|[^A-Za-z])PHP[ /][^[:space:],;)]+' | sed -E 's/^[^Pp]*[Pp][Hh][Pp][ \/]//')
+    if [ -n "$best" ]; then php_judge "$best" "" header
+    else safe "PHP のバージョンを示すヘッダなし（$TARGET_URL。修正状況はヘッダからは不明）"; fi
   fi
   return 0
 }
@@ -1322,7 +1458,7 @@ check_s6() {
     while IFS= read -r host; do
       [ -n "$host" ] || continue
       host="$(refang "$host")"
-      curl -sI --connect-timeout 5 --max-time 10 --proto '=https' -o /dev/null -- "https://$host/" 2>/dev/null
+      curl -q -sI --connect-timeout 5 --max-time 10 --proto '=https' -o /dev/null -- "https://$host/" 2>/dev/null
       local rc=$?
       case "$rc" in
         0) critical "$camp" "" "危殆化した eMudhra 中間 CA をシステムの curl が信頼しています（https://$host/ への接続成功）" ;;

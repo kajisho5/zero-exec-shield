@@ -275,6 +275,50 @@ if command -v mkfifo >/dev/null 2>&1; then
     && ok "検査ルート内の FIFO を errors[] に special_file として記録" || ng "検査ルート内の FIFO が errors[] に記録されていません"
 fi
 
+# §4 --url: Server と X-Powered-By の PHP/x.y.z を判定、HEAD が 405 のときだけ GET、リダイレクトは追わない
+#   ローカルの HTTP サーバー（python3、テスト専用）に対して実行する
+if python3 -I -c 'import http.server' 2>/dev/null && command -v curl >/dev/null 2>&1; then
+  python3 -I - "$TMP/http-port" "$TMP/http-log" <<'PY' >/dev/null 2>&1 &
+import http.server, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def reply(self, body):
+        open(sys.argv[2], "a").write(f"{self.command} {self.path}\n")
+        if self.path == "/redir":
+            self.send_response(301); self.send_header("Location", "/vuln"); self.end_headers(); return
+        if self.command == "HEAD" and self.path == "/":
+            self.send_response(405); self.end_headers(); return
+        self.send_response(200)
+        self.send_header("Server", "Apache/2.4.58 (Ubuntu) PHP/8.3.10")
+        self.send_header("X-Powered-By", "PHP/8.5.12")
+        self.end_headers()
+        if body: self.wfile.write(b"zes\n")
+    def do_HEAD(self): self.reply(False)
+    def do_GET(self): self.reply(True)
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1], "w").write(str(s.server_port))
+s.timeout = 30
+for _ in range(6): s.handle_request()
+PY
+  hpid=$!
+  for _ in $(seq 1 50); do [ -s "$TMP/http-port" ] && break; sleep 0.1; done
+  port="$(cat "$TMP/http-port" 2>/dev/null)"
+  urlscan() { env -u http_proxy -u HTTP_PROXY -u https_proxy -u HTTPS_PROXY -u ALL_PROXY -u all_proxy NO_PROXY='*' \
+    ZES_HOST_CHECKS=0 ZES_OFFLINE=0 ZES_HOME="$FIX/_home" "$SCAN" --quick --root "$TMP/empty-root" --url "http://127.0.0.1:$port$1" --json 2>/dev/null; }
+  out="$(urlscan /)"
+  printf '%s' "$out" | jq -e '[.findings[] | select(.module == "§4" and .level == "HIGH" and (.detail | test("8\\.3\\.10")))] | length == 1' >/dev/null 2>&1 \
+    && printf '%s' "$out" | jq -e '[.findings[] | select(.module == "§4" and .level == "MEDIUM" and (.detail | test("X-Powered-By")))] | length == 1' >/dev/null 2>&1 \
+    && ok "--url: Server ヘッダの PHP/8.3.10 を HIGH（ヘッダ申告版）で判定し、X-Powered-By の露出も報告" || ng "--url の PHP ヘッダ判定が不正"
+  out="$(urlscan /redir)"
+  printf '%s' "$out" | jq -e '[.findings[] | select(.module == "§4" and .level == "HIGH")] | length == 0' >/dev/null 2>&1 \
+    && ok "--url: リダイレクト先を追わない" || ng "--url がリダイレクトを追っています"
+  kill "$hpid" 2>/dev/null; wait "$hpid" 2>/dev/null
+  [ "$(tr '\n' ',' <"$TMP/http-log" 2>/dev/null)" = "HEAD /,GET /,HEAD /redir," ] && ok "--url: HEAD → 405 のときだけ GET（リクエスト列: HEAD /,GET /,HEAD /redir）" \
+    || ng "--url のリクエスト列が不正: $(tr '\n' ',' <"$TMP/http-log" 2>/dev/null)"
+else
+  printf '  SKIP --url のローカル HTTP テスト（python3 または curl が無い）\n'
+fi
+
 # 引数検証（fail-closed）
 "$SCAN" --root /nonexistent-zes-dir >/dev/null 2>&1; [ $? -eq 64 ] && ok "存在しない --root を拒否" || ng "存在しない --root を受理"
 "$SCAN" --quick --url 'file:///etc/passwd' >/dev/null 2>&1; [ $? -eq 64 ] && ok "http(s) 以外の --url を拒否" || ng "不正な --url を受理"
