@@ -1,7 +1,7 @@
-// テーマ: ダーク / ライト / システム（設計書 §5.4、§16-1）。
-// 既定は「システム」で、OS がライトを指定しているときだけライト、それ以外（指定なしを含む）はダーク。
-// 選んだ値は localStorage の zes-theme に保存する。file:// やプライベートモードで localStorage が使えない
-// ときは例外を握りつぶし、保存せずに動かす（表示は OS の設定に従う）。
+// Theme: dark / light / system (design doc §5.4, §16-1).
+// The default is "system": light only when the OS asks for light, dark otherwise (including no preference).
+// The chosen value is saved in zes-theme in localStorage. When localStorage is unavailable on file:// or in private mode,
+// the exception is swallowed and it works without saving (the display follows the OS setting).
 import { useCallback, useSyncExternalStore } from 'react';
 import { useMediaQuery } from './useMediaQuery';
 
@@ -20,7 +20,7 @@ function read(): ThemePref {
 
 let current: ThemePref = typeof window === 'undefined' ? 'system' : read();
 
-/** html に .dark / .light を付ける（system のときはどちらも外し、CSS の prefers-color-scheme に任せる）。 */
+/** Sets .dark / .light on html (for system, removes both and leaves it to prefers-color-scheme in CSS). */
 export function applyTheme(pref: ThemePref = current) {
   const c = document.documentElement.classList;
   c.toggle('dark', pref === 'dark');
@@ -33,7 +33,7 @@ function set(pref: ThemePref) {
     if (pref === 'system') window.localStorage.removeItem(KEY);
     else window.localStorage.setItem(KEY, pref);
   } catch {
-    // 保存できなくても、このページを開いている間は切り替わる
+    // Even if it cannot be saved, the switch applies while this page is open
   }
   applyTheme(pref);
   listeners.forEach((l) => l());

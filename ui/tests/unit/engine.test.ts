@@ -59,10 +59,10 @@ describe('Layer 1 fixtures（CLI と同じ検出）', () => {
     const k = keys(r);
     expect(k).toContain('HIGH §21 github-actions/.github/workflows/pr-target.yml');
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/tag-ref.yml');
-    // 所有者名の大文字小文字違い・YAML フローマッピングでも検出する
+    // Detected even with owner names differing in case and with YAML flow mappings
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/case-variant.yml');
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/flow-mapping.yml');
-    // run: | の中の "uses: actions/checkout@v1"（safe-base-ref.yml）はステップとして数えない
+    // "uses: actions/checkout@v1" inside run: | (safe-base-ref.yml) is not counted as a step
     expect(r.viewers.actions.flatMap((w) => w.uses.map((u) => u.kind)).sort()).toEqual(['compromised', 'compromised', 'sha', 'sha', 'sha', 'sha', 'sha', 'sha', 'sha', 'tag', 'tag', 'tag']);
   });
   it('browser extensions（権限昇格）', async () => {
@@ -156,7 +156,7 @@ describe('ZES 5.2.1 の IoC 構造', () => {
     const wf = (ref: string) => file('r/.github/workflows/ci.yml', `on: [push]\njobs:\n  a:\n    steps:\n      - uses: aquasecurity/trivy-action@${ref}\n`);
     const bad = (await analyzeFiles([wf('v0.33.0')])).findings[0];
     expect([bad?.level, bad?.code, bad?.params]).toEqual(['CRITICAL', 's22.poisoned_tag', { ref: 'aquasecurity/trivy-action@v0.33.0' }]);
-    // 安全版タグでも aquasecurity/* のタグ参照は CLI §22 と同じく CRITICAL（SHA 固定を求める）
+    // Even with a safe tag, tag references of aquasecurity/* are CRITICAL, as in CLI §22 (SHA pinning required)
     const safeTag = (await analyzeFiles([wf('v0.35.0')])).findings.find((f) => f.module === '§22');
     expect([safeTag?.level, safeTag?.code]).toEqual(['CRITICAL', 's22.risky_publisher_tag']);
     expect((await analyzeFiles([wf('a'.repeat(40))])).findings.find((f) => f.module === '§22')?.level).toBe('MEDIUM');
@@ -197,7 +197,7 @@ describe('内容非出力・決定性・エクスポート', () => {
 });
 
 describe('ZES 5.2.2 / 5.2.3 の検知データ（CLI と同じフィクスチャ）', () => {
-  // CLI の期待値（tests/expected）のうち、ブラウザで判定できるモジュール（ホスト状態・§14 等を除く）
+  // Of the CLI expected values (tests/expected), the modules the browser can evaluate (excluding host state, §14 etc.)
   const cli = (name: string, modules: string[]) =>
     (JSON.parse(readFileSync(new URL(`../../../tests/expected/${name}.json`, import.meta.url), 'utf8')) as { findings: { level: string; module: string; path: string }[] }).findings
       .filter((f) => modules.includes(f.module) && f.level !== 'INFO').map((f) => `${f.level} ${f.module} ${name}/${f.path}`).sort();

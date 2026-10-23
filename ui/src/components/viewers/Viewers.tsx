@@ -1,6 +1,6 @@
-// MCP / GitHub Actions / ブラウザ拡張のビューア（設計書 §10.6）。台紙 1 枚＋行の一覧。
-// §13-4 で許容した設定値（command/args、uses:、パーミッション名）だけを表示する。値は凹みの <code>、危険なトークンは SeverityTag。
-// Actions の参照: SHA 固定 = SAFE のタグ、タグ参照 = HIGH、汚染の可能性 = CRITICAL、ローカル = 無彩色のタグ。
+// Viewers for MCP / GitHub Actions / browser extensions (design doc §10.6). One sheet + a list of rows.
+// Only shows the config values allowed in §13-4 (command/args, uses:, permission names). Values are well-ground <code>, dangerous tokens a SeverityTag.
+// Actions references: SHA-pinned = SAFE tag, tag reference = HIGH, possibly poisoned = CRITICAL, local = neutral tag.
 import type { ReactNode } from 'react';
 import type { DisplaySeverity, ExtensionView, McpConfigView, WorkflowView } from '@/engine';
 import { useLang, type MsgKey } from '@/i18n';

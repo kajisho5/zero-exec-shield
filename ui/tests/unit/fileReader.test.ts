@@ -1,4 +1,4 @@
-// フォルダの並行読み取り（0.3.1、U7）: 結果の順序と同時に読む数の上限。
+// Concurrent folder reading (0.3.1, U7): order of results and the limit on concurrent reads.
 import { describe, expect, it } from 'vitest';
 import { readFiles, READ_CONCURRENCY, type PickedFile } from '../../src/fileReader';
 
@@ -10,7 +10,7 @@ describe('readFiles の並行読み取り（U7）', () => {
       async arrayBuffer() {
         track.now++;
         track.max = Math.max(track.max, track.now);
-        // 後のファイルほど早く読み終わる（読み終わりの順で結果が並ぶと落ちる）
+        // Later files finish reading sooner (fails if results are ordered by read completion)
         await new Promise((r) => setTimeout(r, ((i * 7) % 5) + (i % 2 ? 0 : 3)));
         track.now--;
         return body.buffer;

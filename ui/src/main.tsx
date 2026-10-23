@@ -7,7 +7,7 @@ import { applyTheme } from './hooks/useTheme';
 import { applyLang } from './i18n';
 import './styles/index.css';
 
-// 描画の前にテーマのクラスを付ける（別のインラインスクリプトは CSP のハッシュが増えるので作らない）
+// Set the theme class before rendering (no separate inline script, since that would add another CSP hash)
 applyTheme();
 applyLang();
 

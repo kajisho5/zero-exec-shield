@@ -1,8 +1,8 @@
 import type { Page } from '@playwright/test';
 
-// Playwright の Firefox / WebKit は、ディレクトリの setInputFiles がまれに返らないことがある。
-// アプリのコードが無い空のページ（<input webkitdirectory> だけ）でも再現するため、UI ではなく自動操作側の問題。
-// 1 回の待ちを 15 秒に区切り、返らなければ同じ操作をやり直す（最大 3 回。3 回とも返らなければ失敗させる）。
+// Playwright Firefox / WebKit occasionally do not return from setInputFiles on a directory.
+// It reproduces even on an empty page without any app code (only <input webkitdirectory>), so it is a problem of the automation, not of the UI.
+// Each wait is limited to 15 seconds, and if it does not return the same operation is retried (up to 3 times; fails if none of the 3 return).
 export async function pickDir(page: Page, dir: string | string[]): Promise<void> {
   let last: unknown;
   for (let i = 0; i < 3; i++) {

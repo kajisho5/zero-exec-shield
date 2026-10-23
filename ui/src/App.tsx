@@ -25,7 +25,7 @@ import { TABS, findingsForTab, type TabId } from './tabs/definitions';
 
 const nowIso = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-/** 検体名: 投入したフォルダの最上位の名前（webkitRelativePath の先頭）。 */
+/** Sample name: the top-level name of the dropped folder (the first segment of webkitRelativePath). */
 const specimenOf = (picked: PickedFile[]) => {
   const p = picked[0]?.relPath ?? '';
   const i = p.indexOf('/');
@@ -42,8 +42,8 @@ function Scanner() {
   const busy = state.phase === 'reading' || state.phase === 'analyzing';
   const [specimen, setSpecimen] = useState<string | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
-  // 貼り付けシートを閉じたらフォーカスを開いたボタンへ戻す。開く前（未投入）と後（投入済み）でボタンが入れ替わるので、
-  // 押したボタンが消えていれば、いま出ている方（data-paste-opener）へ戻す
+  // When the paste sheet closes, return focus to the button that opened it. The button is swapped before (nothing loaded) and after (loaded),
+  // so if the pressed button is gone, return to the one now shown (data-paste-opener)
   const pasteOpener = useRef<HTMLElement | null>(null);
   const openPaste = (e: React.MouseEvent<HTMLElement>) => { pasteOpener.current = e.currentTarget; setPasteOpen(true); };
   const returnPasteFocus = (e: Event) => {
@@ -54,12 +54,12 @@ function Scanner() {
   const dirInput = useRef<HTMLInputElement>(null);
   const importInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    // React の型に無い属性のため DOM で付与（D&D 非対応環境のフォルダ選択フォールバック、F-02）
+    // Set via the DOM because the attribute is not in the React types (folder-picker fallback for environments without D&D, F-02)
     dirInput.current?.setAttribute('webkitdirectory', '');
     dirInput.current?.setAttribute('directory', '');
   }, []);
 
-  // 実行中のスキャン。クリア・次のスキャンで中断し、その結果は reducer が scanId の不一致で捨てる
+  // The scan in progress. Aborted by clear or the next scan; its result is discarded by the reducer on a scanId mismatch
   const current = useRef<AbortController | null>(null);
   const nextId = useRef(0);
   const cancelScan = () => { current.current?.abort(); current.current = null; };
@@ -67,7 +67,7 @@ function Scanner() {
 
   const scan = async (picked: PickedFile[]) => {
     if (!picked.length) {
-      // 何も起きないと「安全」と誤認させるため、0 件であることを必ず知らせる（隠しファイルを渡さないブラウザがある）
+      // Nothing happening would be mistaken for "safe", so always report that there are 0 files (some browsers do not pass hidden files)
       toast({ tone: 'error', text: t('ui.toast.zero_files') });
       return;
     }
@@ -85,7 +85,7 @@ function Scanner() {
       if (ctl.signal.aborted) return;
       dispatch({ type: 'SCAN_RESULT', scanId, result, finishedAt: nowIso(), durationMs: performance.now() - t0 });
     } catch (e) {
-      if (ctl.signal.aborted) return; // クリア・次のスキャンで中断（エラーではない）
+      if (ctl.signal.aborted) return; // aborted by clear or the next scan (not an error)
       dispatch({ type: 'SCAN_FAIL', scanId, message: e instanceof Error ? e.message : String(e) });
       toast({ tone: 'error', text: t('ui.toast.scan_failed') });
     }
@@ -100,7 +100,7 @@ function Scanner() {
 
   const tabFindings = useMemo(() => findingsForTab(tab, findings), [tab, findings]);
   const modules = useMemo(() => [...new Set(tabFindings.map((f) => f.module))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))), [tabFindings]);
-  // このタブに無いモジュールの絞り込みは効かせない（選択欄が「すべて」なのに全行が消える状態を作らない）。SET_TAB でも消す
+  // A module filter not present in this tab is not applied (avoid a state where the select shows "All" yet every row is gone). SET_TAB clears it too
   const moduleFilter = state.ui.moduleFilter && modules.includes(state.ui.moduleFilter) ? state.ui.moduleFilter : null;
   useEffect(() => { if (state.ui.moduleFilter && !moduleFilter) dispatch({ type: 'SET_MODULE', module: null }); }, [state.ui.moduleFilter, moduleFilter, dispatch]);
   const visible = useMemo(() => {
@@ -135,7 +135,7 @@ function Scanner() {
   };
 
   const r = state.result;
-  // SAFE = 実行したチェックのうち、1 件も該当しなかったもの（ブラウザ判定範囲のみ）
+  // SAFE = the checks that were run and matched nothing (within the browser scope only)
   const hitChecks = new Set((r?.findings ?? []).map((f) => f.ruleId.split(':')[0]!));
   const total = r?.checksRun.length ?? 0;
   const clearChecks = r ? r.checksRun.filter((c) => !hitChecks.has(c)).length : 0;
@@ -154,16 +154,16 @@ function Scanner() {
   const dropFolder = async (dt: DataTransfer) => {
     let picked: PickedFile[];
     try { picked = await fromDataTransfer(dt); } catch {
-      // 読めなかったことを黙って捨てない（何も起きないと「問題なし」と誤認させる）
+      // Do not silently drop what could not be read (nothing happening would be mistaken for "no problems")
       toast({ tone: 'error', text: t('ui.toast.drop_unreadable') });
       return;
     }
     await scan(picked);
   };
 
-  // ドロップ先の外にファイルを落としても、ブラウザがそのファイルへ移動しない（file:// の画面が消え、
-  // ローカルのファイルを開いてしまう）。ファイルのドラッグだけを扱い、テキストのドラッグ（貼り付け欄など）は既定のまま。
-  // ドロップ先が処理したもの（defaultPrevented）は二重に扱わない。それ以外はドロップ先と同じくスキャンへ回す。
+  // Even if a file is dropped outside the drop target, the browser does not navigate to it (the file:// page would disappear
+  // and open the local file). Only file drags are handled; text drags (the paste box etc.) keep the default.
+  // What a drop target already handled (defaultPrevented) is not handled twice. Anything else goes to the scan, like the drop target.
   const dropRef = useRef({ busy, dropFolder });
   dropRef.current = { busy, dropFolder };
   useEffect(() => {

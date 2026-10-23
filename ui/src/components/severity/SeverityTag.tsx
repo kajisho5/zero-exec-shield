@@ -1,4 +1,4 @@
-// 重大度のタグ: 淡色地＋重大度の色の文字、角丸 3。ピルにしない、字間 0（設計書 §9、A-14）。
+// Severity tag: tint ground + text in the severity color, radius 3. Not a pill, letter spacing 0 (design doc §9, A-14).
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import type { DisplaySeverity } from '@/engine';

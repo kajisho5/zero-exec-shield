@@ -1,13 +1,13 @@
-// §4 PHP（PHP2Shell CVE-2026-109618/109619 と php.ini の危険設定）。CLI check_s4 のうち、投入ファイルで判定できる部分の移植:
-//   コンテナイメージのタグ・.tool-versions の版（upstream の修正版表）、dpkg のパッケージ DB（ベンダー修正版表 php2shell_distro）、
-//   Dockerfile の FROM php、php*.ini。インストール済み php の版・RHEL の案内・--url のヘッダ判定はホスト/通信が必要なため CLI のみ。
+// §4 PHP (PHP2Shell CVE-2026-109618/109619 and dangerous php.ini settings). A port of the part of CLI check_s4 that can be evaluated from loaded files:
+//   image tags of containers and .tool-versions versions (upstream fixed-version table), the dpkg package DB (vendor fixed-version table php2shell_distro),
+//   Dockerfile FROM php, php*.ini. The installed php version, RHEL guidance and --url header evaluation need the host/network, so they are CLI only.
 import { push, readable, type RuleCtx } from '../context';
 import type { IocDb } from '../ioc';
 import { textLocators, versionCmp } from '../util';
 
 export type PhpStatus = 'fixed' | 'vulnerable' | 'prerelease' | 'unknown_branch' | 'unparsed';
 
-/** CLI php_status と同じ: upstream の修正版表で x.y.z を判定する（プレリリース・表にないブランチは判断しない）。 */
+/** Same as CLI php_status: evaluates x.y.z with the upstream fixed-version table (prereleases and branches not in the table are not judged). */
 export function phpStatus(ver: string, ioc: IocDb): PhpStatus {
   const m = /^(\d+)\.(\d+)\.(\d+)(.*)$/.exec(ver.replace(/^v/, ''));
   if (!m) return 'unparsed';
@@ -22,7 +22,7 @@ export function phpStatus(ver: string, ioc: IocDb): PhpStatus {
   return Number(m[3]) < Number(fx) ? 'vulnerable' : 'fixed';
 }
 
-/** Debian のバージョン比較（epoch:upstream-revision、~ は何よりも前）。CLI deb_version_lt と同じ。 */
+/** Debian version comparison (epoch:upstream-revision; ~ sorts before anything). Same as CLI deb_version_lt. */
 export function debVersionCmp(a: string, b: string): number {
   const ord = (c: string) => (c === '~' ? -1 : /[A-Za-z]/.test(c) ? c.charCodeAt(0) : c.charCodeAt(0) + 256);
   const isd = (c: string | undefined) => c !== undefined && c >= '0' && c <= '9';
@@ -55,7 +55,7 @@ export function debVersionCmp(a: string, b: string): number {
   return vrc(A[1], B[1]) || vrc(A[2], B[2]);
 }
 
-/** dpkg status の段落から、配信に使われる PHP パッケージ（php*-fpm / -cgi / -cli、libapache2-mod-php*）を取り出す。 */
+/** Extracts the PHP packages used for serving (php*-fpm / -cgi / -cli, libapache2-mod-php*) from the paragraphs of dpkg status. */
 export function dpkgPhpPackages(text: string): { pkg: string; ver: string; src: string }[] {
   const out: { pkg: string; ver: string; src: string }[] = [];
   const paras = text.replace(/^﻿/, '').replace(/\r(?=\n|$)/g, '').split(/\n{2,}/);
@@ -81,7 +81,7 @@ export function phpRules(ctx: RuleCtx): void {
   ctx.checks.add('s4-php2shell').add('s4-php-ini').add('s4-php-image');
   const pfix = (ctx.ioc.infrastructures ?? []).find((i) => i.id === 'php')?.cves.find((c) => c.id === 'CVE-2026-109618')?.fixed ?? [];
   const fixList = pfix.join(' ');
-  // CLI php_judge の upstream 判定（distro / header はインストール済み php・--url のみで使うため CLI のみ）
+  // The upstream evaluation of CLI php_judge (distro / header are used only for the installed php and --url, so CLI only)
   const judge = (ver: string, path: string, sha: string | null, key: string) => {
     const st = phpStatus(ver, ctx.ioc);
     const mm = /^v?(\d+)\.(\d+)\./.exec(ver);
@@ -93,7 +93,7 @@ export function phpRules(ctx: RuleCtx): void {
     else if (st === 'vulnerable') push(ctx, { ...base, level: 'CRITICAL', code: eol ? 's4.php_vulnerable_eol' : 's4.php_vulnerable', params: { fixed: fixList, version: ver } });
   };
 
-  // コンテナイメージのタグ（CLI detect_service_version '(^|[[:space:]/"=])php'。latest 等の浮動タグは FROM の検査で扱う）
+  // Container image tags (CLI detect_service_version '(^|[[:space:]/"=])php'; floating tags such as latest are handled by the FROM check)
   for (const f of readable(ctx).filter((x) => IMAGE_FILES.test(x.name))) {
     for (const m of f.text.matchAll(/(^|[\s/"=])php:[A-Za-z0-9._-]+/gm)) {
       const tag = m[0].slice(m[0].lastIndexOf(':') + 1);
@@ -101,13 +101,13 @@ export function phpRules(ctx: RuleCtx): void {
       if (v) judge(v, f.relPath, f.sha256, 'image');
     }
   }
-  // asdf / mise の .tool-versions（先頭の "php <版>" 行）
+  // .tool-versions of asdf / mise (the leading "php <version>" line)
   for (const f of readable(ctx).filter((x) => x.name === '.tool-versions')) {
     const line = f.text.split(/\r?\n/).find((l) => /^php\s+[0-9]/.test(l));
     const v = line?.split(/\s+/)[1];
     if (v) judge(v, f.relPath, f.sha256, 'tool-versions');
   }
-  // Dockerfile の FROM php（浮動タグは MEDIUM、それ以外は参考 INFO）
+  // Dockerfile FROM php (floating tags are MEDIUM, otherwise reference INFO)
   for (const f of readable(ctx).filter((x) => /^(Dockerfile.*|.*\.dockerfile)$/.test(x.name))) {
     for (const m of f.text.matchAll(/^[ \t]*FROM[ \t]+([^ \n]*\/)?php(:[^ \n]+)?/gim)) {
       const line = m[0].replace(/\r$/, '');
@@ -124,7 +124,7 @@ export function phpRules(ctx: RuleCtx): void {
     if (/^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\s;]/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§4', campaign: null, path: f.relPath, code: 's4.auto_prepend', ruleId: 's4-php-ini:auto_prepend', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\s;]/) });
     if (/^[ \t]*disable_functions[ \t]*=[ \t]*\r?$/m.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, code: 's4.disable_functions_empty', ruleId: 's4-php-ini:disable_functions', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*disable_functions[ \t]*=[ \t]*$/) });
   }
-  // dpkg のパッケージ DB（ベンダー修正版表。OS は同じルートの etc/os-release / usr/lib/os-release）
+  // The dpkg package DB (vendor fixed-version table; the OS from etc/os-release / usr/lib/os-release in the same root)
   for (const f of readable(ctx).filter((x) => /(^|\/)var\/lib\/dpkg\/status$/.test(x.relPath))) {
     const pkgs = dpkgPhpPackages(f.text);
     if (!pkgs.length) continue;

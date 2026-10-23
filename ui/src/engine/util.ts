@@ -5,7 +5,7 @@ import type { Finding, FindingLocator, FindingRelated, FindingSubject, LocatorFo
  *  catalog tests can find them; the CLI uses the same code for the same check (same module, same meaning). */
 export type FCode = { [K in MsgKey]: K extends `f.${infer C}` ? C : never }[MsgKey];
 
-/** [.] / hxxp 形式で無害化された IoC を照合用に戻す（メモリ内のみ）。 */
+/** Restores IoCs defanged in the [.] / hxxp form for matching (in memory only). */
 export function refang(s: string): string {
   return s.replace(/\[\.\]/g, '.').replace(/^hxxp/i, 'http');
 }
@@ -34,7 +34,7 @@ export async function sha256Hex(data: string | ArrayBuffer | Uint8Array): Promis
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** 数値セグメント比較（-1 / 0 / 1）。CLI の version_cmp と同じ規則。 */
+/** Numeric segment comparison (-1 / 0 / 1). Same rule as version_cmp of the CLI. */
 export function versionCmp(a: string, b: string): number {
   const pa = a.replace(/^v/i, '').split(/[.+_-]/);
   const pb = b.replace(/^v/i, '').split(/[.+_-]/);
@@ -52,7 +52,7 @@ export function versionCmp(a: string, b: string): number {
   return 0;
 }
 
-/** "1.2.3" / "<X" / "<=X" / ">=A <=B" 形式の範囲判定。 */
+/** Range evaluation of the forms "1.2.3" / "<X" / "<=X" / ">=A <=B". */
 export function versionMatches(v: string, spec: string): boolean {
   return spec.split(/\s+/).filter(Boolean).every((tok) => {
     const m = /^(>=|<=|>|<|=)?(.+)$/.exec(tok);
@@ -63,12 +63,12 @@ export function versionMatches(v: string, spec: string): boolean {
   });
 }
 
-/** 表示を許容した設定値（§13-4）の長さ上限。 */
+/** Length limit of config values allowed for display (§13-4). */
 export function clip(s: string, max = 120): string {
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
 
-/** text locator の元（行番号と、ハッシュを取る行の内容）。内容は makeFinding でハッシュにし、出力には入れない */
+/** Source of a text locator (line number and the content of the line to hash). The content is hashed by makeFinding and never put in the output */
 export interface TextLocatorSpec { format: 'text'; line: number; text: string }
 export type LocatorSpec = { format: LocatorFormat; pointer: string } | TextLocatorSpec;
 
@@ -84,21 +84,21 @@ export interface FindingSpec {
   ruleId: string;
   evidenceSha?: string | null;
   skillpact?: SkillPactFindingField;
-  /** findings 1.1（CLI の emit の 6 番目の引数と同じ項目） */
+  /** findings 1.1 (the same fields as the 6th argument of emit in the CLI) */
   kind?: string;
   subject?: FindingSubject;
   locators?: LocatorSpec[];
   related?: FindingRelated[];
-  /** path がディレクトリ（ブラウザはツリーハッシュ ger-tree-v1 の mode を知らないため evidence は detail にする） */
+  /** path is a directory (the browser does not know the mode for the tree hash ger-tree-v1, so evidence is detail) */
   directory?: boolean;
 }
 
-/** RFC 6901 の JSON pointer（~ → ~0、/ → ~1）。 */
+/** RFC 6901 JSON pointer (~ → ~0, / → ~1). */
 export function jsonPointer(keys: (string | number)[]): string {
   return keys.map((k) => '/' + String(k).replace(/~/g, '~0').replace(/\//g, '~1')).join('');
 }
 
-/** text の行（\n 区切り。行末の CR と 1 行目の BOM を除く。GER の remove_line・CLI の text_locators と同じ）のうち re に一致するもの（最大 64 行）。 */
+/** The lines of text (\n-separated, without a trailing CR and the BOM on line 1; same as remove_line of GER and text_locators of the CLI) that match re (at most 64 lines). */
 export function textLocators(text: string, re: RegExp, exclude?: RegExp): TextLocatorSpec[] {
   const out: TextLocatorSpec[] = [];
   const lines = text.split('\n');
@@ -112,7 +112,7 @@ export function textLocators(text: string, re: RegExp, exclude?: RegExp): TextLo
   return out;
 }
 
-/** module と path だけで決まる related（CLI の default_related と同じ）。 */
+/** related determined by module and path alone (same as default_related of the CLI). */
 export function defaultRelated(module: string, path: string | null): FindingRelated[] {
   if (!path) return [];
   if (module === '§24' || module === '§42') {
@@ -162,14 +162,14 @@ export async function makeFinding(s: FindingSpec): Promise<Finding> {
   }
   const rel = s.related ?? defaultRelated(s.module, s.path);
   if (rel.length) f.related = rel.map((r) => ({ ...r }));
-  // 通常ファイル（内容を読めた）は file。ディレクトリ・path なし・読めなかったファイルは detail（ブラウザはツリーの mode と
-  // シンボリックリンクの値を知らない。シンボリックリンクは 0 バイトのファイルとして渡されるため file になる）
+  // A regular file (whose content could be read) is file. Directories, no path and unreadable files are detail (the browser does not know the tree mode or
+  // the value of a symlink. Symlinks are passed as 0-byte files, so they become file)
   f.evidence = s.evidenceSha && !s.directory ? { kind: 'file', hash: ev } : { kind: 'detail', hash: 'sha256:' + detailSha };
   if (s.skillpact) f.skillpact = s.skillpact;
   return f;
 }
 
-/** コードフェンスの内側 / 外側を分離する（Markdown）。 */
+/** Separates the inside / outside of code fences (Markdown). */
 export function splitMarkdown(text: string): { code: string; prose: string; frontmatter: string; fenceLangs: string[] } {
   const lines = text.split(/\r?\n/);
   let i = 0;
@@ -196,7 +196,7 @@ export function splitMarkdown(text: string): { code: string; prose: string; fron
   return { code: code.join('\n'), prose: prose.join('\n'), frontmatter: fm.join('\n'), fenceLangs: langs };
 }
 
-/** grep -E 相当の正規表現（POSIX 文字クラスを JS へ変換）。不正なら null。 */
+/** A regular expression equivalent to grep -E (POSIX character classes converted to JS). null if invalid. */
 export function ere(pattern: string, flags = ''): RegExp | null {
   const js = pattern
     .replace(/\[\[:space:\]\]/g, '\\s').replace(/\[:space:\]/g, '\\s')
@@ -208,7 +208,7 @@ export function ere(pattern: string, flags = ''): RegExp | null {
   }
 }
 
-/** JSONC（コメント・末尾カンマ付き JSON。VS Code の mcp.json 等）を解析する。文字列の内側は変更しない。不正なら例外。 */
+/** Parses JSONC (JSON with comments and trailing commas, such as the mcp.json of VS Code). The inside of strings is not changed. Throws if invalid. */
 export function parseJsonc(text: string): unknown {
   const s = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   let out = '';
@@ -228,7 +228,7 @@ export function parseJsonc(text: string): unknown {
       out += ' ';
       i = end + 1;
     } else if (c === ',') {
-      // 直後（空白とコメントを除く）が } / ] なら末尾カンマとして落とす
+      // If what follows (ignoring whitespace and comments) is } / ], drop it as a trailing comma
       let j = i + 1;
       for (;;) {
         while (j < s.length && /\s/.test(s[j]!)) j++;

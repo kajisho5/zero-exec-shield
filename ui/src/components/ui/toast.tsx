@@ -1,5 +1,5 @@
-// 自作のトースト（Sonner は実行時に <style> を差し込むため採らない。設計書 §16-7）。
-// 浮きの地、罫、角丸 6、影。主列の右下に出す。role="status" aria-live="polite"。
+// Home-made toast (Sonner is not used because it injects <style> at runtime. design doc §16-7).
+// Raised ground, rule, radius 6, with shadows. Shown at the bottom right of the main column. role="status" aria-live="polite".
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
 import { Check, OctagonAlert, X } from 'lucide-react';
 import { t, useLang } from '@/i18n';
@@ -40,7 +40,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/** クリップボードへコピー（ネットワーク非使用）。file:// で権限が無い場合は選択できる欄を出す。 */
+/** Copy to the clipboard (no network). When file:// has no permission, show a selectable field instead. */
 export function useCopy() {
   const toast = useToast();
   // label is read at call time, so it follows the language at the moment of copying

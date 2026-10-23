@@ -1,6 +1,6 @@
-// 検体票（設計書 §10.3、§10.4）。投入したものの記録: 検体、ファイル、判定時間、未判定、実行 0 回、状態。
-// この画面でいちばん目立つ要素（等幅 26px のパス）。台紙全体がドロップ先で、dragover で破線の縁になる。
-// スキャン前は Intake（大きな破線のドロップ先）を出す。
+// Sample record (design doc §10.3, §10.4). A record of what was loaded: sample, files, scan time, not scanned, 0 executions, status.
+// The most prominent element on this screen (the 26px monospace path). The whole sheet is the drop target and gets a dashed edge on dragover.
+// Before a scan, Intake (a large dashed drop target) is shown.
 import { useState, type DragEvent, type ReactNode } from 'react';
 import { Check, FolderOpen, Hourglass, OctagonAlert, Upload } from 'lucide-react';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -28,7 +28,7 @@ function useDrop(busy: boolean, onDrop: (dt: DataTransfer) => void) {
   };
 }
 
-/** スキャン前: 検体票の位置に大きなドロップ先（破線、中央揃え）。 */
+/** Before a scan: a large drop target in place of the sample record (dashed, centered). */
 export function Intake({ busy, onDrop, onPick, onImport }: { busy: boolean; onDrop(dt: DataTransfer): void; onPick(): void; onImport(): void }) {
   const { over, handlers } = useDrop(busy, onDrop);
   const { t } = useLang();
@@ -62,9 +62,9 @@ export function SpecimenForm({ name, files, duration, undetermined, status, busy
 }) {
   const { over, handlers } = useDrop(busy, onDrop);
   const { t } = useLang();
-  // 検体名は投入したフォルダ・ファイルの名前（信頼できない）。制御文字・双方向制御文字を目印にして、<bdi> で切り離す
+  // The sample name is the name of the loaded folder or file (untrusted). Control and bidi control characters become markers, isolated with <bdi>
   const shown = visiblePath(name);
-  // data-testid=scan-status を 1 つにするため、CSS で隠さずに片方だけを描く
+  // To keep a single data-testid=scan-status, render only one of the two instead of hiding one with CSS
   // One row only from 1440: at 1280–1439 the status and the button had 191 px and wrapped (both languages; i18n mockup)
   const wide = useMediaQuery('(min-width: 1440px)');
   const Icon = STATUS_ICON[status.kind];
@@ -83,7 +83,7 @@ export function SpecimenForm({ name, files, duration, undetermined, status, busy
   return (
     <section {...handlers} data-testid="dropzone" aria-label={t('ui.spec.form')}
       className={cn('min-w-0 rounded-md border bg-card', over ? 'border-dashed border-foreground outline-1 outline-foreground' : 'border-border')}>
-      {/* ≥1440: 1 段（検体 280 | 4 欄（100px 以上、ラベルの幅まで広がる） | 状態と操作） */}
+      {/* ≥1440: one row (sample 280 | 4 fields (100px or more, growing to the label width) | status and actions) */}
       {wide ? (
       <div className="grid h-[86px] grid-cols-[280px_repeat(4,minmax(100px,max-content))_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col justify-center gap-0.5 border-r border-border px-5">
@@ -100,7 +100,7 @@ export function SpecimenForm({ name, files, duration, undetermined, status, busy
         </div>
       </div>
       ) : (
-      /* <1440: 2 段（パスと状態 / 4 欄）。4 欄は ≥640 で等幅、360–639 は中身の幅、<360 は 2×2 */
+      /* <1440: two rows (path and status / 4 fields). The 4 fields are equal width at ≥640, content width at 360–639, 2×2 below 360 */
       <div>
         <div className="flex min-w-0 items-start gap-3 px-3.5 pt-2.5 pb-3">
           <div className="flex min-w-0 flex-1 flex-col">

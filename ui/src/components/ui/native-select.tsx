@@ -1,5 +1,5 @@
-// shadcn/ui new-york-v4 の native-select を手で取り込み、「検疫台」に書き換えたもの（MIT。NOTICE を参照）。
-// Radix Select は実行時に <style> を差し込むため使わない（設計書 §4.2）。
+// The shadcn/ui new-york-v4 native-select, imported by hand and rewritten for the "quarantine bench" (MIT; see NOTICE).
+// Radix Select is not used because it injects <style> at runtime (design doc §4.2).
 import type * as React from 'react';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';

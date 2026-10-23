@@ -1,4 +1,4 @@
-// 溝の印: 形＋語を重大度の色で。枠なし（設計書 §9）。
+// Gutter mark: shape + word in the severity color. No border (design doc §9).
 import { cn } from '@/lib/utils';
 import type { DisplaySeverity } from '@/engine';
 import { SEV } from './severity';

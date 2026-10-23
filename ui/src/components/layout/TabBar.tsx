@@ -1,7 +1,7 @@
-// タブ列（設計書 §10.2）。Radix Tabs（activationMode="manual"、loop）の TabsList。
-// ≥640: 収まるタブだけを見せ（列の幅を最後に収まるタブの右端で切る。フェードも矢印ボタンも使わない）、
-// 右端に「すべてのタブ 18」（タブ検索）。<640: 44px の横スクロール＋右端に検索ボタン（下からのシート）。
-// 収まらないタブも DOM には残す（←→ / Home / End で移れる。フォーカスしたタブは列の中でスクロールして見せる）。
+// Tab row (design doc §10.2). The TabsList of Radix Tabs (activationMode="manual", loop).
+// ≥640: show only the tabs that fit (the row width is cut at the right edge of the last tab that fits; no fade, no arrow buttons),
+// with "All tabs 18" (tab search) at the right end. <640: 44px horizontal scroll + a search button at the right end (bottom sheet).
+// Tabs that do not fit stay in the DOM (reachable with ←→ / Home / End; a focused tab is scrolled into view within the row).
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLang } from '@/i18n';
 import { TABS, type TabId } from '@/tabs/definitions';
@@ -21,7 +21,7 @@ export function TabBar({ active, counts, onPick, mobile }: { active: TabId; coun
     const l = list.current;
     if (!w || !l || mobile) { setFit(undefined); return; }
     const measure = () => {
-      const avail = w.clientWidth + 10; // 列は -ml-2.5 で左の余白に食い込ませている
+      const avail = w.clientWidth + 10; // the row extends into the left margin with -ml-2.5
       let right = 0;
       for (const el of l.querySelectorAll<HTMLElement>('[role=tab]')) {
         const r = el.offsetLeft + el.offsetWidth;

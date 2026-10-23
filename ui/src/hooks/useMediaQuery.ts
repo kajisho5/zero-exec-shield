@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 
-/** matchMedia の結果を購読する。描画を分ける境界（<640 のカード型の一覧など）にだけ使う。 */
+/** Subscribes to the result of matchMedia. Used only for boundaries that split rendering (such as the card-style list below 640). */
 export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(
     (cb) => {
@@ -12,5 +12,5 @@ export function useMediaQuery(query: string): boolean {
   );
 }
 
-/** 設計書 §8.2 の「<640」。 */
+/** "<640" of design doc §8.2. */
 export const useIsMobile = () => !useMediaQuery('(min-width: 640px)');

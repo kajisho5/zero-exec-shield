@@ -1,7 +1,7 @@
-// ヘッダー（設計書 §10.1）。作業台と同じ地で、下に罫 1px。
-// ≥1280: ロゴ、版、bundle ID、外部通信ゼロのタグ、読み込む / JSON 出力 / クリア / 言語 / テーマ。
-// 言語のボタンは ≥640 だけ。<640 は「…」の中のラジオ（i18n のモックアップ header-en）。
-// 1024–1279: bundle ID は版の Tooltip へ。768–1023: JSON 出力と「…」。<640: マーク＋ワードマーク、テーマ、「…」（44px）。
+// Header (design doc §10.1). Same ground as the bench, with a 1px rule below.
+// ≥1280: logo, version, bundle ID, the zero-network tag, Load / Export JSON / Clear / language / theme.
+// The language buttons only at ≥640. Below 640 they are radio items inside "…" (i18n mockup header-en).
+// 1024–1279: bundle ID moves into the version Tooltip. 768–1023: Export JSON and "…". <640: mark + wordmark, theme, "…" (44px).
 import { Copy, Download, Ellipsis, Trash, Upload, WifiOff } from 'lucide-react';
 import { IOC } from '@/engine';
 import { Mark, Wordmark } from '@/components/brand/Logo';

@@ -1,6 +1,6 @@
-// shadcn/ui new-york-v4 の sheet（Radix Dialog）を手で取り込み、「検疫台」の「下からのシート」に書き換えたもの
-// （MIT。NOTICE を参照）。変更点: 下からだけ、浮きの地、上端の角丸 14、つまみ、180ms の translateY のみ。
-// 背面のスクロールロックは react-remove-scroll の CSP 互換モジュール（src/lib/remove-scroll-csp.tsx）が行う。
+// The shadcn/ui new-york-v4 sheet (Radix Dialog), imported by hand and rewritten as the "bottom sheet" of the "quarantine bench"
+// (MIT; see NOTICE). Changes: bottom only, raised ground, top corner radius 14, a grabber, 180ms translateY only.
+// The background scroll lock is done by the CSP-compatible module of react-remove-scroll (src/lib/remove-scroll-csp.tsx).
 import type * as React from 'react';
 import * as SheetPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
@@ -22,9 +22,9 @@ function SheetClose(props: React.ComponentProps<typeof SheetPrimitive.Close>) {
 
 function SheetContent({ className, children, title, count, description, ...props }: Omit<React.ComponentProps<typeof SheetPrimitive.Content>, 'title'> & {
   title: React.ReactNode;
-  /** 見出しの右の数（鉛筆） */
+  /** Count to the right of the title (pencil) */
   count?: React.ReactNode;
-  /** 見出しの下の補足。無いときは読み上げ用の説明を付けない */
+  /** Supplementary text below the title. When absent, no accessible description is attached */
   description?: React.ReactNode;
 }) {
   const { t } = useLang();

@@ -1,5 +1,5 @@
 // §10 / §26 / §27 / §28 / §30 / §31 / §32 / §33 / §35 / §36 / §40 / §43 / §48
-// ブラウザで判定できるのは「投入されたファイルの中身」まで。ホスト状態は CliOnlyNotice で CLI に案内する。
+// The browser can evaluate only up to "the content of the loaded files". Host state is referred to the CLI with CliOnlyNotice.
 import { HOME_RC_FILES, homeLike, named, push, readable, rootRel, type RuleCtx } from '../context';
 import { extname, textLocators } from '../util';
 import { collectDeps } from './supplyChain';
@@ -48,7 +48,7 @@ export function modelSupplyRules(ctx: RuleCtx): void {
       push(ctx, { level: 'MEDIUM', module: '§36', campaign: 'hf-supply-chain', path: f.relPath, code: 's36.pickle', ruleId: 's36-pickle-load', evidenceSha: f.sha256 });
     }
   }
-  // lerobot（CVE-2026-25874。ioc に修正版が未定義のため版に依らず要確認。CLI check_s36 と同じく依存インベントリから）
+  // lerobot (CVE-2026-25874; no fixed version defined in ioc, so needs review regardless of version; from the dependency inventory, as in CLI check_s36)
   for (const d of collectDeps(ctx)) {
     if (d.eco === 'pypi' && d.name === 'lerobot') push(ctx, { level: 'HIGH', module: '§36', campaign: 'hf-lerobot-rce', path: d.path, code: 's36.lerobot', params: { version: d.version }, ruleId: `s36-lerobot:${d.version}`, evidenceSha: d.sha });
   }
@@ -119,7 +119,7 @@ export function sigstoreRules(ctx: RuleCtx): void {
     }
     if (/slsa-verifier\s+verify-/.test(f.text) && !/--source-uri/.test(f.text)) push(ctx, { level: 'HIGH', module: '§43', campaign: null, path: f.relPath, code: 's43.no_source_uri', ruleId: 's43-slsa', evidenceSha: f.sha256 });
   }
-  // §28 コンテナ署名（CLI check_s28）
+  // §28 Container signing (CLI check_s28)
   const builds = readable(ctx).some((x) => /(^|\/)(\.github\/workflows\/[^/]+\.ya?ml|Jenkinsfile)$|\.gitlab-ci\.yml$|\.sh$/.test(x.relPath) && /(docker\s+push|docker\/build-push-action|buildah\s+push|ko\s+publish)/.test(x.text));
   const verifies = readable(ctx).some((x) => /(\.ya?ml|\.sh)$|(^|\/)(Makefile|Jenkinsfile)$/.test(x.relPath) && /cosign\s+verify/.test(x.text));
   if (builds && !verifies) push(ctx, { level: 'MEDIUM', module: '§28', campaign: null, path: rootPath(ctx), code: 's28.no_verify', ruleId: 's28-no-verify' });
@@ -134,7 +134,7 @@ export function sigstoreRules(ctx: RuleCtx): void {
     }
   }
 
-  // §48 SBOM 整合性（CLI check_s48。同じディレクトリ配下のロックファイル由来の依存と突合）
+  // §48 SBOM integrity (CLI check_s48; matched against the dependencies from lockfiles under the same directory)
   const sboms = named(ctx, /(\.spdx\.json|\.cdx\.json|^bom\.json$|^sbom\.json$|\.spdx$|^cyclonedx\.json$)/);
   if (!sboms.length) return;
   const prov = named(ctx, /(\.intoto\.jsonl|^provenance\.json$|\.provenance\.json$|\.layout$)/).length > 0;
@@ -181,7 +181,7 @@ export function sigstoreRules(ctx: RuleCtx): void {
   }
 }
 
-/** §8 クラウド/コンテナ（CLI check_s8）: .env ファイル、秘密鍵、Dockerfile の USER root・浮動タグ、docker.sock のマウント。 */
+/** §8 Cloud/containers (CLI check_s8): .env files, private keys, USER root and floating tags in Dockerfiles, docker.sock mounts. */
 export function containerRules(ctx: RuleCtx): void {
   ctx.checks.add('s8-env').add('s8-private-key').add('s8-dockerfile').add('s8-docker-sock');
   for (const f of ctx.files) {
@@ -210,12 +210,12 @@ export function containerRules(ctx: RuleCtx): void {
 
 const DOCKERFILE = /^(Dockerfile.*|.*\.dockerfile)$/;
 
-/** Dockerfile の FROM 行の 2 番目のフィールド（CLI の grep -i '^FROM' | awk '{print $2}' と同じ。空のフィールドは除く）。 */
+/** The 2nd field of FROM lines in a Dockerfile (same as grep -i '^FROM' | awk '{print $2}' in the CLI; empty fields are excluded). */
 function fromImages(text: string): string[] {
   return text.split(/\r?\n/).filter((l) => /^\s*FROM\s+/i.test(l)).map((l) => l.trim().split(/\s+/)[1] ?? '').filter(Boolean);
 }
 
-/** 投入フォルダ自体を指す path（CLI の $ROOT 相当。最上位ディレクトリ名、無ければ null）。 */
+/** A path pointing at the loaded folder itself (equivalent to $ROOT of the CLI; the top-level directory name, or null if none). */
 function rootPath(ctx: RuleCtx): string | null {
   return ctx.root || null;
 }
@@ -233,10 +233,10 @@ export function credentialRules(ctx: RuleCtx): void {
 }
 
 /**
- * 投入フォルダを HOME と見なせるとき（homeLike）だけ行う、CLI の HOME 前提の検査。
- *   §10: ~/Library/LaunchAgents/*.plist（参考 INFO）・対話履歴ファイルの存在
- *   §12: ワクチン 3 点（~/.npmrc の ignore-scripts=true、シェル設定の PYTHONNOUSERSITE=1 / PIP_REQUIRE_VIRTUALENV、pip.conf）
- * 環境変数（npm_config_ignore_scripts 等）はブラウザから読めないため、CLI のホスト検査を無効にしたときと同じくファイルだけで判定する。
+ * CLI checks that assume HOME, done only when the loaded folder can be regarded as HOME (homeLike).
+ *   §10: ~/Library/LaunchAgents/*.plist (reference INFO), existence of interactive history files
+ *   §12: the three vaccines (ignore-scripts=true in ~/.npmrc, PYTHONNOUSERSITE=1 / PIP_REQUIRE_VIRTUALENV in shell configs, pip.conf)
+ * Environment variables (npm_config_ignore_scripts etc.) cannot be read from the browser, so evaluation uses files only, as when the CLI host checks are disabled.
  */
 export function homeRules(ctx: RuleCtx): void {
   if (!homeLike(ctx)) return;

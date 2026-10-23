@@ -20,7 +20,7 @@ function sortFindings(xs: Finding[]): Finding[] {
   return xs.sort((a, b) => SEVERITY_RANK[b.level] - SEVERITY_RANK[a.level] || Number(a.module.slice(1)) - Number(b.module.slice(1)) || (a.path ?? '').localeCompare(b.path ?? ''));
 }
 
-/** 投入ファイルを判定する。戻り値にファイル内容は含まれない（パス・ルール ID・固定文言・ハッシュのみ）。 */
+/** Evaluates the loaded files. The return value contains no file content (only paths, rule IDs, fixed wording and hashes). */
 export async function analyzeFiles(input: FileInput[], ioc: IocDb = IOC): Promise<EngineResult> {
   const seen = new Set<string>();
   const files = input.filter((f) => (seen.has(f.relPath) ? false : (seen.add(f.relPath), true)));
@@ -57,8 +57,8 @@ export async function analyzeFiles(input: FileInput[], ioc: IocDb = IOC): Promis
 
   const findings: Finding[] = [];
   const ids = new Set<string>();
-  // CLI の emit と同じく、evidence は path にあるものから決める: 読めたファイルはその内容のハッシュ（file）、
-  // ディレクトリ（投入ファイルの親）は directory（ブラウザは ger-tree-v1 を計算できないため detail）
+  // As in the CLI emit, evidence is determined from what is at path: a file that could be read gets the hash of its content (file),
+  // a directory (the parent of a loaded file) is a directory (the browser cannot compute ger-tree-v1, so detail)
   const dirs = new Set<string>();
   for (const f of files) for (let d = f.relPath; d.includes('/');) { d = d.slice(0, d.lastIndexOf('/')); dirs.add(d); }
   for (const s of ctx.specs) {
@@ -86,7 +86,7 @@ export async function analyzeFiles(input: FileInput[], ioc: IocDb = IOC): Promis
   return { findings: sortFindings(findings), skillpact, blastRadius: ctx.blast.sort((a, b) => a.path.localeCompare(b.path)), viewers: ctx.viewers, errors: ctx.errors, stats, checksRun: [...ctx.checks].sort() };
 }
 
-/** 貼り付けテキストの判定。内容は返さず、ルールと件数だけを Finding にする。 */
+/** Evaluation of pasted text. Returns no content; only rules and counts become Findings. */
 export async function analyzePaste(text: string, ioc: IocDb = IOC): Promise<Finding[]> {
   const hits = analyzePasteText(text, ioc);
   const out: Finding[] = [];

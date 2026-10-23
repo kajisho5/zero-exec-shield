@@ -1,5 +1,5 @@
-// 欄外（設計書 §10.3 の右の列）。カードにせず、作業台の上に置いて罫で区切る注記。見出しの前にアイコンは置かない。
-// テキスト貼り付け判定 / Blast Radius / ホスト検査は CLI で / 未判定の内訳。
+// Side notes (the right column of design doc §10.3). Not cards: notes placed on the bench, separated by rules. No icon before the headings.
+// Pasted-text result / Blast Radius / host checks are in the CLI / breakdown of not scanned.
 import { useState, type ReactNode } from 'react';
 import { CircleDashed, Copy } from 'lucide-react';
 import type { BlastRadiusItem } from '@/engine';
@@ -70,7 +70,7 @@ export function BlastRadius({ items }: { items: BlastRadiusItem[] }) {
       {/* English: the steps line does not fit beside the button (225 px vs 196 px), so it gets its own row (i18n mockup) */}
       <div className={cn('mt-2 flex flex-wrap items-start justify-between gap-x-3 gap-y-2', lang === 'en' && 'flex-col')}>
         <p className={cn('text-xs leading-normal text-muted-foreground', lang === 'ja' && 'max-w-[13.5em] min-w-[12.5em] flex-1')}>{t('ui.blast.steps')}</p>
-        <Button size="sm" disabled={!items.length} onClick={() => copy(items.map((b) => b.path).join('\n'), t('ui.copy.paths')) /* コピーは元の値のまま */} className="shrink-0"><Copy />{t('ui.blast.copy')}</Button>
+        <Button size="sm" disabled={!items.length} onClick={() => copy(items.map((b) => b.path).join('\n'), t('ui.copy.paths')) /* copy keeps the original values */} className="shrink-0"><Copy />{t('ui.blast.copy')}</Button>
       </div>
     </Note>
   );

@@ -1,5 +1,5 @@
-// 5.2.2 の検知データ: 開発インフラ CVE（§3 / §4 / §16）、eMudhra（§6）、収集インテル（§7 / §15 / §22 / §30 / §38 / §42）。
-// CLI の check_s3 / check_s4 / emudhra_* / intel_* と同じ rules/ioc.json を参照する。ホスト状態（パッケージ DB 以外）は CLI のみ。
+// Detection data of 5.2.2: development infrastructure CVEs (§3 / §4 / §16), eMudhra (§6), collected intel (§7 / §15 / §22 / §30 / §38 / §42).
+// References the same rules/ioc.json as check_s3 / check_s4 / emudhra_* / intel_* of the CLI. Host state (other than package DBs) is CLI only.
 import { homeLike, push, readable, rootRel, type RuleCtx } from '../context';
 import type { InfraCve } from '../ioc';
 import type { Severity } from '../types';
@@ -11,7 +11,7 @@ import { collectDeps } from './supplyChain';
 const NUM = /^\d+(\.\d+)+$/;
 const sev = (s: string | undefined, d: Severity): Severity => (s === 'CRITICAL' || s === 'HIGH' || s === 'MEDIUM' || s === 'LOW' || s === 'INFO' ? s : d);
 
-/** 系列（major.minor）ごとの修正版で判定する（CLI version_branch_vulnerable と同じ規則）。系列に修正版が無く最大修正版未満なら脆弱 */
+/** Evaluates with the fixed version per line (major.minor) (same rule as CLI version_branch_vulnerable). Vulnerable if the line has no fixed version and it is below the highest fixed version */
 export function versionBranchVulnerable(v: string, fixed: string[]): boolean {
   if (!fixed.length) return true;
   const max = fixed.reduce((a, b) => (versionCmp(a, b) < 0 ? b : a));
@@ -21,7 +21,7 @@ export function versionBranchVulnerable(v: string, fixed: string[]): boolean {
   return same ? versionCmp(v, same) < 0 : true;
 }
 
-/** compose / Dockerfile / k8s / tf / json の image タグからバージョンを取る（CLI detect_service_version と同じ） */
+/** Takes the version from image tags in compose / Dockerfile / k8s / tf / json (same as CLI detect_service_version) */
 const IMAGE_FILES = /^(docker-compose.*\.ya?ml|compose.*\.ya?ml|Dockerfile.*|.*\.dockerfile|.*\.ya?ml|.*\.tf|.*\.json)$/;
 function imageVersions(ctx: RuleCtx, pattern: string): { ver: string; path: string; sha: string | null }[] {
   const re = ere(`(${pattern}):[A-Za-z0-9._-]+`, 'g');
@@ -42,9 +42,9 @@ export function infraRules(ctx: RuleCtx): void {
   ctx.checks.add('s3-gitlab').add('s16-infra');
   for (const inf of ctx.ioc.infrastructures ?? []) {
     const pats = inf.image_patterns ?? [];
-    // PHP（§4 PHP2Shell）は php.ts が CLI check_s4 と同じ表（php2shell_distro）で判定する
+    // PHP (§4 PHP2Shell) is evaluated by php.ts with the same table as CLI check_s4 (php2shell_distro)
     if (!pats.length || inf.id === 'php') continue;
-    // GitLab は全 CVE（§3）、その他は generic 製品と追記 CVE（§16）
+    // GitLab: all CVEs (§3); others: generic products and appended CVEs (§16)
     const cves = inf.cves.filter((c) => (c.fixed ?? []).length && (inf.id === 'gitlab' || inf.generic || c.generic));
     if (!cves.length) continue;
     const module = inf.id === 'gitlab' ? '§3' : '§16';
@@ -75,7 +75,7 @@ export function infraRules(ctx: RuleCtx): void {
   }
 }
 
-/** Debian 系 ca-certificates の修正判定（CLI debian_ca_fixed と同じ） */
+/** Fix evaluation of Debian-family ca-certificates (same as CLI debian_ca_fixed) */
 export function debianCaFixed(v: string): boolean {
   const date = /^\d{8}/.exec(v)?.[0];
   if (!date) return false;
@@ -94,7 +94,7 @@ export function emudhraRules(ctx: RuleCtx): void {
   const os = e.os_ca_certificates ?? {};
   for (const f of readable(ctx)) {
     if (/(^|\/)var\/lib\/dpkg\/status$/.test(f.relPath)) {
-      // 段落（パッケージ）単位で読み、Status がインストール済みのものだけ（削除済み・config-files は除く。CLI と同じ）
+      // Read per paragraph (package), only those whose Status is installed (removed and config-files excluded; same as the CLI)
       let v: string | undefined;
       for (const para of f.text.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
         const field = (k: string) => new RegExp(`^${k}: (.*)$`, 'm').exec(para)?.[1];
@@ -104,7 +104,7 @@ export function emudhraRules(ctx: RuleCtx): void {
       }
       if (!v) continue;
       const ubMin = os.ubuntu_min_upstream ?? '20260816';
-      // ベンダーは同じイメージの os-release から判定（Ubuntu の SRU 版 20260601~24.04.1 は "ubuntu" を含まない）
+      // The vendor is determined from the os-release of the same image (the Ubuntu SRU version 20260601~24.04.1 does not contain "ubuntu")
       const base = f.relPath.replace(/(^|\/)var\/lib\/dpkg\/status$/, '$1');
       const osr = ctx.byPath.get(`${base}etc/os-release`) ?? ctx.byPath.get(`${base}usr/lib/os-release`);
       const osid = /^ID=["']?([^"'\r\n]*)/m.exec(osr?.text ?? '')?.[1] ?? '';
@@ -133,7 +133,7 @@ export function emudhraRules(ctx: RuleCtx): void {
       if (deno) judge('Deno', deno, f.relPath, f.sha256, fx.deno);
     }
   }
-  // certifi の最低版（CLI check_s6 の runtime_minimums.certifi と同じ。依存インベントリから判定）
+  // Minimum version of certifi (same as runtime_minimums.certifi of CLI check_s6; evaluated from the dependency inventory)
   const certMin = ctx.ioc.runtime_minimums?.certifi;
   if (certMin) {
     for (const d of collectDeps(ctx)) {
@@ -163,7 +163,7 @@ export function intelRules(ctx: RuleCtx): void {
   if (!intel) return;
   const wf = /(^|\/)(\.github\/workflows\/[^/]+\.ya?ml|\.gitlab-ci\.ya?ml|\.circleci\/config\.ya?ml|Jenkinsfile|action\.ya?ml)$/;
 
-  // §15 既知の悪性ファイル（SHA-256 は名前に依らず全ファイル、名前は完全一致）
+  // §15 Known malicious files (SHA-256 against all files regardless of name; names by exact match)
   const shaCamp = new Map<string, string>();
   for (const x of intel.files ?? []) for (const h of x.sha256 ?? []) if (!shaCamp.has(h)) shaCamp.set(h, x.campaign);
   for (const f of ctx.files) {
@@ -177,9 +177,9 @@ export function intelRules(ctx: RuleCtx): void {
     }
   }
 
-  // §22 侵害されたアクション（bad_refs は CRITICAL、safe_refs 以外のタグ参照は severity）
+  // §22 Compromised actions (bad_refs are CRITICAL; tag references other than safe_refs get severity)
   const wfFiles = readable(ctx).filter((f) => wf.test(f.relPath));
-  // CLI intel_actions と同じく GitHub Actions のワークフローと action.yml だけを、workflowText で正規化して見る
+  // As in CLI intel_actions, only GitHub Actions workflows and action.yml are looked at, normalized with workflowText
   const ghFiles = wfFiles.filter((f) => /(^|\/)(\.github\/workflows\/[^/]+|action)\.ya?ml$/.test(f.relPath)).map((f) => ({ f, text: workflowText(f.text).join('\n') }));
   for (const a of intel.actions ?? []) {
     const re = new RegExp(`uses:\\s*["']?${escapeRe(a.action)}@([^"'\\s#,}]+)`, 'gi');
@@ -194,14 +194,14 @@ export function intelRules(ctx: RuleCtx): void {
     }
   }
 
-  // §38 CI 設定内の既知の悪性文字列
+  // §38 Known malicious strings in CI configs
   for (const w of intel.workflow_strings ?? []) {
     for (const f of wfFiles) {
       if ((w.strings ?? []).some((s) => f.text.includes(s))) push(ctx, { level: sev(w.severity, 'HIGH'), module: '§38', campaign: w.campaign, path: f.relPath, code: 'intel.ci_pattern', params: { campaign: w.campaign }, ruleId: `s38-intel-strings:${w.campaign}`, evidenceSha: f.sha256 });
     }
   }
 
-  // §7 / §20 AI 設定・指示ファイル内の既知の文字列（file_regex でパスを絞る）
+  // §7 / §20 Known strings in AI configs and instruction files (file_regex narrows down the paths)
   for (const s of intel.strings ?? []) {
     const rx = ere(s.file_regex ?? '.');
     if (!rx) continue;
@@ -210,13 +210,13 @@ export function intelRules(ctx: RuleCtx): void {
       const low = f.text.toLowerCase();
       const hit = strs.find((x) => low.includes(x));
       if (hit === undefined) continue;
-      // エージェントの設定ファイルのフックなら、最初に一致した文字列を含むフックの位置（CLI の intel_strings と同じ）
+      // If it is a hook in an agent config file, the location of the hook containing the first matched string (same as intel_strings in the CLI)
       const locators = /(^|\/)\.claude\/settings(\.local)?\.json$/.test(f.relPath) ? hookLocators(f.text, (c) => c.toLowerCase().includes(hit)) : undefined;
       push(ctx, { level: sev(s.severity, 'HIGH'), module: s.module, campaign: s.campaign, path: f.relPath, code: 'intel.campaign_string', params: { campaign: s.campaign }, ruleId: `s7-intel-strings:${s.campaign}`, evidenceSha: f.sha256, ...(locators ? { locators } : {}) });
     }
   }
 
-  // §42 悪性・侵害された拡張（Chrome: Extensions/<id>/<ver>、VS Code / Open VSX: extensions/<publisher.name>-<ver>）
+  // §42 Malicious or compromised extensions (Chrome: Extensions/<id>/<ver>, VS Code / Open VSX: extensions/<publisher.name>-<ver>)
   for (const x of intel.extensions ?? []) {
     const bads = x.bad_versions ?? [];
     for (const id of x.ids ?? []) {
@@ -234,10 +234,10 @@ export function intelRules(ctx: RuleCtx): void {
     }
   }
 
-  // §30 ホストの痕跡（CLI intel_host_files と同じく、パスの種類ごとに照合先を分ける）
-  //   ~/… / $HOME/… … 投入フォルダが HOME と見なせるとき（homeLike）に限り、その直下からの相対パスと完全一致
-  //   /… / $TMPDIR/… … ホストの実パス。ブラウザは読めないため照合しない（CLI のホスト検査）
-  //   それ以外（site-packages/cook.pth 等）… 投入フォルダ内のサフィックス一致
+  // §30 Host traces (as in CLI intel_host_files, match against a different place per kind of path)
+  //   ~/… / $HOME/… … only when the loaded folder can be regarded as HOME (homeLike), exact match with the path relative to it
+  //   /… / $TMPDIR/… … real host paths. The browser cannot read them, so they are not matched (CLI host checks)
+  //   anything else (site-packages/cook.pth etc.) … suffix match inside the loaded folder
   const asHome = homeLike(ctx);
   for (const h of intel.host ?? []) {
     const level = sev(h.severity, 'HIGH');

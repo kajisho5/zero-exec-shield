@@ -5,7 +5,7 @@ import type { TabId } from '../tabs/definitions';
 
 export interface ScanState {
   phase: 'idle' | 'reading' | 'analyzing' | 'done' | 'error';
-  /** 実行中（最後に開始した）スキャンの ID。クリア・新しいスキャンで置き換わり、古いスキャンの進捗・結果は捨てる */
+  /** ID of the running (most recently started) scan. Replaced by clear or a new scan; progress and results of older scans are discarded */
   scanId: number | null;
   progress: { processed: number; total: number };
   result: EngineResult | null;
@@ -53,11 +53,11 @@ export const initialState: ScanState = {
 };
 
 export function reducer(s: ScanState, a: Action): ScanState {
-  // 置き換えられた（クリア後・次のスキャン開始後の）スキャンの進捗・結果は反映しない
+  // Progress and results of a replaced scan (after clear, after the next scan started) are not applied
   if ((a.type === 'SCAN_PROGRESS' || a.type === 'SCAN_RESULT' || a.type === 'SCAN_FAIL') && a.scanId !== s.scanId) return s;
   switch (a.type) {
     case 'SCAN_START':
-      // 前回のスキャン結果は消す（新しい startedAt と古い結果・finishedAt を混ぜて表示・書き出ししない）
+      // Clear the previous scan result (never show or export a new startedAt mixed with old results or finishedAt)
       return { ...s, phase: 'reading', scanId: a.scanId, progress: { processed: 0, total: a.total }, startedAt: a.startedAt, finishedAt: null, durationMs: 0, result: null, errorMessage: null };
     case 'SCAN_PROGRESS':
       return { ...s, phase: a.phase ?? s.phase, progress: { ...s.progress, processed: a.processed } };
@@ -70,7 +70,7 @@ export function reducer(s: ScanState, a: Action): ScanState {
     case 'IMPORT_FINDINGS':
       return { ...s, imported: a.doc, phase: s.phase === 'idle' ? 'done' : s.phase };
     case 'SET_TAB':
-      // モジュールはタブごとに違う。前のタブのモジュールで絞ったままにしない（選択欄は「すべて」なのに全行が消える）
+      // Modules differ per tab. Do not keep a filter on a module of the previous tab (the select would show "All" yet every row would be gone)
       return { ...s, ui: { ...s.ui, activeTab: a.tab, moduleFilter: a.tab === s.ui.activeTab ? s.ui.moduleFilter : null } };
     case 'TOGGLE_SEVERITY': {
       const next = new Set(s.ui.severityFilter);
@@ -89,8 +89,8 @@ export function reducer(s: ScanState, a: Action): ScanState {
   }
 }
 
-/** 画面に出す全 finding（フォルダ判定 + 貼り付け + CLI 取り込み）。id で重複を除き、先に出たもの（フォルダ判定 > 貼り付け > 取り込み）を残す
- *  （自分が書き出した findings.json を取り込み直しても二重に数えない）。 */
+/** All findings shown on screen (folder scan + paste + CLI import). Duplicates by id are removed, keeping the first (folder scan > paste > import)
+ *  (re-importing a findings.json you exported yourself is not counted twice). */
 export function allFindings(s: ScanState): Finding[] {
   const seen = new Set<string>();
   return [...(s.result?.findings ?? []), ...s.pasteFindings, ...(s.imported?.findings ?? [])].filter((f) => (seen.has(f.id) ? false : (seen.add(f.id), true)));

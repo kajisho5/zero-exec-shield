@@ -1,6 +1,6 @@
-// 検出一覧（設計書 §10.3、§10.4）。台紙 1 枚。自前の仮想スクロール（行の高さを固定）。
-// ≥640: 表（溝＋重大度 / パス・詳細 / キャンペーン / モジュール / コピー）、行 60px、見出し行は role="table" の中。
-// <640: 1 件 96px のカード型の行。行を押すと詳細のシート（閉じるとフォーカスは押した行に戻る）。
+// Findings list (design doc §10.3, §10.4). One sheet. Custom virtual scrolling (fixed row height).
+// ≥640: a table (gutter + severity / path and detail / campaign / module / copy), 60px rows, the header row inside role="table".
+// <640: 96px card-style rows, one per finding. Pressing a row opens the detail sheet (on close, focus returns to the pressed row).
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CircleDashed, Copy, ListFilter, Search } from 'lucide-react';
 import type { Finding } from '@/engine';
@@ -23,8 +23,8 @@ const ROW = 60;
 const CARD_ROW = 96;
 const COLS = 'grid grid-cols-[128px_minmax(0,1fr)_160px_88px_48px] max-xl:grid-cols-[120px_minmax(0,1fr)_128px_72px_48px] max-md:grid-cols-[112px_minmax(0,1fr)_128px_48px]';
 
-/** 固定高の仮想スクロール。スクロール領域は 0 件のとき外れる（空の案内に替わる）ので、付け直したときと件数が変わったときに
- *  top を要素の実際の scrollTop に合わせ直す（古い top のままだと、0 に戻った領域に末尾の行だけを描いて一覧が空に見える）。 */
+/** Fixed-height virtual scrolling. The scroll area is detached at 0 findings (replaced by the empty notice), so when it is reattached or the count changes,
+ *  top is resynced to the element's actual scrollTop (with a stale top, only the last rows are drawn in an area reset to 0 and the list looks empty). */
 function useVirtual(n: number, row: number, maxHeight: number) {
   const [top, setTop] = useState(0);
   const el = useRef<HTMLElement | null>(null);
@@ -98,7 +98,7 @@ export function FindingsTable({ findings, total, empty, query, onQuery, modules,
                     <span role="cell" className="-mt-[3px] flex justify-end">
                       {f.path && (
                         <Tip label={t('ui.findings.copy_path')} side="left">
-                          {/* コピーは元の値のまま（利用者が求めたのはそのパス）。読み上げ名だけ目印付きの表示用 */}
+                          {/* Copy keeps the original value (that path is what the user asked for). Only the accessible name uses the marked display form */}
                           <Button variant="ghost" size="icon-sm" aria-label={t('ui.findings.copy_path_aria', { path: visiblePath(f.path) })} onClick={() => copy(f.path!)}><Copy /></Button>
                         </Tip>
                       )}
@@ -114,7 +114,7 @@ export function FindingsTable({ findings, total, empty, query, onQuery, modules,
   );
 }
 
-/** <640 の一覧: 検索（44px）とモジュールのシート、カード型の行、詳細のシート。 */
+/** The <640 list: search (44px) and the module sheet, card-style rows, the detail sheet. */
 export function FindingList({ findings, empty, query, onQuery, modules, module, onModule }: {
   findings: Finding[]; empty: string; query: string; onQuery(q: string): void; modules: string[]; module: string | null; onModule(m: string | null): void;
 }) {
@@ -130,7 +130,7 @@ export function FindingList({ findings, empty, query, onQuery, modules, module, 
       <div className="flex gap-2">
         <Input icon={<Search aria-hidden="true" className="size-4 shrink-0" />} value={query} onChange={(e) => onQuery(e.target.value)} placeholder={t('ui.findings.search')} aria-label={t('ui.findings.search')} data-testid="search" className="h-11 flex-1" />
         <Sheet open={filterOpen} onOpenChange={setFilterOpen}>
-          {/* Trigger にすると、閉じたとき（Escape・選択・閉じる）に Radix がフォーカスをこのボタンへ戻す */}
+          {/* As a Trigger, Radix returns focus to this button when the sheet closes (Escape, selection, close) */}
           <SheetTrigger asChild>
             <Button variant="outline" size="icon-touch" aria-label={t('ui.findings.module_filter_btn', { m: module ?? t('ui.findings.module_all') })} className="relative">
               <ListFilter />
@@ -172,7 +172,7 @@ export function FindingList({ findings, empty, query, onQuery, modules, module, 
                       {f.path ? <PathText path={f.path} className="max-w-full text-[13.5px]" /> : <span className="text-[13.5px] text-muted-foreground">{t('ui.findings.pasted')}</span>}
                       <span lang={textLang(ft(f))} className="block max-w-full truncate text-xs text-muted-foreground">{visiblePath(ft(f))}</span>
                     </button>
-                    {/* コピーは元の値のまま。読み上げ名だけ表示用 */}
+                    {/* Copy keeps the original value. Only the accessible name uses the display form */}
                     {f.path && <Button variant="ghost" size="icon-touch" aria-label={t('ui.findings.copy_path_aria', { path: visiblePath(f.path) })} onClick={() => copy(f.path!)} className="absolute top-[18px] right-1"><Copy /></Button>}
                   </div>
                 );
@@ -186,11 +186,11 @@ export function FindingList({ findings, empty, query, onQuery, modules, module, 
   );
 }
 
-/** 詳細のシート（承認済み §16-5）。パスと詳細の全文、キャンペーン、モジュール、「パスをコピー」。 */
+/** The detail sheet (approved §16-5). Full path and detail, campaign, module, "Copy path". */
 function FindingSheet({ finding, onClose, returnFocus }: { finding: Finding | null; onClose(): void; returnFocus(): HTMLElement | null }) {
   const copy = useCopy();
   const { t, ft } = useLang();
-  // 閉じるアニメーションの間も内容を残す
+  // Keep the content during the closing animation
   const last = useRef<Finding | null>(null);
   if (finding) last.current = finding;
   const f = finding ?? last.current;
@@ -211,7 +211,7 @@ function FindingSheet({ finding, onClose, returnFocus }: { finding: Finding | nu
               <dt className="text-muted-foreground">{t('ui.findings.campaign')}</dt><dd className="wrap-anywhere">{visibleOpt(f.campaign) ?? '—'}</dd>
               <dt className="text-muted-foreground">{t('ui.findings.module')}</dt><dd>{f.module}</dd>
             </dl>
-            {/* コピーは元の値のまま（表示用の目印を付けない） */}
+            {/* Copy keeps the original value (no display markers) */}
             {f.path && <Button variant="ink" size="touch" className="w-full" onClick={() => copy(f.path!)}><Copy />{t('ui.findings.copy_path')}</Button>}
           </div>
         </SheetContent>

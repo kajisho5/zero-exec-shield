@@ -1,6 +1,6 @@
-// shadcn/ui new-york-v4 の button を手で取り込み、「検疫台」に合わせて書き換えたもの（MIT。NOTICE を参照）。
-// 変更点: variant は ink（墨の塗り）/ outline / ghost の 3 種だけ。角丸 6。disabled は不透明度で薄めず、罫の枠と鉛筆色。
-// 高さ 36（sm 30〜32）、タッチ環境（pointer: coarse）では 44。
+// The shadcn/ui new-york-v4 button, imported by hand and rewritten to fit the "quarantine bench" (MIT; see NOTICE).
+// Changes: only 3 variants, ink (ink fill) / outline / ghost. Radius 6. disabled is not faded by opacity but uses a rule border and pencil color.
+// Height 36 (sm 30-32), 44 on touch devices (pointer: coarse).
 import type * as React from 'react';
 import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';

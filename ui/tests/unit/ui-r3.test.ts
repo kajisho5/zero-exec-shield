@@ -1,5 +1,5 @@
-// 0.3.1 の UI 修正の単体テスト: 仮想スクロールの範囲（U1）、タブ切り替えでのモジュール絞り込み（U2）、
-// 表示用の制御文字の目印（U3）。
+// Unit tests for the UI fixes of 0.3.1: virtual scrolling range (U1), module filter on tab switch (U2),
+// markers for control characters in display (U3).
 import { describe, expect, it } from 'vitest';
 import { virtualWindow } from '../../src/lib/virtualWindow';
 import { visibleOpt, visiblePath } from '../../src/lib/visiblePath';
@@ -7,11 +7,11 @@ import { initialState, reducer } from '../../src/state/reducer';
 
 describe('virtualWindow（U1）', () => {
   it('古い top（行が減った・領域を付け直した直後）でも先頭側の行を描き、空の範囲にしない', () => {
-    // 400 行を末尾までスクロールした top のまま、行が 400 → 11 に減った
+    // With the top of 400 rows scrolled to the end, the rows dropped from 400 to 11
     const w = virtualWindow(11, 60, 600, 400 * 60 - 600);
     expect(w.start).toBe(0);
     expect(w.end).toBe(11);
-    // 400 行に戻り、領域を付け直した（scrollTop は 0）
+    // Back to 400 rows, with the area reattached (scrollTop is 0)
     const back = virtualWindow(400, 60, 600, 0);
     expect([back.start, back.end]).toEqual([0, 15]);
   });

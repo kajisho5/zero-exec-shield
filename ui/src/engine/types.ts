@@ -1,4 +1,4 @@
-// 判定エンジンの型。ファイル内容（text）は FileInput にだけ存在し、出力の型には現れない（設計書 §6.3）。
+// Types of the evaluation engine. File content (text) exist only in FileInput and never appear in the output types (design doc §6.3).
 import type { MsgKey } from '../i18n';
 
 export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
@@ -6,21 +6,21 @@ export type DisplaySeverity = Severity | 'SAFE';
 export const SEVERITIES: Severity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
 export const SEVERITY_RANK: Record<Severity, number> = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, INFO: 1 };
 
-/** SkillPact 0.8 の 6 効果（spec §6）。順序も仕様どおり */
+/** The 6 effects of SkillPact 0.8 (spec §6). In the order of the spec */
 export type Effect = 'read' | 'write' | 'network' | 'exec' | 'spend' | 'send';
 export const EFFECTS: Effect[] = ['read', 'write', 'network', 'exec', 'spend', 'send'];
 export type Decision = 'allow' | 'ask' | 'deny';
 export type Level = 'L1' | 'L2' | 'L3';
 
-/** エンジンへの入力。text は判定にのみ使い、どの出力にも転記しない。 */
+/** Input to the engine. text is used only for evaluation and is never copied into any output. */
 export interface FileInput {
   relPath: string;
   name: string;
   size: number;
   lastModified: number;
-  /** UTF-8 として読んだ内容。サイズ超過・バイナリ・読み取り失敗は null */
+  /** Contents read as UTF-8. null when over the size limit, binary or unreadable */
   text: string | null;
-  /** 内容の SHA-256（"sha256:" なしの 16 進）。読み取れなかった場合は null */
+  /** SHA-256 of the content (hex without "sha256:"). null if it could not be read */
   sha256: string | null;
   readState: 'read' | 'skipped-size' | 'skipped-binary' | 'error';
 }
@@ -39,7 +39,7 @@ export interface SkillPactFindingField {
   diff_anomaly: boolean;
 }
 
-/** findings 1.1 の任意項目（ZES schemas/findings.schema.json）。ファイル内容は含めない（pointer か、行番号と行の SHA-256 だけ） */
+/** Optional fields of findings 1.1 (ZES schemas/findings.schema.json). No file content (only a pointer, or a line number and the SHA-256 of the line) */
 export interface FindingSubject { ecosystem: string; package: string; version: string | null; safe_version: string | null; fixed_versions: string[] }
 export type LocatorFormat = 'json' | 'jsonc' | 'toml' | 'yaml' | 'ini' | 'text' | 'plist';
 export interface FindingLocator { format: LocatorFormat; pointer?: string; line?: number; line_sha256?: string }
@@ -52,9 +52,9 @@ export interface Finding {
   level: Severity;
   module: string;
   campaign: string | null;
-  /** 投入フォルダからの相対パス。貼り付け由来は null */
+  /** Path relative to the loaded folder. null for pasted input */
   path: string | null;
-  /** 固定テンプレート由来の説明（ファイル由来の文字列を連結しない） */
+  /** Description from a fixed template (never concatenates strings from files) */
   detail: string;
   evidence_hash: string;
   kind?: string;
@@ -64,7 +64,7 @@ export interface Finding {
   subject?: FindingSubject;
   locators?: FindingLocator[];
   related?: FindingRelated[];
-  /** 種類つきの証跡（CLI から取り込んだ 1.0 の finding には無い） */
+  /** Typed evidence (absent from 1.0 findings imported from the CLI) */
   evidence?: FindingEvidence;
   skillpact?: SkillPactFindingField;
   ruleId: string;
@@ -75,7 +75,7 @@ export interface BlastRadiusItem { path: string; kind: string; size: number }
 
 export interface McpServerView {
   name: string;
-  /** §13-4 で表示を許容した設定値（120 文字まで） */
+  /** Config value allowed for display by §13-4 (up to 120 characters) */
   command: string;
   args: string;
   risk: 'high' | 'medium' | 'none';
@@ -99,7 +99,7 @@ export interface SkillPactAnalysis {
   contract: {
     found: boolean;
     path: string | null;
-    /** none: 契約なし / unparseable: I-JSON 不正 / unsupported: 未対応の contract_version / invalid: 部分検査で不合格 / ok */
+    /** none: no contract / unparseable: invalid I-JSON / unsupported: unsupported contract_version / invalid: failed the partial checks / ok */
     status: 'none' | 'unparseable' | 'unsupported' | 'invalid' | 'ok';
     problem: string | null;
     contractVersion: string | null;
@@ -107,9 +107,9 @@ export interface SkillPactAnalysis {
   };
   skillName: string | null;
   skillVersion: string | null;
-  /** ZES の部分検査に合格した場合のみ 'L1'。L2/L3 は ZES では判定しない */
+  /** 'L1' only if the ZES partial checks pass. ZES does not evaluate L2/L3 */
   level: string | null;
-  /** integrity.signatures がある（ZES は署名を検証しない） */
+  /** integrity.signatures is present (ZES does not verify signatures) */
   signed: boolean;
   signers: string[];
   author: string | null;
@@ -142,6 +142,6 @@ export interface EngineResult {
   viewers: { mcp: McpConfigView[]; actions: WorkflowView[]; extensions: ExtensionView[] };
   errors: ScanError[];
   stats: EngineStats;
-  /** 実行したチェック ID（SAFE = 該当なしのチェック数の算出に使う） */
+  /** IDs of the checks that ran (used to compute SAFE = the number of checks with no match) */
   checksRun: string[];
 }

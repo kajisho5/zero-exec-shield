@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// ローカルは環境に導入済みの Chromium（PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers）だけを使う。playwright install はしない。
-// CI では E2E_ALL_BROWSERS=1 で Firefox / WebKit（Safari 系エンジン）も実行する（file:// での CSP・クリップボードの差を確認するため）。
+// Locally, only the Chromium already installed in the environment (PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers) is used. No playwright install.
+// In CI, E2E_ALL_BROWSERS=1 also runs Firefox / WebKit (the Safari-family engine) (to check the CSP and clipboard differences on file://).
 const all = process.env['E2E_ALL_BROWSERS'] === '1';
 // The existing specs check the Japanese UI, so the default browser locale is ja-JP. tests/e2e/i18n.spec.ts switches to
 // en-US (the English UI is the default for every other locale).
@@ -10,7 +10,7 @@ const use = { headless: true, viewport: { width: 1440, height: 900 }, locale: 'j
 export default defineConfig({
   testDir: 'tests/e2e',
   timeout: 60_000,
-  // CI は 3 エンジンを直列に実行し（並列の負荷による停止を切り分けるため）、失敗時の trace を残す
+  // CI runs the 3 engines serially (to tell stalls caused by parallel load apart) and keeps traces on failure
   workers: all ? 1 : undefined,
   use: { ...use, trace: all ? 'retain-on-failure' : 'off' },
   reporter: 'list',

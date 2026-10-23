@@ -1,4 +1,4 @@
-// §7.2 の 18 タブ（順序固定）。各タブは module または campaign で検出を絞り込む。
+// The 18 tabs of §7.2 (fixed order). Each tab narrows findings by module or campaign.
 import type { Finding } from '../engine';
 import type { MsgKey } from '../i18n';
 
@@ -12,7 +12,7 @@ export interface TabDef {
   label: MsgKey;
   modules: string[];
   campaigns: string[];
-  /** ブラウザでは判定できないホスト状態の検査（0 件 = 安全と誤認させないため案内を出す）。カタログのキー（ui.cli_note.*） */
+  /** Host-state checks the browser cannot perform (a notice is shown so 0 findings is not mistaken for safe). Catalog key (ui.cli_note.*) */
   cliOnlyNote?: MsgKey;
   viewer?: 'mcp' | 'actions' | 'extensions' | 'skillpact';
 }

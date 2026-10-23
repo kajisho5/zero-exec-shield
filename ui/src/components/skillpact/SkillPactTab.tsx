@@ -1,7 +1,7 @@
-// SkillPact タブ（実験的。設計書 §10.5）。スキルが宣言した権限（SkillPact 0.8 契約）とコードの実態を比べる。
-// 左: 作業台の上のスキル一覧。右: 報告（台紙 1 枚を罫で節に分ける）。
-// SAFE（緑）の部品を一つも置かない。署名は紫印の「署名あり（未検証）」で、L2 / L3 や「安全」とは書かない。
-// 押印の隣には必ず意味の文を置く（ツールチップに隠さない）。
+// SkillPact tab (experimental. design doc §10.5). Compares the permissions a skill declared (SkillPact 0.8 contract) with what its code is observed to do.
+// Left: the skill list on the bench. Right: the report (one sheet divided into sections by rules).
+// Not a single SAFE (green) part. A signature is the violet stamp "signed (unverified)"; never write L2 / L3 or "safe".
+// Always place a sentence with the meaning next to a stamp (do not hide it in a tooltip).
 import { useMemo, useState, type ReactNode } from 'react';
 import { CircleDashed, GitCompare, Search } from 'lucide-react';
 import { EFFECTS, IOC, type Severity, type SkillPactAnalysis } from '@/engine';
@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input';
 const SPEC = IOC.skillpact.spec;
 const ORDER: Severity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
 
-/** 契約の状態（ZES の部分検査の結果）。L2 / L3 は判定しない。 */
+/** Contract status (result of the ZES partial checks). L2 / L3 are not evaluated. */
 function contractValue(a: SkillPactAnalysis, t: typeof tNow): { text: string; tone?: 'medium' } {
   const s = a.contract.status;
   const v = a.contract.contractVersion ?? '?';
@@ -113,7 +113,7 @@ function EffectMatrix({ a }: { a: SkillPactAnalysis }) {
           <span>{t('ui.sp.none')}</span>
         </div>
       </div>
-      {/* エフェクトの列は狭い幅に収まらないので、表だけを横スクロールさせる（ページ全体は横にスクロールさせない） */}
+      {/* The effects columns do not fit a narrow width, so only the table scrolls horizontally (the page as a whole never scrolls horizontally) */}
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[640px] table-fixed border-collapse text-[13px]">
           <thead>
@@ -174,7 +174,7 @@ function SevIcon({ level }: { level: Severity }) {
   return <Icon aria-hidden="true" strokeWidth={2.25} className="size-[13px] shrink-0" />;
 }
 
-/** 指摘の行（検出一覧と同じ溝の帯）。判定不可は破線の帯と鉛筆色（色で安心させない）。 */
+/** A finding row (the same gutter band as the findings list). Inconclusive uses a dashed band and pencil color (no reassurance by color). */
 function Remark({ level, title, children, testid }: { level: Severity | null; title: string; children: ReactNode; testid?: string }) {
   const { t } = useLang();
   return (

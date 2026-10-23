@@ -1,5 +1,5 @@
-// shadcn/ui new-york-v4 の tooltip を手で取り込み、「検疫台」に書き換えたもの（MIT。NOTICE を参照）。
-// 変更点: 墨の地に作業台色の文字、角丸 4、矢印なし、ズームなし（遅延 400ms・80ms のフェードのみ。§7）。
+// The shadcn/ui new-york-v4 tooltip, imported by hand and rewritten for the "quarantine bench" (MIT; see NOTICE).
+// Changes: bench-colored text on an ink ground, radius 4, no arrow, no zoom (400ms delay, 80ms fade only. §7).
 import type * as React from 'react';
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 import { cn } from '@/lib/utils';
@@ -30,7 +30,7 @@ function TooltipContent({ className, sideOffset = 6, ...props }: React.Component
   );
 }
 
-/** よく使う形: 子をトリガーにして、文字列のツールチップを付ける。 */
+/** The common form: make the child the trigger and attach a string tooltip. */
 function Tip({ label, side, children }: { label: React.ReactNode; side?: 'top' | 'right' | 'bottom' | 'left'; children: React.ReactElement }) {
   return (
     <Tooltip>

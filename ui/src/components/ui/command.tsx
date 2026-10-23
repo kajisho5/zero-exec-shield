@@ -1,5 +1,5 @@
-// shadcn/ui new-york-v4 の command（cmdk）を手で取り込み、「検疫台」のタブ検索用に書き換えたもの（MIT。NOTICE を参照）。
-// 変更点: 入力欄は凹みの地と縁の枠。項目は選択行の地＋左に墨の帯。CommandDialog は使わない（Popover / Sheet に入れる）。
+// The shadcn/ui new-york-v4 command (cmdk), imported by hand and rewritten for the "quarantine bench" tab search (MIT; see NOTICE).
+// Changes: the input has the well ground and an edge border. Items use the selected-row ground + an ink band on the left. CommandDialog is not used (placed in a Popover / Sheet).
 import type * as React from 'react';
 import { Command as CommandPrimitive } from 'cmdk';
 import { Search } from 'lucide-react';

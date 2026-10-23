@@ -1,8 +1,8 @@
-// CLI（zes-scan.sh）との Layer-1 パリティ。tests/expected/<name>.json（CLI の期待値）と、同じフィクスチャを
-// analyzeFiles に渡した結果を「level module path」の集合で比べる。差分は下の ALLOWED に理由付きで列挙したものだけを許す
-// （CLI か UI の片方だけを直すと、このテストが落ちる）。
-// 両方にある「level module path」については、findings 1.1 の項目（kind / subject / locators / related / evidence.kind）の
-// 値の集合も比べる。ブラウザが知りえない値の差（ALLOWED_11）だけを、項目ごとに理由付きで許す。
+// Layer-1 parity with the CLI (zes-scan.sh). Compares tests/expected/<name>.json (the CLI expected values) with the result of passing the same fixture
+// to analyzeFiles, as sets of "level module path". Only differences listed with a reason in ALLOWED below are allowed
+// (fixing only one of the CLI or the UI makes this test fail).
+// For the "level module path" present in both, the sets of values of the findings 1.1 fields (kind / subject / locators / related / evidence.kind)
+// are compared too. Only differences in values the browser cannot know (ALLOWED_11) are allowed, per field and with a reason.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +12,7 @@ import { loadFixture } from './fixtures';
 
 const EXPECTED = fileURLToPath(new URL('../../../tests/expected/', import.meta.url));
 
-/** ブラウザでは同じ結果にできない差分（意図的なもの）。キーは「level module path」（path はフィクスチャ相対、ルートは "."）。 */
+/** Differences the browser cannot reproduce (intentional). Keys are "level module path" (path relative to the fixture, the root is "."). */
 const ALLOWED: Record<string, { cliOnly: string[]; uiOnly: string[]; reason: string }> = {
   symjack: {
     cliOnly: ['CRITICAL §17 docs/vid-settings.mp4'],
@@ -35,12 +35,12 @@ type F11 = { kind?: string; subject?: unknown; locators?: unknown[]; related?: {
 const FIELDS = ['kind', 'subject', 'locators', 'related', 'evidence'] as const;
 type Field = (typeof FIELDS)[number];
 
-/** findings 1.1 の項目のうち、ブラウザでは CLI と同じ値にできないもの。keys は「level module path」（'*' は全 finding）。 */
+/** findings 1.1 fields for which the browser cannot produce the same values as the CLI. keys are "level module path" ('*' is every finding). */
 const ALLOWED_11: Record<string, { keys: string[]; fields: Field[]; reason: string }[]> = {
   symjack: [{ keys: ['*'], fields: ['evidence'], reason: 'シンボリックリンクは 0 バイトのファイルとして渡される。CLI は symlink（readlink の値のハッシュ）、UI は file' }],
   'r3-symlink-config': [{ keys: ['*'], fields: ['evidence'], reason: 'リンク名で検査した設定（.mcp.json → cfg/servers.json 等）は CLI では symlink、UI では 0 バイトの file' }],
 };
-/** ディレクトリの finding（CLI は ger-tree-v1 の tree。ブラウザはファイルの mode を知らないためツリーハッシュを作れず detail） */
+/** Findings on directories (the CLI uses the ger-tree-v1 tree. The browser does not know file modes, so it cannot build a tree hash: detail) */
 const DIR_EVIDENCE_REASON = 'ブラウザはファイルの mode を知らないため ger-tree-v1 を計算できない。CLI の tree は UI では detail';
 
 const key = (level: string, module: string, path: string | null) => `${level} ${module} ${path ?? ''}`;
@@ -63,7 +63,7 @@ describe('CLI 期待値とのパリティ（tests/expected）', () => {
       const allowed = ALLOWED[name] ?? { cliOnly: [], uiOnly: [] };
       expect({ cliOnly, uiOnly }).toEqual({ cliOnly: [...allowed.cliOnly].sort(), uiOnly: [...allowed.uiOnly].sort() });
 
-      // findings 1.1 の項目（両方にある key ごとに、値の集合を比べる）
+      // findings 1.1 fields (for each key present in both, compare the sets of values)
       const exp11 = exp.findings as (typeof exp.findings[number] & F11)[];
       const relPath = (p: string) => rel(p) ?? p;
       const ui11 = r.findings.map((f) => ({ ...f, path: rel(f.path), related: f.related?.map((x) => ({ relation: x.relation, path: relPath(x.path) })), evidence: f.evidence ? { kind: f.evidence.kind } : undefined }));

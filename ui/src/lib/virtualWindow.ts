@@ -1,6 +1,6 @@
-// 固定高の仮想スクロールで描く行の範囲（検出一覧の表とカード型の行で共用）。
-/** n 行・1 行 row px・表示領域の最大 maxHeight px で、スクロール位置 top のときに描く [start, end) と領域の高さ。
- *  top は行数が減った直後や領域を付け直した直後に古い値のことがあるので、末尾（n × row − height）に収めてから使う。 */
+// The range of rows drawn by fixed-height virtual scrolling (shared by the findings table and the card-style rows).
+/** For n rows, row px per row and a maximum view height of maxHeight px: the [start, end) to draw at scroll position top, and the height of the area.
+ *  top may be stale right after the row count drops or the area is reattached, so it is clamped to the end (n × row − height) before use. */
 export function virtualWindow(n: number, row: number, maxHeight: number, top: number) {
   const height = Math.min(Math.max(n, 1) * row, maxHeight);
   const t = Math.min(Math.max(0, top), Math.max(0, n * row - height));

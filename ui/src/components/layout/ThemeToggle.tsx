@@ -1,4 +1,4 @@
-// テーマ切替: ghost のアイコンボタン＋メニュー（ダーク / ライト / システムに合わせる）。設計書 §5.4。
+// Theme switch: a ghost icon button + menu (dark / light / match system). design doc §5.4.
 import { Moon, Sun } from 'lucide-react';
 import { useTheme, type ThemePref } from '@/hooks/useTheme';
 import { useLang } from '@/i18n';

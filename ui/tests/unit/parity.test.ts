@@ -1,4 +1,4 @@
-// CLI（zes-scan.sh）を基準とした UI 判定の差分の回帰テスト。入力はインラインの FileInput で作る（リポジトリのフィクスチャは CLI と共有のため追加しない）。
+// Regression tests for differences of the UI evaluation against the CLI (zes-scan.sh). Input is built as inline FileInput (no repository fixtures are added, since they are shared with the CLI).
 import { describe, expect, it } from 'vitest';
 import { analyzeFiles } from '../../src/engine';
 import type { FileInput } from '../../src/engine/types';

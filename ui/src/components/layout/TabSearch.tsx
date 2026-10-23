@@ -1,6 +1,6 @@
-// タブ検索（設計書 §10.2、§16-4）。≥640 は Popover＋Command、<640 は下からのシート＋Command。
-// 絞り込みは cmdk のあいまい検索を使わず、NFKC＋小文字化した部分一致（表示名・ID・別名・§番号・キャンペーン）。
-// IME 変換中の Enter は cmdk が無視する。
+// Tab search (design doc §10.2, §16-4). ≥640 is Popover + Command, <640 is a bottom sheet + Command.
+// Filtering does not use the cmdk fuzzy search but a substring match after NFKC + lowercasing (display name, ID, aliases, § number, campaign).
+// Enter during IME composition is ignored by cmdk.
 import { useMemo, useRef, useState } from 'react';
 import { Check, Search } from 'lucide-react';
 import { translate, useLang } from '@/i18n';
@@ -74,7 +74,7 @@ function TabSearchList({ active, counts, onPick, touch }: { active: TabId; count
 export function TabSearch({ active, counts, onPick, mobile }: { active: TabId; counts: Record<TabId, TabCount>; onPick(id: TabId): TabId | void; mobile: boolean }) {
   const [open, setOpen] = useState(false);
   const { t } = useLang();
-  // 選んだときはタブにフォーカスを移す（閉じたときの既定はトリガーに戻す）
+  // On selection, move focus to the tab (on close the default is to return to the trigger)
   const picked = useRef<TabId | null>(null);
   const pick = (id: TabId) => { picked.current = id; setOpen(false); onPick(id); };
   const focusPicked = (e: Event) => {

@@ -1,9 +1,9 @@
-// §49 SkillPact 契約（実験的）— CLI check_skillpact と同じ規則をブラウザで再現する。
-// AI エージェントのスキルが「宣言した権限」（skill.contract.json、SkillPact 0.8 形式
-// https://github.com/kajisho5/skillpact）と「コードが実際にしていること」（静的解析）が一致するかを確かめる。
-// - 契約・ポリシーは JSON として読むのみ。スキル本体・テストは実行しない。署名は検証しない（signed = 署名欄あり・未検証）
-// - level は自己申告を使わず、ZES の部分検査に合格した場合のみ 'L1'。L2/L3 は ZES では判定しない（L3 でも安全を意味しない）
-// - 契約のないスキルは比較対象外（影響の大きい効果が見える場合のみ参考 INFO）。契約付きスキル配下の SKILL.md は報告しない
+// §49 SkillPact contracts (experimental) — reproduces the rules of CLI check_skillpact in the browser.
+// Checks whether the declared permissions of an AI agent skill (skill.contract.json, SkillPact 0.8 format
+// https://github.com/kajisho5/skillpact) match what its code actually does (static analysis).
+// - Contracts and policies are only read as JSON. The skill itself and its tests are never run. Signatures are not verified (signed = signature field present, unverified)
+// - level does not use the self-declaration; 'L1' only if the ZES partial checks pass. ZES does not evaluate L2/L3 (even L3 does not mean safe)
+// - Skills without a contract are not compared (reference INFO only when high-impact effects are visible). SKILL.md under a skill with a contract is not reported
 import { push, type RuleCtx } from './context';
 import type { DiffAnomaly, Effect, FileInput, RuleResult, Severity, SkillPactAnalysis, SkillPactDivergence, SkillPactFindingField } from './types';
 import { SEVERITY_RANK } from './types';
@@ -18,8 +18,8 @@ const strs = (v: unknown): string[] => arr(v).filter(isStr);
 const HIGH_EFFECTS: Effect[] = ['exec', 'network', 'spend', 'send'];
 const CONTRACT = 'skill.contract.json';
 
-// ---------------------------------------------------------------- I-JSON（spec §4.1）
-/** 重複キー・深さ 64 超・±(2^53−1) 外の数値・孤立サロゲート・不正 UTF-8（U+FFFD）を検出する。問題なければ null。 */
+// ---------------------------------------------------------------- I-JSON (spec §4.1)
+/** Detects duplicate keys, depth over 64, numbers outside ±(2^53−1), lone surrogates and invalid UTF-8 (U+FFFD). null if there is no problem. */
 export function ijsonProblem(text: string): string | null {
   const s = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   let value: unknown;
@@ -90,7 +90,7 @@ export function ijsonProblem(text: string): string | null {
   return problem;
 }
 
-// ---------------------------------------------------------------- globs（spec §6.1。参照実装 core._glob_re と同じ）
+// ---------------------------------------------------------------- globs (spec §6.1; same as core._glob_re of the reference implementation)
 const reEsc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export function globRe(p: string): RegExp {
   const parts = p.split('/');
@@ -161,7 +161,7 @@ const scopes = (c: Obj, e: string): string[] => {
   return isObj(p) ? strs(p['scope']) : [];
 };
 
-// ---------------------------------------------------------------- 契約の部分検査（CLI SP_ANALYZE と同じ）
+// ---------------------------------------------------------------- partial checks of contracts (same as CLI SP_ANALYZE)
 interface Analysis {
   vstatus: 'ok' | 'unsupported'; cv: string | null; name: string | null; sver: string | null; errors: string[]; permsOk: boolean;
   declared: Effect[]; signed: boolean; authors: string[]; signers: string[]; level: string | null; divergence: Omit<SkillPactDivergence, 'level'>[];
@@ -305,7 +305,7 @@ function analyze(c: Obj, R: RuleCtx['ioc']['skillpact'], files: string[], hashes
   };
 }
 
-// ---------------------------------------------------------------- 静的解析（CLI sp_extract / sp_observed と同じ）
+// ---------------------------------------------------------------- static analysis (same as CLI sp_extract / sp_observed)
 function frontmatterName(text: string): string {
   const lines = text.replace(/^﻿/, '').split(/\r?\n/);
   if (!/^---\s*$/.test(lines[0] ?? '')) return '';
@@ -320,7 +320,7 @@ function frontmatterName(text: string): string {
   return '';
 }
 
-/** 契約の entry.cli / tests.cases[].run / tests.setup が $SKILL_DIR/… で参照するファイル（スキル相対。CLI sp_must と同じ） */
+/** Files (relative to the skill) that entry.cli / tests.cases[].run / tests.setup of the contract reference via $SKILL_DIR/… (same as CLI sp_must) */
 function mustRefs(text: string | null | undefined): Set<string> {
   const out = new Set<string>();
   if (!text) return out;
@@ -362,13 +362,13 @@ function observe(ctx: RuleCtx, files: FileInput[], policyPaths: Set<string>, pre
         if (infence) code += l + '\n';
       }
     } else if (must.has(f.relPath.slice(prefix.length)) || R.script_extensions.includes(f.name.split('.').pop() ?? '') || f.text.startsWith('#!')) {
-      // 契約が実行すると宣言したファイルは拡張子・シバンの有無に依らずスクリプトとして扱う
+      // Files the contract declares it runs are treated as scripts regardless of extension or shebang
       shell = true;
       code += f.text + '\n';
     } else if (/\.(json|ya?ml|toml|ini|cfg)$/.test(f.name)) {
       code += f.text + '\n';
     } else if (!f.text.slice(0, 8192).includes('\0')) {
-      // 拡張子から種別が分からないテキストもコードスコープに含める（実行の効果は付けない。CLI と同じ）
+      // Text whose type cannot be told from the extension is included in the code scope too (without execution effects; same as the CLI)
       code += f.text + '\n';
     }
   }
@@ -385,7 +385,7 @@ function observe(ctx: RuleCtx, files: FileInput[], policyPaths: Set<string>, pre
   return o;
 }
 
-// ---------------------------------------------------------------- ポリシー（構造検査のみ）
+// ---------------------------------------------------------------- policies (structural checks only)
 function policyProblem(p: Obj, R: RuleCtx['ioc']['skillpact']): string {
   const bad: string[] = [];
   const extra = Object.keys(p).filter((k) => !R.policy_keys.includes(k));
@@ -404,7 +404,7 @@ function policyProblem(p: Obj, R: RuleCtx['ioc']['skillpact']): string {
   return [...new Set(bad)].sort().join(', ');
 }
 
-// ---------------------------------------------------------------- 本体
+// ---------------------------------------------------------------- main
 /** Divergence codes (the CLI's s49.divergence.*): [unsigned, signed contract]. ZES does not verify signatures and a
  *  signature never changes the severity; a signed contract only gets the sentence that says so. */
 const DIVERGENCE_CODES: Record<'exec' | 'network' | 'spend' | 'send' | 'read_sensitive_none' | 'read_sensitive_scoped' | 'write_durable_none' | 'write_durable_scoped', [FCode, FCode]> = {
@@ -433,7 +433,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
   const R = ctx.ioc.skillpact;
   const EFF = R.effects;
 
-  // ポリシー（policy_version と defaults を持つ JSON。ファイル名は問わない）
+  // Policies (JSON with policy_version and defaults; any file name)
   const policyPaths = new Set<string>();
   for (const f of ctx.files) {
     if (!f.name.endsWith('.json') || f.name === CONTRACT || f.text == null || !f.text.includes('"policy_version"')) continue;
@@ -450,7 +450,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
   const hasContract = (d: string) => ctx.byPath.has(d ? `${d}/${CONTRACT}` : CONTRACT);
   const under = (d: string) => { let x = d; while (x !== '') { x = dirname(x); if (hasContract(x)) return true; } return false; };
   const skillDirSet = new Set(dirs);
-  // 前版比較用の索引（投入されたすべての契約。ブラウザはレジストリやキャッシュを取得しない）
+  // Index for the previous-version comparison (all loaded contracts; the browser never fetches registries or caches)
   const index = ctx.files.filter((f) => f.name === CONTRACT && f.text != null).flatMap((f) => {
     try {
       const c = JSON.parse(f.text!) as unknown;
@@ -515,7 +515,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
             if (k === null) continue;
             hits.push({ level: d.level, campaign: 'skillpact-divergence', path: dir || '.', ruleId: `s49-divergence:${d.effect}`, code: DIVERGENCE_CODES[k][r.signed ? 1 : 0] });
           }
-          // 前版との差分（spec §17）
+          // Difference from the previous version (spec §17)
           const cv = semv(r.sver);
           if (r.permsOk && r.name && cv) {
             const prev = index.filter((x) => x.name === r.name && x.path !== cfile.relPath && semv(x.ver) && cmpv(semv(x.ver)!, cv) < 0)
@@ -545,7 +545,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
         }
       }
     }
-    // 検出ルール表
+    // Detection rule table
     const noCompare = !cfile || a.contract.status === 'unparseable' || a.contract.status === 'unsupported';
     a.results = RULE_TITLES.map(([title, level], i): RuleResult => {
       const n = i + 1;

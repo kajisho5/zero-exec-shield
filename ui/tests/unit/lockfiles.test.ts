@@ -1,4 +1,4 @@
-// pnpm-lock.yaml / yarn.lock の解析で、汚染パッケージを実名・実バージョンで拾えることの回帰テスト。
+// Regression tests that parsing pnpm-lock.yaml / yarn.lock picks up poisoned packages by their real name and real version.
 import { describe, expect, it } from 'vitest';
 import { analyzeFiles } from '../../src/engine';
 import type { FileInput } from '../../src/engine/types';

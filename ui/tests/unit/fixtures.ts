@@ -1,5 +1,5 @@
-// リポジトリの tests/fixtures（CLI と共通）を、ブラウザが渡すのと同じ FileInput 形式で読み込む。
-// シンボリックリンクはブラウザがリンク先を取得できない状況を再現するため 0 バイトのファイルとして扱う。
+// Loads tests/fixtures of the repository (shared with the CLI) in the same FileInput form the browser passes.
+// Symlinks are treated as 0-byte files to reproduce the situation where the browser cannot fetch the link target.
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
