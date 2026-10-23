@@ -199,7 +199,7 @@ describe('ZES 5.2.2 / 5.2.3 の検知データ（CLI と同じフィクスチャ
     (JSON.parse(readFileSync(new URL(`../../../tests/expected/${name}.json`, import.meta.url), 'utf8')) as { findings: { level: string; module: string; path: string }[] }).findings
       .filter((f) => modules.includes(f.module) && f.level !== 'INFO').map((f) => `${f.level} ${f.module} ${name}/${f.path}`).sort();
   const MODS = ['§3', '§4', '§6', '§15', '§16', '§22', '§38'];
-  const ui = (r: Awaited<ReturnType<typeof analyzeFiles>>) => [...new Set(r.findings.filter((f) => MODS.includes(f.module)).map((f) => `${f.level} ${f.module} ${f.path ?? ''}`))].sort();
+  const ui = (r: Awaited<ReturnType<typeof analyzeFiles>>) => [...new Set(r.findings.filter((f) => MODS.includes(f.module) && f.level !== 'INFO').map((f) => `${f.level} ${f.module} ${f.path ?? ''}`))].sort();
   it('intel-2026q3: GitLab / PHP2Shell / eMudhra / Jenkins / Gitea / 脆弱版 / 悪性パッケージ / Actions', async () => {
     const r = await analyzeFiles(loadFixture('intel-2026q3'));
     expect(ui(r)).toEqual([...new Set(cli('intel-2026q3', MODS))].sort());

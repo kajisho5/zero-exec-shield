@@ -5,6 +5,7 @@ import { actionsRules, extensionRules } from './rules/ciAndExtensions';
 import { emudhraRules, infraRules, intelRules } from './rules/intel';
 import { buildHookRules, credentialRules, homeRules, ebpfRules, modelSupplyRules, persistenceRules, sigstoreRules } from './rules/codeAndHost';
 import { analyzePasteText } from './rules/network';
+import { phpRules } from './rules/php';
 import { networkRules } from './rules/network';
 import { blastRadius, filenameRules, packageRules } from './rules/supplyChain';
 import { skillpactRules } from './skillpact';
@@ -45,6 +46,7 @@ export async function analyzeFiles(input: FileInput[], ioc: IocDb = IOC): Promis
   sigstoreRules(ctx);
   credentialRules(ctx);
   infraRules(ctx);
+  phpRules(ctx);
   emudhraRules(ctx);
   intelRules(ctx);
   blastRadius(ctx);

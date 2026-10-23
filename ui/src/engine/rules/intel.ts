@@ -38,15 +38,16 @@ function imageVersions(ctx: RuleCtx, pattern: string): { ver: string; path: stri
 const cveLevel = (c: InfraCve): Severity => sev(c.severity, (c.cvss ?? 0) >= 9 || c.kev ? 'CRITICAL' : 'HIGH');
 
 export function infraRules(ctx: RuleCtx): void {
-  ctx.checks.add('s3-gitlab').add('s4-php2shell').add('s16-infra');
+  ctx.checks.add('s3-gitlab').add('s16-infra');
   for (const inf of ctx.ioc.infrastructures ?? []) {
     const pats = inf.image_patterns ?? [];
-    if (!pats.length) continue;
-    // GitLab は全 CVE（§3）、PHP は PHP2Shell（§4）、その他は generic 製品と追記 CVE（§16）
-    const cves = inf.cves.filter((c) => (c.fixed ?? []).length && (inf.id === 'gitlab' || (inf.id === 'php' ? c.id === 'CVE-2026-109618' : inf.generic || c.generic)));
+    // PHP（§4 PHP2Shell）は php.ts が CLI check_s4 と同じ表（php2shell_distro）で判定する
+    if (!pats.length || inf.id === 'php') continue;
+    // GitLab は全 CVE（§3）、その他は generic 製品と追記 CVE（§16）
+    const cves = inf.cves.filter((c) => (c.fixed ?? []).length && (inf.id === 'gitlab' || inf.generic || c.generic));
     if (!cves.length) continue;
-    const module = inf.id === 'gitlab' ? '§3' : inf.id === 'php' ? '§4' : '§16';
-    const rule = inf.id === 'gitlab' ? 's3-gitlab' : inf.id === 'php' ? 's4-php2shell' : 's16-infra';
+    const module = inf.id === 'gitlab' ? '§3' : '§16';
+    const rule = inf.id === 'gitlab' ? 's3-gitlab' : 's16-infra';
     for (const { ver, path, sha } of imageVersions(ctx, pats.join('|'))) {
       const v = ver.replace(/^v/, '');
       if (!NUM.test(v)) {
@@ -58,8 +59,8 @@ export function infraRules(ctx: RuleCtx): void {
         const fixed = c.fixed ?? [];
         if (!versionBranchVulnerable(v, fixed)) continue;
         const level: Severity = module === '§16' ? cveLevel(c) : 'CRITICAL';
-        const name = inf.id === 'gitlab' ? 'GitLab' : inf.id === 'php' ? 'PHP' : inf.id;
-        const what = inf.id === 'php' ? 'PHP2Shell（CVE-2026-109618/109619、認証不要 RCE）' : `${c.id}${c.cvss ? `（CVSS ${c.cvss}）` : ''}`;
+        const name = inf.id === 'gitlab' ? 'GitLab' : inf.id;
+        const what = `${c.id}${c.cvss ? `（CVSS ${c.cvss}）` : ''}`;
         push(ctx, { level, module, campaign: null, path, detail: `${name} ${v} は ${what}の影響範囲（修正版: ${fixed.join(' ')}）`, ruleId: `${rule}:${inf.id}:${c.id}:${v}`, evidenceSha: sha });
       }
     }
