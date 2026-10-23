@@ -1,0 +1,17 @@
+# ZES test fixture: yarn Berry の npm: エイリアス（resolution の実パッケージ名で照合）
+__metadata:
+  version: 8
+  cacheKey: 10
+
+"kv@npm:keyv@6.0.0":
+  version: 6.0.0
+  resolution: "keyv@npm:6.0.0"
+  checksum: 10/0000
+  languageName: node
+  linkType: hard
+
+"cache-manager@npm:^7.2.0":
+  version: 7.2.10
+  resolution: "cache-manager@npm:7.2.10"
+  languageName: node
+  linkType: hard

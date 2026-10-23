@@ -63,7 +63,7 @@ chmod +x zes-scan.sh
 | `--full` | §1〜49 |
 | `--worm` | §15/18/25/45 のみ |
 | `--skillpact` | §49 のみ |
-| `--url <URL>` | §4 の非侵襲 URL チェック（`curl -sI` で `X-Powered-By` ヘッダのみ取得。http/https のみ受理） |
+| `--url <URL>` | §4 の非侵襲 URL チェック（`HEAD` でヘッダのみ取得し、405/501 のときだけ `GET`。リダイレクトは追わない。`Server` / `X-Powered-By` の `PHP/x.y.z` を PHP2Shell の修正版と照合し、該当すれば HIGH「ヘッダ申告版で潜在的に脆弱」。http/https のみ受理） |
 | `--json` | findings.json を標準出力へ（人間向けログは標準エラーへ） |
 | `--skillpact-cache <dir>` | §49 前版比較用の SkillPact 契約の置き場所（ローカルのみ） |
 
@@ -73,9 +73,18 @@ chmod +x zes-scan.sh
 |---|---|
 | `ZES_IOC` | ioc.json のパス（既定 `rules/ioc.json`） |
 | `ZES_HOME` | ホーム配下を対象とする検査（§10〜§14 等）の基点（既定 `$HOME`） |
-| `ZES_HOST_CHECKS=0` | ホスト状態検査（ps / lsof / /proc / uname / docker version / systemctl / mount 等）を無効化 |
+| `ZES_HOST_CHECKS=0` | ホスト状態検査（ps / lsof / /proc / uname / docker --version / systemctl / mount 等）を無効化 |
 | `ZES_OFFLINE=1` | 外向き通信（§4 `--url`、§6 eMudhra 接続試験）を無効化（`errors[]` に `skipped_offline`） |
 | `ZES_SKILLPACT_CACHE` | `--skillpact-cache` と同じ |
+| `ZES_GIT_TIMEOUT` | §38/§46 の git 呼び出しの打ち切り秒数（既定 60。超過は `errors[]` に `git_timeout`） |
+
+### 出力の文字列（findings.json / 人間向けログ）
+
+- `path` / `detail` / `errors[].reason` は常に valid な UTF-8 JSON です。制御文字（U+0000〜U+001F・U+007F）と C1 制御文字（U+0080〜U+009F）は `\u00XX` でエスケープします（デコードすれば元の文字に戻ります）。
+- ファイル名に不正な UTF-8 バイトがある場合、そのバイトを 1 バイトずつ `\xHH`（4 文字のテキスト）に置き換えた値を `path` に出力し、`errors[]` に `core` / `non_utf8_path:<置換後のパス>` を記録します（実際のファイル名とは異なることを示すため）。
+- `findings[].id` は、出力した（JSON をデコードした）`module|campaign|path|detail` の SHA-256 です（`campaign` / `path` が null のときは空文字列）。
+- 人間向けログでは制御文字を `\xHH`、C1 制御文字を `\u00HH` と表示し、端末エスケープシーケンスをそのまま出力しません。
+- 検査ルート内の FIFO・ソケット・デバイスファイルは開かず、`errors[]` に `special_file:<パス>` を記録します。
 
 ### 終了コード
 
@@ -262,7 +271,7 @@ SkillPact © SEVENTHWELL (shogo kajiyama), https://github.com/kajisho5/skillpact
   - `runOn: folderOpen` → §7 / エージェントフック（`.claude/settings.json` の hooks）→ §17
   - `/etc/ld.so.preload`・シェル設定の `LD_PRELOAD` → §31 / ロード系スクリプト・eBPF・カーネル taint → §40
   - `noatime` → §13（§35 は参照のみ）
-  - `docker cp` の使用・TeamCity・Artifactory → §16 / `docker version`・`uname -r`・特権コンテナ → §23
+  - `docker cp` の使用・TeamCity・Artifactory → §16 / `docker --version`・`uname -r`・特権コンテナ → §23
   - `trust_remote_code=True` → §36 / pickle 系拡張子・`weights_only=False`・`--extra-index-url` → §32
   - ブラウザ拡張の権限・`update_url` → §24 / 既知名・バージョン間の権限昇格（所有権移転）→ §42
   - Bun 取得: `package.json` 等 → §15 / JS・Python コード → §45

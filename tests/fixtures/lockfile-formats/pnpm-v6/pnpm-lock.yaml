@@ -1,0 +1,8 @@
+# ZES test fixture: pnpm lockfileVersion 6.0（/name@version(peer)）
+lockfileVersion: '6.0'
+
+packages:
+
+  /cacheable@2.5.1(react@18.2.0):
+    resolution: {integrity: sha512-AAAA}
+    dev: false

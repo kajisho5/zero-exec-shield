@@ -1,0 +1,3 @@
+# ZES test fixture: 閉じていない見出し
+[mcp_servers.x
+command = "bash"

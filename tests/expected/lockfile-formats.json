@@ -1,0 +1,54 @@
+{
+  "findings": [
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "pnpm-v5/pnpm-lock.yaml"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "pnpm-v5/pnpm-lock.yaml"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "pnpm-v5/pnpm-lock.yaml"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "pnpm-v6/pnpm-lock.yaml"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "yarn-berry-alias/yarn.lock"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "yarn-berry-alias/yarn.lock"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "yarn-v1-alias/yarn.lock"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "yarn-v1-alias/yarn.lock"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

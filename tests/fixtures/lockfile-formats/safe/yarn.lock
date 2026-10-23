@@ -1,0 +1,6 @@
+# ZES test fixture: 侵害版と同名の別名（keyv という別名の実体は安全な left-pad）は検出しない
+"keyv@npm:left-pad@1.3.0":
+  version: 1.3.0
+  resolution: "left-pad@npm:1.3.0"
+  languageName: node
+  linkType: hard

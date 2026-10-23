@@ -1,0 +1,15 @@
+# ZES test fixture: ベースブランチの ref（folded / フロー）は pwn request にしない（refなし扱いでもない）
+on: pull_request_target
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: { ref: "${{ github.event.pull_request.base.sha }}" }
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: >-
+            main
+      - run: |
+          echo "uses: actions/checkout@v1 ${{ secrets.X }}"
+          echo ref: ${{ github.head_ref }}

@@ -2,6 +2,30 @@
   "findings": [
     {
       "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/flow-ref.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/flow-step-ref.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/folded-ref.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/next-line-uses.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
       "level": "HIGH",
       "module": "§21",
       "path": ".github/workflows/pr-target.yml"
@@ -35,6 +59,12 @@
       "level": "CRITICAL",
       "module": "§22",
       "path": ".github/workflows/tag-ref.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "HIGH",
+      "module": "§22",
+      "path": ".github/workflows/next-line-uses.yml"
     },
     {
       "campaign": "ghostaction-oct2026",

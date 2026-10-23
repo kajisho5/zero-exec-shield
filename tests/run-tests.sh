@@ -202,11 +202,128 @@ n="$(ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$TMP/outer-root/zes/
 mkdir -p "$TMP/badmcp" && printf '{ "mcpServers": { "x": { "command": "bash" ' >"$TMP/badmcp/.mcp.json"
 run_scan "$TMP/badmcp" quick "$FIX/_home" | jq -e '[.errors[] | select(.module == "§17" and (.reason | startswith("mcp_config_parse_failed:")))] | length == 1' >/dev/null \
   && ok "不正な MCP 設定を errors[] に記録（0件扱いしない）" || ng "不正な MCP 設定が errors[] に記録されていません"
+# 解釈できない Codex TOML（閉じていない見出し・command 無し・command が配列）は errors[] に記録する（fail-closed）
+n="$(run_scan "$FIX/codex-toml-broken" quick "$FIX/_home" | jq '[.errors[] | select(.module == "§17" and (.reason | startswith("codex_toml_unparsed:")))] | length')"
+[ "$n" = "3" ] && ok "解釈できない Codex TOML を errors[] に記録（3 件）" || ng "解釈できない Codex TOML の errors[] が 3 件ではありません（${n:-?} 件）"
 # intel の jq フィルタが失敗した場合は errors[] に記録する（ホスト IoC 等が黙って無効化されない）
 jq '.intel.host = [{"campaign": "zes-test", "paths": 5}]' "$IOC" >"$TMP/ioc-broken-intel.json"
 mkdir -p "$TMP/empty-root"
 ZES_IOC="$TMP/ioc-broken-intel.json" run_scan "$TMP/empty-root" standard "$FIX/_home" | jq -e '[.errors[] | select(.module == "§30" and (.reason | startswith("intel_jq_failed:")))] | length >= 1' >/dev/null \
   && ok "intel の jq 失敗を errors[] に記録（fail-closed）" || ng "intel の jq 失敗が errors[] に記録されていません"
+
+# ホスト検査を有効にしても findings[].path は絶対パスか null（"auditd" / "crontab:user" 等の疑似パスを出さない）
+mkdir -p "$TMP/host-root" "$TMP/host-home"
+bad="$(ZES_HOST_CHECKS=1 ZES_OFFLINE=1 ZES_HOME="$TMP/host-home" "$SCAN" --full --root "$TMP/host-root" --json 2>/dev/null \
+  | jq -r '[.findings[] | select(.path != null and (.path | startswith("/") | not)) | .path] | join(",")' 2>/dev/null)"
+[ -z "$bad" ] && ok "ホスト検査の findings[].path が絶対パスか null" || ng "ホスト検査で絶対パスでない path: $bad"
+
+# intel.host の絶対パスはホストの実パスのみ照合（ZES_HOST_CHECKS=1 のときだけ。検査ルート内の同名サフィックスは見ない）
+mkdir -p "$TMP/hostioc" "$TMP/hostioc-root$TMP/hostioc" && : >"$TMP/hostioc/marker" && : >"$TMP/hostioc-root$TMP/hostioc/marker"
+jq --arg p "$TMP/hostioc/marker" '.intel.host = [{"campaign": "zes-test-host", "severity": "HIGH", "paths": [$p]}]' "$IOC" >"$TMP/ioc-hostpath.json"
+on="$(ZES_IOC="$TMP/ioc-hostpath.json" ZES_HOST_CHECKS=1 ZES_OFFLINE=1 ZES_HOME="$TMP/host-home" "$SCAN" --standard --root "$TMP/hostioc-root" --json 2>/dev/null | jq -r '[.findings[] | select(.campaign == "zes-test-host") | .path] | join(",")')"
+off="$(ZES_IOC="$TMP/ioc-hostpath.json" run_scan "$TMP/hostioc-root" standard "$TMP/host-home" | jq -r '[.findings[] | select(.campaign == "zes-test-host") | .path] | join(",")')"
+[ "$on" = "$TMP/hostioc/marker" ] && [ -z "$off" ] && ok "intel.host の絶対パスはホスト検査時の実パスのみ照合" || ng "intel.host の絶対パスの照合先が不正（on=$on off=$off）"
+
+# 検査対象 .git/config の include.path（FIFO）で走査が停止しない / git が停止したら timeout で errors[] に記録
+if command -v git >/dev/null 2>&1 && command -v mkfifo >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  for k in inc pr; do
+    ( export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+      mkdir -p "$TMP/git-$k" && cd "$TMP/git-$k" && git init -q . && echo inert >README && git add README \
+        && git -c user.name=a -c user.email=a@example.invalid commit -q -m init ) >/dev/null 2>&1
+  done
+  mkfifo "$TMP/git-inc/.git/hang.fifo" && printf '[include]\n\tpath = hang.fifo\n[includeIf "gitdir:/"]\n\tpath = hang.fifo\n' >>"$TMP/git-inc/.git/config"
+  out="$(ZES_GIT_TIMEOUT=10 timeout 120 env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --full --root "$TMP/git-inc" --json 2>/dev/null)"
+  printf '%s' "$out" | jq -e '([.findings[] | select(.module == "§46" and (.detail | test("1 コミット中")))] | length == 1) and ([.errors[] | select(.reason | test("^git_"))] | length == 0)' >/dev/null 2>&1 \
+    && ok "検査対象 .git/config の include.path（FIFO）を読まずに §46 を完走" || ng "include.path（FIFO）で走査が停止または §46 が失敗"
+  mkfifo "$TMP/git-pr/.git/packed-refs"
+  out="$(ZES_GIT_TIMEOUT=2 timeout 120 env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --full --root "$TMP/git-pr" --json 2>/dev/null)"
+  printf '%s' "$out" | jq -e '[.errors[] | select(.module == "§46" and .reason == "git_timeout")] | length >= 1' >/dev/null 2>&1 \
+    && ok "git が停止した場合は timeout で打ち切り errors[] に git_timeout を記録" || ng "git の停止が errors[] に記録されていません"
+else
+  printf '  SKIP git/mkfifo/timeout が無いため .git の FIFO チェックを省略\n'
+fi
+
+# ファイル名の制御文字・不正 UTF-8: JSON は valid UTF-8、id は出力した値から再計算可能、人間向けログに ESC を出さない
+mkdir -p "$TMP/names"
+for nm in $'esc\033[31m' $'bad\377\376' $'c1\302\233' 'back\x41slash' $'tab\tname'; do
+  mkdir -p "$TMP/names/$nm" && printf '// ZES test fixture\nconst p = ".claude/";\n' >"$TMP/names/$nm/setup.mjs"
+done
+run_scan "$TMP/names" quick "$FIX/_home" >"$TMP/names.json"; cp "$TMP/stderr.txt" "$TMP/names.log"
+if python3 -I -c 'pass' 2>/dev/null; then
+  if out="$(python3 -I - "$TMP/names.json" <<'PY' 2>&1
+import hashlib, json, sys
+raw = open(sys.argv[1], "rb").read()
+d = json.loads(raw.decode("utf-8"))  # strict UTF-8
+bad = [f["path"] for f in d["findings"] if f["id"] != "sha256:" + hashlib.sha256("|".join([f["module"], f["campaign"] or "", f["path"] or "", f["detail"]]).encode()).hexdigest()]
+n = len([f for f in d["findings"] if f["module"] == "§17"])
+nu = len([e for e in d["errors"] if e["module"] == "core" and e["reason"].startswith("non_utf8_path:") and "\\xff\\xfe" in e["reason"]])
+print(f"mismatch={bad} s17={n} non_utf8={nu}")
+sys.exit(0 if not bad and n == 5 and nu == 1 else 1)
+PY
+)"; then ok "制御文字・不正 UTF-8 のパス: valid UTF-8 JSON・id 再計算一致・errors[] に non_utf8_path"
+  else ng "制御文字・不正 UTF-8 のパスの出力が不正" "$out"; fi
+else
+  printf '  SKIP 不正 UTF-8 パスの JSON 検証（python3 が無い）\n'
+fi
+if grep -q $'\033' "$TMP/names.log"; then ng "人間向けログに ESC（端末エスケープ）がそのまま出力されています"
+else ok "人間向けログの制御文字を \\xHH で表示（端末エスケープ注入なし）"; fi
+# ZES_HOME は実パスへ正規化（相対パス・末尾スラッシュ・存在しないディレクトリ）
+bad="$(cd "$FIX" && ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="_home/" "$SCAN" --quick --root "$TMP/empty-root" --json 2>/dev/null \
+  | jq -r --arg h "$FIX/_home/" '[.findings[] | select(.path != null) | select((.path | startswith($h) | not) or (.path | contains("//"))) | .path] | join(",")')"
+n="$(cd "$FIX" && ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="_home/" "$SCAN" --quick --root "$TMP/empty-root" --json 2>/dev/null | jq '.findings | length')"
+[ -z "$bad" ] && [ "${n:-0}" -gt 0 ] && ok "相対・末尾スラッシュ付き ZES_HOME を実パスに正規化" || ng "ZES_HOME が正規化されていません: ${bad:-findings=$n}"
+ZES_HOME="$TMP/nonexistent-home" "$SCAN" --quick --root "$TMP/empty-root" >/dev/null 2>&1; [ $? -eq 64 ] && ok "存在しない ZES_HOME を拒否" || ng "存在しない ZES_HOME を受理"
+
+# 検査ルート内の FIFO・ソケット等は開かずに errors[] に special_file として記録する（黙って捨てない）
+if command -v mkfifo >/dev/null 2>&1; then
+  mkdir -p "$TMP/special" && mkfifo "$TMP/special/pipe.fifo"
+  run_scan "$TMP/special" quick "$FIX/_home" | jq -e --arg p "special_file:$TMP/special/pipe.fifo" '[.errors[] | select(.module == "core" and .reason == $p)] | length == 1' >/dev/null 2>&1 \
+    && ok "検査ルート内の FIFO を errors[] に special_file として記録" || ng "検査ルート内の FIFO が errors[] に記録されていません"
+fi
+
+# §4 --url: Server と X-Powered-By の PHP/x.y.z を判定、HEAD が 405 のときだけ GET、リダイレクトは追わない
+#   ローカルの HTTP サーバー（python3、テスト専用）に対して実行する
+if python3 -I -c 'import http.server' 2>/dev/null && command -v curl >/dev/null 2>&1; then
+  python3 -I - "$TMP/http-port" "$TMP/http-log" <<'PY' >/dev/null 2>&1 &
+import http.server, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def reply(self, body):
+        open(sys.argv[2], "a").write(f"{self.command} {self.path}\n")
+        if self.path == "/redir":
+            self.send_response(301); self.send_header("Location", "/vuln"); self.end_headers(); return
+        if self.command == "HEAD" and self.path == "/":
+            self.send_response(405); self.end_headers(); return
+        self.send_response(200)
+        self.send_header("Server", "Apache/2.4.58 (Ubuntu) PHP/8.3.10")
+        self.send_header("X-Powered-By", "PHP/8.5.12")
+        self.end_headers()
+        if body: self.wfile.write(b"zes\n")
+    def do_HEAD(self): self.reply(False)
+    def do_GET(self): self.reply(True)
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1], "w").write(str(s.server_port))
+s.timeout = 30
+for _ in range(6): s.handle_request()
+PY
+  hpid=$!
+  for _ in $(seq 1 50); do [ -s "$TMP/http-port" ] && break; sleep 0.1; done
+  port="$(cat "$TMP/http-port" 2>/dev/null)"
+  urlscan() { env -u http_proxy -u HTTP_PROXY -u https_proxy -u HTTPS_PROXY -u ALL_PROXY -u all_proxy NO_PROXY='*' \
+    ZES_HOST_CHECKS=0 ZES_OFFLINE=0 ZES_HOME="$FIX/_home" "$SCAN" --quick --root "$TMP/empty-root" --url "http://127.0.0.1:$port$1" --json 2>/dev/null; }
+  out="$(urlscan /)"
+  printf '%s' "$out" | jq -e '[.findings[] | select(.module == "§4" and .level == "HIGH" and (.detail | test("8\\.3\\.10")))] | length == 1' >/dev/null 2>&1 \
+    && printf '%s' "$out" | jq -e '[.findings[] | select(.module == "§4" and .level == "MEDIUM" and (.detail | test("X-Powered-By")))] | length == 1' >/dev/null 2>&1 \
+    && ok "--url: Server ヘッダの PHP/8.3.10 を HIGH（ヘッダ申告版）で判定し、X-Powered-By の露出も報告" || ng "--url の PHP ヘッダ判定が不正"
+  out="$(urlscan /redir)"
+  printf '%s' "$out" | jq -e '[.findings[] | select(.module == "§4" and .level == "HIGH")] | length == 0' >/dev/null 2>&1 \
+    && ok "--url: リダイレクト先を追わない" || ng "--url がリダイレクトを追っています"
+  kill "$hpid" 2>/dev/null; wait "$hpid" 2>/dev/null
+  [ "$(tr '\n' ',' <"$TMP/http-log" 2>/dev/null)" = "HEAD /,GET /,HEAD /redir," ] && ok "--url: HEAD → 405 のときだけ GET（リクエスト列: HEAD /,GET /,HEAD /redir）" \
+    || ng "--url のリクエスト列が不正: $(tr '\n' ',' <"$TMP/http-log" 2>/dev/null)"
+else
+  printf '  SKIP --url のローカル HTTP テスト（python3 または curl が無い）\n'
+fi
 
 # 引数検証（fail-closed）
 "$SCAN" --root /nonexistent-zes-dir >/dev/null 2>&1; [ $? -eq 64 ] && ok "存在しない --root を拒否" || ng "存在しない --root を受理"
