@@ -10,13 +10,13 @@ export function McpViewer({ configs }: { configs: McpConfigView[] }) {
       <p className="text-xs text-subtle">command / args のみ表示（120 文字まで）。危険なコマンドを赤、要確認を黄で強調</p>
       {configs.map((c) => (
         <div key={c.path} className="mt-3">
-          <div className="font-mono text-[13px] text-muted">{c.path}{c.parseError && <span className="ml-2 text-high">（JSON として解析できません）</span>}</div>
+          <div className="break-all font-mono text-[13px] text-muted">{c.path}{c.parseError && <span className="ml-2 text-high">（JSON として解析できません）</span>}</div>
           <ul className="mt-1 divide-y divide-border rounded-lg border border-border">
             {c.servers.map((s, i) => (
-              <li key={i} className="grid grid-cols-[160px_1fr_auto] items-center gap-3 px-3 py-2" data-risk={s.risk}>
+              <li key={i} className="grid grid-cols-1 gap-1 px-3 py-2 sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:items-center sm:gap-3" data-risk={s.risk}>
                 <span className="truncate text-sm">{s.name || '—'}</span>
                 <code className={`truncate font-mono text-[13px] ${s.risk === 'high' ? 'text-critical' : s.risk === 'medium' ? 'text-medium' : ''}`}>{s.command} {s.args}</code>
-                <span className="flex gap-1">{s.tokens.map((t) => <Pill key={t} tone={s.risk === 'high' ? 'critical' : 'medium'}>{t}</Pill>)}</span>
+                <span className="flex flex-wrap gap-1">{s.tokens.map((t) => <Pill key={t} tone={s.risk === 'high' ? 'critical' : 'medium'}>{t}</Pill>)}</span>
               </li>
             ))}
             {!c.servers.length && <li className="px-3 py-2 text-sm text-subtle">サーバー定義なし</li>}
@@ -37,11 +37,11 @@ export function ActionsViewer({ workflows }: { workflows: WorkflowView[] }) {
       <p className="text-xs text-subtle">uses: の参照を SHA 固定 / タグ参照で色分け</p>
       {workflows.map((w) => (
         <div key={w.path} className="mt-3">
-          <div className="font-mono text-[13px] text-muted">{w.path}{w.prTarget && <span className="ml-2 text-high">pull_request_target</span>}</div>
+          <div className="break-all font-mono text-[13px] text-muted">{w.path}{w.prTarget && <span className="ml-2 text-high">pull_request_target</span>}</div>
           <ul className="mt-1 divide-y divide-border rounded-lg border border-border">
             {w.uses.map((u) => (
               <li key={u.ref} className="flex items-center justify-between gap-3 px-3 py-2" data-kind={u.kind}>
-                <code className="truncate font-mono text-[13px]">{u.ref}</code>
+                <code className="min-w-0 truncate font-mono text-[13px]">{u.ref}</code>
                 <Pill tone={tone[u.kind]}>{label[u.kind]}</Pill>
               </li>
             ))}

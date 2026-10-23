@@ -178,6 +178,7 @@ const NARROW: [string, RegExp, string?][] = [
   ['skillpact-signed-divergence', /^SkillPact/, 'skillpact-viewer'],
   ['skillpact-prose', /^SkillPact/, 'prose-alert'],
   ['skillpact-diff-anomaly', /^SkillPact/, 'skill-item'],
+  ['mcp-visible', /^MCP/, 'mcp-viewer'],
   ['github-actions', /^GitHub Actions/, 'actions-viewer'],
   ['browser-ext', /^ブラウザ拡張/, 'extension-viewer'],
 ];
