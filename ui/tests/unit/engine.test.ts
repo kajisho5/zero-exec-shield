@@ -62,7 +62,8 @@ describe('Layer 1 fixtures（CLI と同じ検出）', () => {
     // 所有者名の大文字小文字違い・YAML フローマッピングでも検出する
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/case-variant.yml');
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/flow-mapping.yml');
-    expect(r.viewers.actions.flatMap((w) => w.uses.map((u) => u.kind)).sort()).toEqual(['compromised', 'compromised', 'sha', 'sha', 'sha', 'tag', 'tag']);
+    // run: | の中の "uses: actions/checkout@v1"（safe-base-ref.yml）はステップとして数えない
+    expect(r.viewers.actions.flatMap((w) => w.uses.map((u) => u.kind)).sort()).toEqual(['compromised', 'compromised', 'sha', 'sha', 'sha', 'sha', 'sha', 'sha', 'sha', 'tag', 'tag', 'tag']);
   });
   it('browser extensions（権限昇格）', async () => {
     const r = await analyzeFiles(loadFixture('browser-ext'));

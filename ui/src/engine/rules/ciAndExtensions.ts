@@ -3,24 +3,100 @@ import { pathMatch, push, readable, type RuleCtx } from '../context';
 import type { UsesRef } from '../types';
 import { clip, dirname } from '../util';
 
-/** actions/checkout ステップごとの ref 種別（CLI §21 と同じ判定）。 */
+/**
+ * ワークフロー本文の正規化（CLI workflow_text と同じ）。CRLF・BOM を除き、値が次行以降に続くキーを 1 行に畳む。
+ *   - ブロックスカラー（"key: >-" / "key: |" 等）: より深くインデントされた後続行を全て空白区切りで連結
+ *   - 値が空のキーの後にプレーンスカラーが続く場合（"- uses:" の次行に値）: マッピング/シーケンスでない
+ *     より深い後続行を連結（YAML のプレーンスカラーの複数行折り返し）
+ * run: | の中に書かれた "uses: …" はこの畳み込みで run: の値の一部になり、ステップとして数えない。
+ */
+export function workflowText(yaml: string): string[] {
+  const src = yaml.replace(/^﻿/, '').split('\n').map((l) => l.replace(/\r$/, ''));
+  if (src.length && src[src.length - 1] === '') src.pop();
+  const out: string[] = [];
+  let pend = '';
+  let pind = 0;
+  let blk = false;
+  let acc = '';
+  const KEY_ONLY = /^\s*(-\s+)?["']?[A-Za-z0-9_.$-]+["']?:\s*([>|][-+0-9]*)?\s*(#.*)?$/;
+  const NODE = /^\s*(-(\s|$)|["']?[A-Za-z0-9_.$-]+["']?:(\s|$))/;
+  for (const line of src) {
+    if (pend !== '') {
+      if (/^\s*$/.test(line) || (!blk && /^\s*#/.test(line))) continue;
+      const lead = (/^\s*/.exec(line)?.[0] ?? '').length;
+      if (lead > pind && (blk || !NODE.test(line))) {
+        let v = line.replace(/^\s+/, '');
+        if (!blk) v = v.replace(/\s+#.*$/, '');
+        v = v.replace(/\s+$/, '');
+        acc += (acc === '' ? '' : ' ') + v;
+        continue;
+      }
+      out.push(pend + (acc !== '' ? ' ' + acc : ''));
+      pend = ''; acc = '';
+    }
+    if (KEY_ONLY.test(line)) {
+      pind = (/^\s*/.exec(line)?.[0] ?? '').length;
+      if (/^\s*-\s/.test(line)) pind = line.length - line.replace(/^\s*-\s+/, '').length - 1;
+      pend = line.replace(/\s*(#.*)?$/, '');
+      blk = /:\s*[>|][-+0-9]*$/.test(pend);
+      pend = pend.replace(/\s*[>|][-+0-9]*$/, '');
+      acc = '';
+      continue;
+    }
+    out.push(line);
+  }
+  if (pend !== '') out.push(pend + (acc !== '' ? ' ' + acc : ''));
+  return out;
+}
+
+/** actions/checkout ステップごとの ref 種別（CLI §21 と同じ判定。入力は workflowText で正規化した行）。 */
 export function checkoutRefs(yaml: string): ('noref' | 'prhead' | 'otherref')[] {
   const out: ('noref' | 'prhead' | 'otherref')[] = [];
   let inChk = false;
   let ind = 0;
   let ref: 'prhead' | 'otherref' | '' = '';
   const flush = () => { if (inChk) out.push(ref === '' ? 'noref' : ref); inChk = false; ref = ''; };
-  for (const line of yaml.split(/\r?\n/)) {
+  // ref はブロックマッピング（行頭の ref:）とフローマッピング（{ ref: … } / , ref: …）の両方を見る
+  const getRef = (s: string) => {
+    const m = /^\s*ref:/.exec(s) ?? /[{,]\s*ref:/.exec(s);
+    if (!m) return;
+    let r = s.slice(m.index + m[0].length).replace(/^\s*/, '');
+    if (/^["']/.test(r)) {
+      const q = r[0]!;
+      r = r.slice(1);
+      const k = r.indexOf(q);
+      if (k >= 0) r = r.slice(0, k);
+    } else {
+      r = r.replace(/[,}].*$/, '');
+    }
+    ref = /github\.(event\.pull_request\.head|head_ref)/.test(r) ? 'prhead' : 'otherref';
+  };
+  for (const line of workflowText(yaml)) {
     const lead = (/^\s*/.exec(line)?.[0] ?? '').length;
-    // 引用符付き（uses: "actions/checkout@v4"）と所有者名の大文字小文字違いも対象
-    if (/uses:\s*["']?actions\/checkout@/i.test(line)) { flush(); inChk = true; ind = lead; continue; }
+    // 引用符付き（uses: "actions/checkout@v4"）・所有者名の大文字小文字違い・フローマッピングのステップも対象
+    if (/^\s*(-\s+)?(\{([^}#]*,)?\s*)?uses:\s*["']?actions\/checkout@/.test(line.toLowerCase())) {
+      flush(); inChk = true; ind = lead;
+      const at = line.lastIndexOf('actions/checkout@');
+      getRef(at < 0 ? line : line.slice(at + 'actions/checkout@'.length));
+      continue;
+    }
     if (!inChk) continue;
     if (/^\s*-\s/.test(line) && lead <= ind) { flush(); continue; }
-    const m = /^\s*ref:\s*(.*)$/.exec(line);
-    if (m) ref = /github\.(event\.pull_request\.head|head_ref)/.test(m[1] ?? '') ? 'prhead' : 'otherref';
+    getRef(line);
   }
   flush();
   return out;
+}
+
+/** §22 の uses: 参照（CLI と同じく正規化後の各行の先頭のステップ/フローマッピングの uses: のみ。重複は除く）。 */
+export function usesRefs(yaml: string): string[] {
+  const seen = new Set<string>();
+  for (const line of workflowText(yaml)) {
+    const m = /^[\s-]*(\{([^}#]*,)?\s*)?uses:\s*["']?[^"'\s#,}]+/.exec(line);
+    if (!m) continue;
+    seen.add(m[0].replace(/.*uses:\s*["']?/, ''));
+  }
+  return [...seen];
 }
 
 export function actionsRules(ctx: RuleCtx): void {
@@ -50,16 +126,17 @@ export function actionsRules(ctx: RuleCtx): void {
     if (/toJSON\(\s*secrets\s*\)/.test(y)) push(ctx, { level: 'CRITICAL', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'toJSON(secrets) で全シークレットを展開', ruleId: 's38-tojson', evidenceSha: f.sha256 });
 
     const uses: UsesRef[] = [];
-    const seen = new Set<string>();
-    // YAML フローマッピング（- {uses: ...}）も対象。所有者/リポジトリ名は大文字小文字を区別しない
-    for (const m of y.matchAll(/^[\s-]*(?:\{(?:[^}#\n]*,)?\s*)?uses:\s*["']?([^"'\s#,}]+)/gm)) {
-      const ref = m[1] ?? '';
-      if (seen.has(ref)) continue;
-      seen.add(ref);
+    // 正規化後の各行の uses:（フローマッピング・次行の値・ブロックスカラーを含む。run: の中の文字列は数えない）
+    for (const ref of usesRefs(y)) {
       if (ref.startsWith('./') || ref.startsWith('docker://')) { uses.push({ ref: clip(ref), kind: 'local' }); continue; }
       const at = ref.lastIndexOf('@');
-      const act = (at < 0 ? ref : ref.slice(0, at)).toLowerCase();
-      const ver = at < 0 ? '' : ref.slice(at + 1);
+      if (at < 0) {
+        uses.push({ ref: clip(ref), kind: 'tag' });
+        push(ctx, { level: 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `uses: ${clip(ref, 80)} がバージョン未指定`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256 });
+        continue;
+      }
+      const act = ref.slice(0, at).toLowerCase();
+      const ver = ref.slice(at + 1);
       // versions に一致、または safe_tags があり「安全版タグでも SHA でもない」参照は汚染の可能性（trivy-action）
       const known = compromised.find((c) => c.action.toLowerCase() === act && (c.versions.includes(ver) || (!!c.safe_tags && !/^[0-9a-f]{40}$/.test(ver) && !c.safe_tags.includes(ver))));
       const org = compromised.some((c) => c.action.endsWith('/*') && act.startsWith(c.action.slice(0, -1).toLowerCase()));

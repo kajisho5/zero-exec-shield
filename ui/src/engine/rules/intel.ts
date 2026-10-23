@@ -4,6 +4,7 @@ import { push, readable, type RuleCtx } from '../context';
 import type { InfraCve } from '../ioc';
 import type { Severity } from '../types';
 import { basename, ere, versionCmp, versionMatches } from '../util';
+import { workflowText } from './ciAndExtensions';
 import { collectDeps } from './supplyChain';
 
 const NUM = /^\d+(\.\d+)+$/;
@@ -157,10 +158,12 @@ export function intelRules(ctx: RuleCtx): void {
 
   // §22 侵害されたアクション（bad_refs は CRITICAL、safe_refs 以外のタグ参照は severity）
   const wfFiles = readable(ctx).filter((f) => wf.test(f.relPath));
+  // CLI intel_actions と同じく GitHub Actions のワークフローと action.yml だけを、workflowText で正規化して見る
+  const ghFiles = wfFiles.filter((f) => /(^|\/)(\.github\/workflows\/[^/]+|action)\.ya?ml$/.test(f.relPath)).map((f) => ({ f, text: workflowText(f.text).join('\n') }));
   for (const a of intel.actions ?? []) {
     const re = new RegExp(`uses:\\s*["']?${escapeRe(a.action)}@([^"'\\s#,}]+)`, 'gi');
-    for (const f of wfFiles) {
-      for (const ref of new Set([...f.text.matchAll(re)].map((m) => m[1] ?? ''))) {
+    for (const { f, text } of ghFiles) {
+      for (const ref of new Set([...text.matchAll(re)].map((m) => m[1] ?? ''))) {
         if ((a.bad_refs ?? []).includes(ref)) {
           push(ctx, { level: 'CRITICAL', module: '§22', campaign: a.campaign, path: f.relPath, detail: `侵害が報告されたアクション ${a.action}@${ref}`, ruleId: `s22-intel-actions:${a.action}@${ref}`, evidenceSha: f.sha256 });
         } else if ((a.safe_refs ?? []).length && !(a.safe_refs ?? []).includes(ref) && !/^[0-9a-f]{40}$/.test(ref)) {
