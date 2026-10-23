@@ -206,4 +206,4 @@ ZES のライセンスは [Apache License 2.0](LICENSE) です。ZES 自体の�
 
 - **SkillPact。** §49 は SkillPact 0.8 の契約形式（https://github.com/kajisho5/skillpact）を読みます。SkillPact © SEVENTHWELL (shogo kajiyama)。仕様の文章は CC BY 4.0、スキーマとコードは Apache-2.0 です。ZES は形式を変えずにその一部を検査する実装で、SkillPact の適合性検査ツールではありません。ZES の結果は SkillPact のレベルではなく、SEVENTHWELL による承認でもありません。`tests/fixtures/skillpact-*` の一部は SkillPact の conformance ケースと例の複製です（[tests/fixtures/skillpact-README.md](tests/fixtures/skillpact-README.md)）。
 - **PHP2Shell のデータ。** `rules/ioc.json` の PHP2Shell 修正版と Debian / Ubuntu / RHEL のパッケージデータ（`php2shell_distro`）、および §4 の版判定は、[openai/php2shell-checker](https://github.com/openai/php2shell-checker)（Apache-2.0）と、そこに挙がっている各ベンダーの勧告に基づきます。
-- **レビューの手法。** ZES のセキュリティレビューは [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)（MIT）の手法に沿って行いました。同リポジトリのコードは含みません。
+- **レビューの手法。** バグ探しの各ラウンドでは [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)（MIT）の手法（指摘ごとの独立した検証など）を参考にしました。同リポジトリのコードは含みません。
