@@ -631,20 +631,41 @@ build_deps() {
         want && /"version": *"/ { v=$0; sub(/.*"version": *"/,"",v); sub(/".*/,"",v); print "npm\t" n "\t" v "\t" src; want=0 }' "$f" >>"$DEPS_TSV"
     fi
   done < <(files_named '^(package-lock\.json|npm-shrinkwrap\.json)$')
-  # npm: yarn.lock
+  # npm: yarn.lock（v1 / Berry）
+  #   エイリアス（"kv@npm:keyv@6.0.0"）は別名ではなく実パッケージ名（keyv）で照合する。
+  #   Berry の resolution: "keyv@npm:6.0.0" があればそれを優先（ブロック末尾でまとめて出力）
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     text_lines "$f" | awk -v src="$f" '
-      /^[^ #].*:$/ { h=$0; sub(/:$/,"",h); split(h,parts,/, */); n=parts[1]; gsub(/"/,"",n);
-                     if (n ~ /^@/) { sub(/^@/,"",n); sub(/@.*/,"",n); n="@" n } else { sub(/@.*/,"",n) } ; next }
-      /^  version:? / { v=$0; sub(/^  version:? +/,"",v); gsub(/"/,"",v); if (n!="") print "npm\t" n "\t" v "\t" src; n="" }' >>"$DEPS_TSV"
+      function pname(spec,   at, t, n0) {   # "name@range" → name（range が npm:<target> なら target の名前）
+        gsub(/"/, "", spec)
+        at = (spec ~ /^@/) ? index(substr(spec, 2), "@") + 1 : index(spec, "@")
+        if (at <= 1) return spec
+        t = substr(spec, at + 1)
+        n0 = substr(spec, 1, at - 1)
+        if (t !~ /^npm:/) return n0
+        t = substr(t, 5)
+        if (t ~ /^[0-9^~<>=*]/ || t == "") return n0              # "keyv@npm:^6.0.0"（Berry の通常表記）
+        at = (t ~ /^@/) ? index(substr(t, 2), "@") + 1 : index(t, "@")
+        return (at > 1) ? substr(t, 1, at - 1) : t }               # "kv@npm:keyv@6.0.0" / "kv@npm:keyv"
+      function flush() { if (n != "" && v != "") print "npm\t" (rn != "" ? rn : n) "\t" v "\t" src; n = ""; v = ""; rn = "" }
+      /^[^ #].*:$/ { flush(); h=$0; sub(/:$/,"",h); split(h,parts,/, */); n = pname(parts[1]); next }
+      /^  version:? / { v=$0; sub(/^  version:? +/,"",v); gsub(/"/,"",v); next }
+      /^  resolution:? / { r=$0; sub(/^  resolution:? +/,"",r); gsub(/"/,"",r); if (index(r, "@npm:") > 1) rn = substr(r, 1, index(r, "@npm:") - 1); next }
+      END { flush() }' >>"$DEPS_TSV"
   done < <(files_named '^yarn\.lock$')
-  # npm: pnpm-lock.yaml（"/name@1.2.3:" / "name@1.2.3:" 形式）
+  # npm: pnpm-lock.yaml
+  #   v6+: "/name@1.2.3:" / "name@1.2.3(peer@x):"、v5: "/name/1.2.3:" / "/@scope/name/1.2.3:" / "/name/1.2.3_peer@x:"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     text_lines "$f" | awk -v src="$f" '
-      /^  ['"'"'\/]?@?[^ @]+@[0-9][^:]*:/ {
-        s=$0; sub(/^  /,"",s); gsub(/'"'"'/,"",s); sub(/^\//,"",s); sub(/:.*$/,"",s); sub(/\(.*$/,"",s)
+      /^  ['"'"'"]?\/(@[^\/ ]+\/)?[^\/@ ]+\/[0-9][^:]*['"'"'"]?:/ {
+        s=$0; sub(/^  /,"",s); gsub(/['"'"'"]/,"",s); sub(/^\//,"",s); sub(/:.*$/,"",s)
+        k = 0; while (match(substr(s, k + 1), /\//)) k += RSTART
+        v = substr(s, k + 1); sub(/[_(].*$/, "", v)
+        print "npm\t" substr(s, 1, k - 1) "\t" v "\t" src; next }
+      /^  ['"'"'"\/]?@?[^ @]+@[0-9][^:]*:/ {
+        s=$0; sub(/^  /,"",s); gsub(/['"'"'"]/,"",s); sub(/^\//,"",s); sub(/:.*$/,"",s); sub(/\(.*$/,"",s)
         if (s ~ /^@/) { at=index(substr(s,2),"@")+1 } else { at=index(s,"@") }
         if (at>1) print "npm\t" substr(s,1,at-1) "\t" substr(s,at+1) "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^pnpm-lock\.yaml$')
