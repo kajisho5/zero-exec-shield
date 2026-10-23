@@ -2,7 +2,8 @@
 import { push, readable, type RuleCtx } from '../context';
 import type { McpServerView } from '../types';
 import { parseCodexToml } from '../toml';
-import { clip, parseJsonc } from '../util';
+import { clip, parseJsonc, versionCmp } from '../util';
+import { collectDeps } from './supplyChain';
 
 export { parseCodexToml };
 
@@ -104,5 +105,29 @@ export function aiAssistantRules(ctx: RuleCtx): void {
     if (/[A-Za-z][Ͱ-ϿЀ-ӿ]|[Ͱ-ϿЀ-ӿ][A-Za-z]/u.test(f.text)) {
       push(ctx, { level: 'MEDIUM', module: '§7', campaign: null, path: f.relPath, detail: 'ラテン文字と混在するキリル/ギリシャ文字（ホモグリフ疑い）', ruleId: 's7-homoglyph', evidenceSha: f.sha256 });
     }
+  }
+}
+
+/** §37 MCP レジストリ（CLI check_s37 のうち投入ファイルで判定できる部分）: MCP-POISON の痕跡と、MCP 関連依存の CVE。 */
+export function mcpRegistryRules(ctx: RuleCtx): void {
+  ctx.checks.add('s37-marker').add('s37-mcp-cves').add('s37-mcp-deps');
+  for (const f of readable(ctx).filter((x) => /\.(json|ya?ml|toml|js|ts|py|md)$/.test(x.name) && x.text.includes('MCP-POISON'))) {
+    push(ctx, { level: 'HIGH', module: '§37', campaign: 'mcp-poisoning', path: f.relPath, detail: 'SPECTER MCP-POISON の痕跡', ruleId: 's37-marker', evidenceSha: f.sha256 });
+  }
+  const deps = collectDeps(ctx);
+  const cves = (ctx.ioc.mcp_poisoning['mcp_cves'] ?? []) as { id: string; eco?: string; package?: string; fixed?: string }[];
+  for (const c of cves) {
+    if (!c.package || !c.fixed) continue;
+    for (const d of deps) {
+      if (d.eco !== c.eco || d.name !== c.package || d.version === '' || versionCmp(d.version, c.fixed) >= 0) continue;
+      push(ctx, { level: 'HIGH', module: '§37', campaign: 'mcp-poisoning', path: d.path, detail: `${c.package}@${d.version} は ${c.id} の影響範囲（修正版 ${c.fixed}）`, ruleId: `s37-mcp-cves:${c.id}:${d.version}`, evidenceSha: d.sha });
+    }
+  }
+  // ioc に修正版が未定義の MCP 関連 CVE は、該当しうる依存を要確認として出す
+  for (const d of deps) {
+    const hit = (d.eco === 'npm' && (d.name === '@modelcontextprotocol/sdk' || /appium.*mcp|mcp.*appium/.test(d.name) || d.name === '@modelcontextprotocol/server-everything' || /gitlab-mcp/.test(d.name)))
+      || (d.eco === 'pypi' && (d.name === 'mcp' || d.name === 'mcp-server-fetch' || d.name === 'fastmcp'))
+      || (d.eco === 'go' && /stacklok\/toolhive/.test(d.name));
+    if (hit) push(ctx, { level: 'MEDIUM', module: '§37', campaign: 'mcp-poisoning', path: d.path, detail: `MCP 関連依存 ${d.name}@${d.version}: CVE-2026-104850/104120/111767/59951/61559/52869/58500, GO-2026-5996/6002 の該当可否を確認（ioc に修正版未定義）`, ruleId: `s37-mcp-deps:${d.name}@${d.version}`, evidenceSha: d.sha });
   }
 }

@@ -1,9 +1,9 @@
 import type { RuleCtx } from './context';
 import { IOC, type IocDb } from './ioc';
-import { aiAssistantRules, mcpRules } from './rules/agentConfig';
+import { aiAssistantRules, mcpRegistryRules, mcpRules } from './rules/agentConfig';
 import { actionsRules, extensionRules } from './rules/ciAndExtensions';
 import { emudhraRules, infraRules, intelRules } from './rules/intel';
-import { buildHookRules, credentialRules, homeRules, ebpfRules, modelSupplyRules, persistenceRules, sigstoreRules } from './rules/codeAndHost';
+import { buildHookRules, containerRules, credentialRules, homeRules, ebpfRules, modelSupplyRules, persistenceRules, sigstoreRules } from './rules/codeAndHost';
 import { analyzePasteText } from './rules/network';
 import { phpRules } from './rules/php';
 import { networkRules } from './rules/network';
@@ -34,10 +34,12 @@ export async function analyzeFiles(input: FileInput[], ioc: IocDb = IOC): Promis
   filenameRules(ctx);
   packageRules(ctx);
   mcpRules(ctx);
+  mcpRegistryRules(ctx);
   aiAssistantRules(ctx);
   networkRules(ctx);
   actionsRules(ctx);
   extensionRules(ctx);
+  containerRules(ctx);
   buildHookRules(ctx);
   modelSupplyRules(ctx);
   persistenceRules(ctx);
