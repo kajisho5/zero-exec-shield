@@ -69,7 +69,8 @@ export function TabBar({ active, findings, onSelect }: { active: TabId; findings
 
   return (
     <nav className="relative flex h-12 items-stretch border-b border-border px-4 sm:px-8">
-      <Button variant="icon" className="my-auto mr-2 shrink-0" aria-label="タブを左へスクロール" onClick={() => scrollBy(-320)}><Icon name="chevron-left" /></Button>
+      {/* 狭い画面ではスクロールボタンを隠し、タブ列の幅を確保する（スワイプと「すべてのタブ」で移動できる） */}
+      <div className="my-auto mr-2 hidden shrink-0 sm:flex"><Button variant="icon" aria-label="タブを左へスクロール" onClick={() => scrollBy(-320)}><Icon name="chevron-left" /></Button></div>
       <div ref={scroller} role="tablist" aria-label="検査カテゴリ" className="scrollbar-none flex min-w-0 flex-1 snap-x items-stretch overflow-x-auto [mask-image:linear-gradient(to_right,transparent,black_24px,black_calc(100%-24px),transparent)]">
         {TABS.map((t, i) => {
           const c = counts[t.id]!;
@@ -95,10 +96,10 @@ export function TabBar({ active, findings, onSelect }: { active: TabId; findings
           );
         })}
       </div>
-      <Button variant="icon" className="my-auto ml-2 shrink-0" aria-label="タブを右へスクロール" onClick={() => scrollBy(320)}><Icon name="chevron-right" /></Button>
+      <div className="my-auto ml-2 hidden shrink-0 sm:flex"><Button variant="icon" aria-label="タブを右へスクロール" onClick={() => scrollBy(320)}><Icon name="chevron-right" /></Button></div>
       <div ref={menuWrap} className="relative my-auto ml-2 shrink-0">
         <Button aria-haspopup="menu" aria-expanded={menu} aria-controls={menu ? 'all-tabs-menu' : undefined} onClick={() => setMenu((m) => !m)} data-testid="all-tabs">
-          すべてのタブ <span className="text-xs text-muted">{TABS.length}</span> <Icon name="chevron-down" size={14} />
+          <span className="sr-only sm:not-sr-only">すべてのタブ</span> <span className="text-xs text-muted">{TABS.length}</span> <Icon name="chevron-down" size={14} />
         </Button>
         {menu && (
           <ul id="all-tabs-menu" role="menu" aria-label="すべてのタブ" onKeyDown={menuKey} className="absolute right-0 top-10 z-40 max-h-[70vh] w-60 overflow-auto rounded-xl border border-border-strong bg-surface-2 py-1 shadow-xl">
