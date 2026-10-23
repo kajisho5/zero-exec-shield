@@ -371,3 +371,46 @@ for (const width of [320, 375]) {
     }
   });
 }
+
+// 設計書 §5.2・§5.3 のコントラスト（palette.json）を実際の描画で確かめる。計算は WCAG 2.1 の相対輝度。
+test('重大度の文字色のコントラスト（台紙・作業台・淡色地の上、両テーマ）が設計値どおり 4.5 以上', async ({ browser }) => {
+  // [テーマ, 重大度, 台紙の上, 淡色地の上]（palette.json）
+  const SPEC: Record<'dark' | 'light', Record<string, [number, number]>> = {
+    dark: { CRITICAL: [6.48, 5.85], HIGH: [7.76, 6.92] },
+    light: { CRITICAL: [6.76, 6.01], HIGH: [6.1, 5.5] },
+  };
+  for (const colorScheme of ['dark', 'light'] as const) {
+    const ctx = await browser.newContext({ colorScheme, viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    await open(page);
+    await scan(page, 'chaindrop');
+    const ratios = await page.evaluate(() => {
+      const x = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;
+      const rgb = (c: string) => { x.clearRect(0, 0, 1, 1); x.fillStyle = c; x.fillRect(0, 0, 1, 1); return [...x.getImageData(0, 0, 1, 1).data].slice(0, 3); };
+      const lum = (c: string) => { const v = rgb(c).map((n) => { const s = n / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }); return 0.2126 * v[0]! + 0.7152 * v[1]! + 0.0722 * v[2]!; };
+      const ratio = (a: string, b: string) => { const [p, q] = [lum(a), lum(b)].sort((m, n) => n - m); return Math.round(((p! + 0.05) / (q! + 0.05)) * 100) / 100; };
+      const bgOf = (el: Element) => { for (let e: Element | null = el; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor; if (c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c; } return getComputedStyle(document.body).backgroundColor; };
+      const out: Record<string, number> = {};
+      const table = document.querySelector('[data-testid=findings-table]')!;
+      for (const s of ['CRITICAL', 'HIGH']) {
+        const mark = table.querySelector(`[data-severity=${s}]`)!;
+        out[`${s}/sheet`] = ratio(getComputedStyle(mark).color, getComputedStyle(table).backgroundColor);
+        const chip = [...document.querySelectorAll('[role=tab] span[aria-hidden]')].find((e) => getComputedStyle(e).color === getComputedStyle(mark).color);
+        if (chip) out[`${s}/tint`] = ratio(getComputedStyle(chip).color, bgOf(chip));
+      }
+      const body = getComputedStyle(document.body);
+      out['ink/bench'] = ratio(body.color, body.backgroundColor);
+      const muted = document.querySelector('[data-testid=blast-radius] p')!;
+      out['pencil/bench'] = ratio(getComputedStyle(muted).color, body.backgroundColor);
+      return out;
+    });
+    for (const [k, v] of Object.entries(ratios)) expect(v, `${colorScheme} ${k}`).toBeGreaterThanOrEqual(4.5);
+    for (const [s, [onSheet, onTint]] of Object.entries(SPEC[colorScheme])) {
+      expect(Math.abs(ratios[`${s}/sheet`]! - onSheet), `${colorScheme} ${s}/sheet ${ratios[`${s}/sheet`]}`).toBeLessThan(0.1);
+      if (ratios[`${s}/tint`] !== undefined) expect(Math.abs(ratios[`${s}/tint`]! - onTint), `${colorScheme} ${s}/tint ${ratios[`${s}/tint`]}`).toBeLessThan(0.1);
+    }
+    expect(Math.abs(ratios['ink/bench']! - 13.4)).toBeLessThan(0.1);
+    expect(Math.abs(ratios['pencil/bench']! - (colorScheme === 'dark' ? 7.75 : 6.12))).toBeLessThan(0.1);
+    await ctx.close();
+  }
+});
