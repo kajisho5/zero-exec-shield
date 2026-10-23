@@ -14,7 +14,7 @@
       "bad_versions": [
         "6.0.0"
       ],
-      "safe_version": "5.x最新",
+      "safe_version": "latest 5.x",
       "note": ""
     },
     {
