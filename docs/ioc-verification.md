@@ -1,262 +1,264 @@
-# ZES v5.2 IoC 一次情報照合レポート
+English | [日本語](ioc-verification.ja.md)
 
-- **調査日**: 2026-10-22
-- **対象**: ZES v5.2 Master Specification §3（`rules/ioc.json` 収録データ）＋ §6 / §9 で参照される一部の値
-- **方法**: Web 検索で公式アドバイザリ（GitHub Advisory / OSV / NVD / CISA KEV / ベンダー告知）と一次調査元（Socket, StepSecurity, JFrog, Wiz, Snyk, Datadog, Microsoft, Unit 42, Check Point, Elastic, Pillar, Adversa ほか）を照合した。記事の本文を直接取得できず、検索結果の要約を使った項目がある。記載のない値は推測で埋めていない。
-- **判定区分**
-  - **一致**: 一次情報または複数の一次調査元で仕様の値を確認できた
-  - **相違あり**: 事実の一部は確認できたが、値・帰属・説明が仕様と食い違う（内容は備考欄に記載）
-  - **確認できず**: 今回の調査範囲では裏付けが見つからなかった、または調査していない
+# ZES v5.2 IoC primary-source verification report
 
-## サマリ
+- **Survey date**: 2026-10-22
+- **Scope**: ZES v5.2 Master Specification §3 (the data in `rules/ioc.json`) + some values referenced in §6 / §9
+- **Method**: compared against official advisories (GitHub Advisory / OSV / NVD / CISA KEV / vendor notices) and the original researchers (Socket, StepSecurity, JFrog, Wiz, Snyk, Datadog, Microsoft, Unit 42, Check Point, Elastic, Pillar, Adversa and others) through web searches. For some items the article body could not be retrieved directly and the search-result summary was used. Values not stated by the sources were not filled in by guessing.
+- **Verdict categories**
+  - **Match**: the specification's value was confirmed by a primary source or by several original researchers
+  - **Differs**: part of the facts was confirmed, but the value, attribution or description disagrees with the specification (details in the notes column)
+  - **Could not confirm**: no corroboration was found within the scope of this survey, or the item was not investigated
 
-| 判定 | 件数 | 割合 |
+## Summary
+
+| Verdict | Count | Share |
 |---|---|---|
-| 一致 | 68 | 約 59% |
-| 相違あり | 24 | 約 21% |
-| 確認できず | 23 | 約 20% |
-| **合計** | **115** | 100% |
+| Match | 68 | about 59% |
+| Differs | 24 | about 21% |
+| Could not confirm | 23 | about 20% |
+| **Total** | **115** | 100% |
 
-（件数は下の各表の行単位で数えた）
+(Counted per row of the tables below)
 
-**実装に影響する主な相違（優先度順）**
+**Main differences that affect the implementation (by priority)**
 
-1. **キャンペーン名と時期の取り違え**: `pypi-oct2026` に含まれる telnyx（2026-03-27）と lightning（2026-04-30）は、どちらも 10 月の事案ではない。certifi は eMudhra 事案（GHSA-6q48-6c7w-9gw2）であり、`litellm-oct2026` キャンペーンに属さない。
-2. **jscrambler の悪性版**: 実際は 8.14.0 / 8.16.0 / 8.17.0 / 8.18.0 / 8.20.0 の 5 版。「8.14.0〜8.20.0」の範囲で判定すると、悪性と報告されていない 8.15.0 と 8.19.0 まで誤検知する。安全版は 8.22.0。TeamPCP への帰属は確認できなかった（JFrog は IronWorm 系統と評価）。
-3. **trivy-action v0.69.4**: v0.69.4 は Trivy バイナリの版番号であり、trivy-action の版番号ではない。trivy-action はタグ 75/76 が書き換えられ（Aqua 発表では 76/77）、安全版は v0.35.0。
-4. **Cursor CVE-2026-50548 の修正版は 3.0**（仕様 §41 の「<2.5」は CVE-2026-26268 のもの）。
-5. **CVE-2026-22703 の対象製品は Rekor ではなく Cosign**。版範囲 <2.6.2 / <3.0.4 は一致する。
-6. **MCP 系 CVE の説明違い**: CVE-2026-52869 は MCP Python SDK のセッション ID と認証主体を紐付けない不備（CVSS 7.1、修正 1.27.2）で、レジストリ汚染の事案ではない。CVE-2026-58500 は appium-mcp の XSS（8.2）であり、各ソースは RCE と記載していない。GO-2026-6002 は NAT64 の不備ではない（認証ディスカバリ経路の SSRF、CVE-2026-58196）。
-7. **NeighborJack の定義**: Backslash Security（2025-06）の報告では「MCP サーバーが 0.0.0.0 に bind し、同一 LAN から到達できる」設定不備を指す。仕様の「隣接する脆弱な MCP 経由の間接侵害／内部 IP の登録」とは検出対象が異なる。
-8. **誤検知リスク**: `seed1/seed2.getsession.org`（Session メッセンジャーの正規インフラ）と、`eth-mainnet.nodereal.io` / `go.getblock.io` / `eth.llamarpc.com`（正規の Ethereum RPC）は、名前が出現しただけで CRITICAL にすると誤検知する。
-9. **ChainDrop の IoC 不足**: 新しい C2 `awqhnjewqjkl[.]icu` と Ethereum 解決コントラクト `0xE1f2395ee43e45A1556EC6438a88c31B83493103` が仕様に入っていない（Unit 42 / Elastic / Microsoft）。
-10. **Homebrew ca-certificates `2026-09-25_1`**: eMudhra の鍵漏洩は 2026-10-17 に報告された。それより前の日付のバンドルが修正版になることはありえず、値の誤りが疑われる（裏付けは取れていない）。
+1. **Mixed-up campaign names and timing**: telnyx (2026-03-27) and lightning (2026-04-30), included in `pypi-oct2026`, are neither October incidents. certifi belongs to the eMudhra incident (GHSA-6q48-6c7w-9gw2) and not to the `litellm-oct2026` campaign.
+2. **Malicious versions of jscrambler**: there are actually 5 versions: 8.14.0 / 8.16.0 / 8.17.0 / 8.18.0 / 8.20.0. Matching on the range "8.14.0–8.20.0" also falsely flags 8.15.0 and 8.19.0, which have not been reported as malicious. The safe version is 8.22.0. Attribution to TeamPCP could not be confirmed (JFrog assesses it as part of the IronWorm lineage).
+3. **trivy-action v0.69.4**: v0.69.4 is a version number of the Trivy binary, not of trivy-action. In trivy-action, tags 75/76 were rewritten (76/77 according to Aqua's announcement), and the safe version is v0.35.0.
+4. **The fixed version for Cursor CVE-2026-50548 is 3.0** (the "<2.5" in specification §41 belongs to CVE-2026-26268).
+5. **The product affected by CVE-2026-22703 is Cosign, not Rekor**. The version ranges <2.6.2 / <3.0.4 match.
+6. **Wrong descriptions of MCP CVEs**: CVE-2026-52869 is a flaw in the MCP Python SDK that does not bind the session ID to the authenticated principal (CVSS 7.1, fixed in 1.27.2), not a registry-poisoning incident. CVE-2026-58500 is an XSS in appium-mcp (8.2), and no source describes it as RCE. GO-2026-6002 is not a NAT64 flaw (it is an SSRF in the auth discovery path, CVE-2026-58196).
+7. **Definition of NeighborJack**: in Backslash Security's report (2025-06) it refers to the misconfiguration where "an MCP server binds to 0.0.0.0 and is reachable from the same LAN". This is a different detection target from the specification's "indirect compromise via an adjacent vulnerable MCP / registration of internal IPs".
+8. **False-positive risk**: `seed1/seed2.getsession.org` (legitimate infrastructure of the Session messenger) and `eth-mainnet.nodereal.io` / `go.getblock.io` / `eth.llamarpc.com` (legitimate Ethereum RPC) cause false positives if their mere appearance is rated CRITICAL.
+9. **Missing ChainDrop IoCs**: the new C2 `awqhnjewqjkl[.]icu` and the Ethereum resolver contract `0xE1f2395ee43e45A1556EC6438a88c31B83493103` are not in the specification (Unit 42 / Elastic / Microsoft).
+10. **Homebrew ca-certificates `2026-09-25_1`**: the eMudhra key leak was reported on 2026-10-17. A bundle dated before that cannot be the fixed version, so the value is suspected to be wrong (not corroborated).
 
 ---
 
 ## 1. `packages[]`
 
-| 項目 | 仕様値 | 一次情報の値 | 判定 | 根拠URL |
+| Item | Specification value | Primary-source value | Verdict | Source URL |
 |---|---|---|---|---|
-| litellm（悪性版／安全版） | 1.107.0 / 1.106.2 | 1.107.0 の wheel 7 種が悪性。2026-10-21 公開、安全版は 1.106.2（Chainguard） | 一致 | https://research.jfrog.com/post/litellm-hijacked-again/ , https://www.stepsecurity.io/blog/litellm-1-107-0-compromised-pypi-backdoored-wheels-credential-stealer , https://www.chainguard.dev/unchained/litellm-attacked-again-malicious-1-107-0-wheels-on-pypi-and-docker-hub-october-2026 |
-| litellm（悪性ファイル） | cook.pth / cook.py / sitecustomize.py | cook.pth（`import cook`）→ cook.py、sitecustomize.py のデーモン、`/tmp/remote_code_loader.lock` | 一致 | https://www.mend.io/blog/litellm-1-107-0-compromised/ , https://www.endorlabs.com/learn/litellm-1-107-0-compromised-python-startup-hooks-steal-cloud-ai-and-proxy-credentials |
-| litellm（Docker イメージ） | 記載なし | Docker Hub のイメージも侵害された（StepSecurity / Chainguard） | 相違あり（仕様に不足） | https://socket.dev/blog/litellm-compromise |
-| certifi | <2026.10.19 / 2026.10.19（campaign: litellm-oct2026） | GHSA-6q48-6c7w-9gw2。影響範囲 2019.03.09〜<2026.10.19（emSign ECC Root CA G3 を削除）。原因は eMudhra 事案で、LiteLLM とは無関係 | 相違あり（キャンペーンの紐付け誤り） | https://www.openwall.com/lists/oss-security/2026/10/20/20 , https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576 |
-| @tanstack/*（規模） | 42pkg / 84ver | 2026-05-11 に 42 パッケージ・84 版を公開。GHSA-g7cv-rxg3-hmpx / CVE-2026-45321 | 一致 | https://socket.dev/blog/tanstack-npm-packages-compromised-mini-shai-hulud-supply-chain-attack , https://advisories.gitlab.com/npm/@tanstack/react-router/CVE-2026-45321/ |
-| @tanstack/*（悪性ファイル） | router_init.js / tanstack_runner.js / vite_setup.mjs | 今回の調査ではファイル名を照合できなかった | 確認できず | — |
-| mistralai | 2.4.6 / 2.4.5 | PyPI の mistralai 2.4.6 が悪性で、2.4.5 が安全 | 一致 | https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised , https://phoenix.security/mini-shai-hulud-teampcp-tanstack/ |
-| guardrails-ai | 0.10.1 / 0.10.0 | 0.10.1 が悪性で、0.10.0 以前は安全 | 一致 | https://socket.dev/blog/tanstack-npm-packages-compromised-mini-shai-hulud-supply-chain-attack |
-| intercom-client | 侵害版 / 「1,800+開発者影響」 | 悪性版は 7.0.4（2026-04-30、約 2 時間公開）、安全版は 7.0.3。GHSA-54pg-9963-v8vg。「1,800+」という数値はどこにも見つからない | 相違あり（版番号が未記載、影響人数の裏付けなし） | https://osv.dev/vulnerability/GHSA-54pg-9963-v8vg |
-| jscrambler | 8.14.0〜8.20.0（campaign: teampcp） | 悪性は 8.14.0 / 8.16.0 / 8.17.0 / 8.18.0 / 8.20.0 の 5 版、安全版は 8.22.0。2026-07-11 公開の Rust 製インフォスティーラー。TeamPCP への帰属は確認できず、JFrog は IronWorm 系統と評価 | 相違あり | https://thehackernews.com/2026/07/compromised-jscrambler-8140-npm-release.html , https://www.attestd.io/blog/jscrambler-ironworm-npm-supply-chain |
-| @asyncapi/* | 侵害版 | 調査していない | 確認できず | — |
-| @polymarket/* | 侵害版 | 調査していない | 確認できず | — |
-| keyv | 6.0.0 / 5.x 最新 | 6.0.0 は 2026-08-04 公開（MAL-2026-11524）。npm は keyv@5.6.0 を latest に戻した | 一致 | https://osv.dev/vulnerability/MAL-2026-11524 , https://www.chainguard.dev/unchained/the-keyv-and-cacheable-npm-supply-chain-attack-inside-the-mini-shai-hulud-campaign |
-| flat-cache | 6.1.24 | 6.1.24 が悪性で、6.1.23 が安全 | 一致 | https://www.stepsecurity.io/blog/chaindrop-npm-worm |
-| file-entry-cache | 11.1.6 | Datadog / StepSecurity は 11.1.6 を悪性と記載。Chainguard は版番号を示していない | 一致（ソース間で一部相違あり） | https://securitylabs.datadoghq.com/articles/npm-worm-compromises-popular-npm-packages/ |
-| cacheable-request | 13.0.20 | 13.0.20 が悪性で、13.0.19 が安全 | 一致 | https://www.stepsecurity.io/blog/chaindrop-npm-worm |
-| cache-manager | 7.2.10 | 7.2.10 が悪性で、7.2.9 が安全 | 一致 | https://www.chainguard.dev/unchained/the-keyv-and-cacheable-npm-supply-chain-attack-inside-the-mini-shai-hulud-campaign |
-| ecto | 5.0.1 | ecto@5.0.1 の setup.mjs と Math_Symbol.js は keyv@6.0.0 のものとバイト単位で同一 | 一致 | https://www.mend.io/blog/keyv-malicious-packages/ |
-| cacheable / @cacheable/memory / @cacheable/node-cache / @cacheable/utils / @cacheable/net | 2.5.1 / 2.2.1 / 3.1.2 / 2.5.1 / 2.1.1 | 影響パッケージとしての記載はあるが、版番号を個別に照合できなかった | 確認できず | https://www.stepsecurity.io/blog/chaindrop-npm-worm |
-| lightning | 2.6.2, 2.6.3 / 2.6.1 / `_runtime/`（campaign: pypi-oct2026） | 値は一致する（`_runtime` が Bun を取得して実行）。ただし公開日は 2026-04-30 で、10 月の事案ではない | 相違あり（キャンペーン名・時期） | https://lightning.ai/blog/pytorch-lightning-supply-chain-attack/ , https://snyk.io/blog/lightning-pypi-compromise-bun-based-credential-stealer/ |
-| telnyx | 4.87.1, 4.87.2 / 4.87.0 / 83.142.209.203:8080（campaign: pypi-oct2026） | 値は一致する（`http://83.142.209.203:8080/ringtone.wav`、GHSA-955r-262c-33jc）。ただし公開日は 2026-03-27 で、10 月の事案ではない | 相違あり（キャンペーン名・時期） | https://advisories.gitlab.com/pypi/telnyx/GHSA-955r-262c-33jc/ , https://www.akamai.com/blog/security-research/telnyx-sdk-pypi-2026-teampcp-supply-chain-attacks |
-| py2ops | 2.2 | 悪性と記載しているのは Vulert のみ。secure.software の 2.2.1 スキャンはマルウェアなしで、両者が矛盾する。版 2.2 は確認できなかった | 確認できず | https://vulert.com/vuln-db/malicious-code-in-py2ops--pypi- , https://secure.software/pypi/packages/py2ops/malware |
-| @solana-labs/web3js | 1.0.0, 1.0.2, 100+ / MAL-2026-5788 | MAL-2026-5788（GHSA-pqhf-q5g8-6jpm、2026-06-15）。版リストはソースによって異なる（1.0.0〜1.0.10、1.98.103〜1.98.110、1.98.112 など） | 一致（版リストは OSV の最新版で要確認） | https://osv.dev/vulnerability/MAL-2026-5788 |
-| solana-web3-stable | sibling | MAL-2026-10903 | 一致 | https://www.hacktron.ai/package/npm/solana-web3-stable/1.0.0 |
-| @solana-labs/spl-toke / web3-js / ancor | sibling | 照合できなかった | 確認できず | — |
-| tensorlake | 0.5.144（2026-10-08） | 0.5.144 は 2026-10-08 公開、0.5.143 が最終安全版。preinstall で実行され、トークン失効を検知すると $HOME を消去するスイッチを持つ | 一致 | https://socket.dev/blog/tensorlake-compromise , https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/ |
-| imgdecode（malfex） | shellcode ローダー | 2026-09-30 アップロード。Windows で DLL を介してシェルコードを dllhost.exe に注入する | 一致 | https://thehackernews.com/2026/10/malfex-npm-package-imgdecode-hides.html |
-| Namastex Labs 関連 | npm→PyPI→暗号資産 | @automagik/genie、pgserve 等（2026-04）。npm と PyPI に伝播し、ウォレットを窃取する | 一致（時期は 2026-04） | https://www.theregister.com/2026/04/22/another_npm_supply_chain_attack/ |
-| css-nesting-transform | 1.0.0（2026-10-12） | MAL-2026-17804。npm 公開は 2026-10-07、OSV の公開は 10-08、最終更新は 10-12。依存関係混乱を狙った偵察型（whoami / id / uname を webhook に送信） | 相違あり（日付） | https://osv.dev/vulnerability/MAL-2026-17804 , https://github.com/ossf/malicious-packages/pull/1602 |
-| HF datasets | 悪性データセット（2026-07-16） | Hugging Face が 2026-07-16 に公表。リモートコードローダーとデータセット設定のテンプレートインジェクションの 2 経路 | 一致 | https://huggingface.co/blog/security-incident-july-2026 |
-| lerobot | CVE-2026-25874 / CVSS 9.8 | ≤0.5.1 が影響。CVSS は 9.3（GHSA / THN）と 9.8（CSA）でソースによって異なる。公表時点で修正版はなかった | 相違あり（CVSS がソース間で不一致、修正版未確認） | https://labs.cloudsecurityalliance.org/research/csa-research-note-lerobot-cve-2026-25874-unauth-rce-20260429/ , https://thehackernews.com/2026/04/critical-cve-2026-25874-leaves-hugging.html |
-| megalodon-ci | 5,561 リポジトリ（2026-05） | 2026-05-18、6 時間未満で 5,561 リポジトリに 5,718 件のコミット | 一致 | https://labs.cloudsecurityalliance.org/research/csa-research-note-megalodon-github-actions-cicd-supply-chain , https://stepsecurity.io/blog/megalodon-mass-github-actions-secret-exfiltration-across-5-500-public-repositories |
-| sckit-memos | OpenClaw / MemoryOS（2026-09-23） | npm @memtensor/memos-cloud-openclaw-plugin 0.1.21 / 0.1.23 / 0.1.25、PyPI MemoryOS 2.0.34。C2 は skyleen[.]fr（Socket） | 一致（版番号と C2 は仕様に不足） | https://thehackernews.com/2026/09/compromised-memtensor-packages-deliver.html , https://safedep.io/memtensor-sckit-worm-npm-pypi/ |
-| @redhat-cloud-services/* | MAL-2026-5141 / OIDC publisher 侵害 | MAL-2026-5141 は host-inventory-client 5.0.3 / 5.0.4 / 5.0.6 の 1 パッケージのみ。他のパッケージは MAL-2026-5142 / 5143 などの別 ID。OIDC trusted publisher の悪用は一致 | 一致（ID は 1 パッケージ分のみ） | https://osv.dev/vulnerability/MAL-2026-5141 , https://www.bleepingcomputer.com/news/security/red-hat-npm-packages-compromised-to-steal-developer-credentials |
-| sap-npm | SAP 関連（2026-05） | 調査していない | 確認できず | — |
-| nx-console | 悪性版 | 18.95.0（2026-05-18）、CVE-2026-48027、KEV 掲載、修正版は 18.100.0 | 一致（版番号は仕様に不足） | https://nx.dev/blog/nx-console-v18-95-0-postmortem , https://www.stepsecurity.io/blog/nx-console-vs-code-extension-compromised |
-| ovhcloud-cli | 2026-10-19 リリース / GlassWorm 経由 | v0.11.0〜v0.15.0 のリリースバイナリが 2026-10-19 に差し替えられた。安全版は v0.16.0。侵入経路は開発者の GitHub アカウント侵害。GlassWorm との関連は研究者の仮説で、OVHcloud は言及していない | 相違あり（帰属が未確定） | https://www.helpnetsecurity.com/2026/10/21/ovhcloud-cli-github-malware/ , https://www.securityweek.com/hijacked-developer-account-used-to-plant-stealer-in-ovhcloud-cli/ |
-| typosquat-payment-sdk | 決済 SDK のタイポ（2026-06〜07） | 調査していない | 確認できず | — |
+| litellm (malicious version / safe version) | 1.107.0 / 1.106.2 | 7 wheels of 1.107.0 are malicious. Published 2026-10-21; safe version 1.106.2 (Chainguard) | Match | https://research.jfrog.com/post/litellm-hijacked-again/ , https://www.stepsecurity.io/blog/litellm-1-107-0-compromised-pypi-backdoored-wheels-credential-stealer , https://www.chainguard.dev/unchained/litellm-attacked-again-malicious-1-107-0-wheels-on-pypi-and-docker-hub-october-2026 |
+| litellm (malicious files) | cook.pth / cook.py / sitecustomize.py | cook.pth (`import cook`) → cook.py, a daemon in sitecustomize.py, `/tmp/remote_code_loader.lock` | Match | https://www.mend.io/blog/litellm-1-107-0-compromised/ , https://www.endorlabs.com/learn/litellm-1-107-0-compromised-python-startup-hooks-steal-cloud-ai-and-proxy-credentials |
+| litellm (Docker image) | Not stated | The Docker Hub image was also compromised (StepSecurity / Chainguard) | Differs (missing from the specification) | https://socket.dev/blog/litellm-compromise |
+| certifi | <2026.10.19 / 2026.10.19 (campaign: litellm-oct2026) | GHSA-6q48-6c7w-9gw2. Affected range 2019.03.09 to <2026.10.19 (removes emSign ECC Root CA G3). Caused by the eMudhra incident, unrelated to LiteLLM | Differs (wrong campaign link) | https://www.openwall.com/lists/oss-security/2026/10/20/20 , https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576 |
+| @tanstack/* (scale) | 42pkg / 84ver | 42 packages and 84 versions published on 2026-05-11. GHSA-g7cv-rxg3-hmpx / CVE-2026-45321 | Match | https://socket.dev/blog/tanstack-npm-packages-compromised-mini-shai-hulud-supply-chain-attack , https://advisories.gitlab.com/npm/@tanstack/react-router/CVE-2026-45321/ |
+| @tanstack/* (malicious files) | router_init.js / tanstack_runner.js / vite_setup.mjs | The file names could not be checked in this survey | Could not confirm | — |
+| mistralai | 2.4.6 / 2.4.5 | mistralai 2.4.6 on PyPI is malicious; 2.4.5 is safe | Match | https://www.wiz.io/blog/mini-shai-hulud-strikes-again-tanstack-more-npm-packages-compromised , https://phoenix.security/mini-shai-hulud-teampcp-tanstack/ |
+| guardrails-ai | 0.10.1 / 0.10.0 | 0.10.1 is malicious; 0.10.0 and earlier are safe | Match | https://socket.dev/blog/tanstack-npm-packages-compromised-mini-shai-hulud-supply-chain-attack |
+| intercom-client | Compromised version / "1,800+ developers affected" | The malicious version is 7.0.4 (2026-04-30, public for about 2 hours); the safe version is 7.0.3. GHSA-54pg-9963-v8vg. The figure "1,800+" is not found anywhere | Differs (version not stated, no corroboration for the number affected) | https://osv.dev/vulnerability/GHSA-54pg-9963-v8vg |
+| jscrambler | 8.14.0–8.20.0 (campaign: teampcp) | 5 malicious versions: 8.14.0 / 8.16.0 / 8.17.0 / 8.18.0 / 8.20.0; safe version 8.22.0. A Rust infostealer published 2026-07-11. Attribution to TeamPCP could not be confirmed; JFrog assesses it as IronWorm lineage | Differs | https://thehackernews.com/2026/07/compromised-jscrambler-8140-npm-release.html , https://www.attestd.io/blog/jscrambler-ironworm-npm-supply-chain |
+| @asyncapi/* | Compromised versions | Not investigated | Could not confirm | — |
+| @polymarket/* | Compromised versions | Not investigated | Could not confirm | — |
+| keyv | 6.0.0 / latest 5.x | 6.0.0 published 2026-08-04 (MAL-2026-11524). npm restored keyv@5.6.0 as latest | Match | https://osv.dev/vulnerability/MAL-2026-11524 , https://www.chainguard.dev/unchained/the-keyv-and-cacheable-npm-supply-chain-attack-inside-the-mini-shai-hulud-campaign |
+| flat-cache | 6.1.24 | 6.1.24 is malicious; 6.1.23 is safe | Match | https://www.stepsecurity.io/blog/chaindrop-npm-worm |
+| file-entry-cache | 11.1.6 | Datadog / StepSecurity list 11.1.6 as malicious. Chainguard gives no version number | Match (sources partly differ) | https://securitylabs.datadoghq.com/articles/npm-worm-compromises-popular-npm-packages/ |
+| cacheable-request | 13.0.20 | 13.0.20 is malicious; 13.0.19 is safe | Match | https://www.stepsecurity.io/blog/chaindrop-npm-worm |
+| cache-manager | 7.2.10 | 7.2.10 is malicious; 7.2.9 is safe | Match | https://www.chainguard.dev/unchained/the-keyv-and-cacheable-npm-supply-chain-attack-inside-the-mini-shai-hulud-campaign |
+| ecto | 5.0.1 | setup.mjs and Math_Symbol.js in ecto@5.0.1 are byte-for-byte identical to those in keyv@6.0.0 | Match | https://www.mend.io/blog/keyv-malicious-packages/ |
+| cacheable / @cacheable/memory / @cacheable/node-cache / @cacheable/utils / @cacheable/net | 2.5.1 / 2.2.1 / 3.1.2 / 2.5.1 / 2.1.1 | Listed as affected packages, but the individual versions could not be checked | Could not confirm | https://www.stepsecurity.io/blog/chaindrop-npm-worm |
+| lightning | 2.6.2, 2.6.3 / 2.6.1 / `_runtime/` (campaign: pypi-oct2026) | The values match (`_runtime` downloads and runs Bun). However, it was published on 2026-04-30 and is not an October incident | Differs (campaign name, timing) | https://lightning.ai/blog/pytorch-lightning-supply-chain-attack/ , https://snyk.io/blog/lightning-pypi-compromise-bun-based-credential-stealer/ |
+| telnyx | 4.87.1, 4.87.2 / 4.87.0 / 83.142.209.203:8080 (campaign: pypi-oct2026) | The values match (`http://83.142.209.203:8080/ringtone.wav`, GHSA-955r-262c-33jc). However, it was published on 2026-03-27 and is not an October incident | Differs (campaign name, timing) | https://advisories.gitlab.com/pypi/telnyx/GHSA-955r-262c-33jc/ , https://www.akamai.com/blog/security-research/telnyx-sdk-pypi-2026-teampcp-supply-chain-attacks |
+| py2ops | 2.2 | Only Vulert lists it as malicious. secure.software's scan of 2.2.1 found no malware, so the two contradict each other. Version 2.2 could not be confirmed | Could not confirm | https://vulert.com/vuln-db/malicious-code-in-py2ops--pypi- , https://secure.software/pypi/packages/py2ops/malware |
+| @solana-labs/web3js | 1.0.0, 1.0.2, 100+ / MAL-2026-5788 | MAL-2026-5788 (GHSA-pqhf-q5g8-6jpm, 2026-06-15). The version list differs by source (1.0.0–1.0.10, 1.98.103–1.98.110, 1.98.112, etc.) | Match (check the version list against the latest OSV entry) | https://osv.dev/vulnerability/MAL-2026-5788 |
+| solana-web3-stable | sibling | MAL-2026-10903 | Match | https://www.hacktron.ai/package/npm/solana-web3-stable/1.0.0 |
+| @solana-labs/spl-toke / web3-js / ancor | sibling | Could not be checked | Could not confirm | — |
+| tensorlake | 0.5.144 (2026-10-08) | 0.5.144 published 2026-10-08; 0.5.143 is the last safe version. Runs at preinstall and has a switch that wipes $HOME when it detects token revocation | Match | https://socket.dev/blog/tensorlake-compromise , https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/ |
+| imgdecode (malfex) | shellcode loader | Uploaded 2026-09-30. On Windows it injects shellcode into dllhost.exe through a DLL | Match | https://thehackernews.com/2026/10/malfex-npm-package-imgdecode-hides.html |
+| Namastex Labs related | npm→PyPI→crypto assets | @automagik/genie, pgserve, etc. (2026-04). Spread to npm and PyPI and steals wallets | Match (timing is 2026-04) | https://www.theregister.com/2026/04/22/another_npm_supply_chain_attack/ |
+| css-nesting-transform | 1.0.0 (2026-10-12) | MAL-2026-17804. Published on npm 2026-10-07, published in OSV 10-08, last updated 10-12. A reconnaissance package aimed at dependency confusion (sends whoami / id / uname to a webhook) | Differs (date) | https://osv.dev/vulnerability/MAL-2026-17804 , https://github.com/ossf/malicious-packages/pull/1602 |
+| HF datasets | Malicious datasets (2026-07-16) | Disclosed by Hugging Face on 2026-07-16. Two vectors: a remote code loader and template injection in the dataset configuration | Match | https://huggingface.co/blog/security-incident-july-2026 |
+| lerobot | CVE-2026-25874 / CVSS 9.8 | ≤0.5.1 affected. The CVSS differs by source: 9.3 (GHSA / THN) and 9.8 (CSA). No fixed version existed at disclosure | Differs (CVSS inconsistent between sources, fixed version not confirmed) | https://labs.cloudsecurityalliance.org/research/csa-research-note-lerobot-cve-2026-25874-unauth-rce-20260429/ , https://thehackernews.com/2026/04/critical-cve-2026-25874-leaves-hugging.html |
+| megalodon-ci | 5,561 repositories (2026-05) | 2026-05-18: 5,718 commits to 5,561 repositories in under 6 hours | Match | https://labs.cloudsecurityalliance.org/research/csa-research-note-megalodon-github-actions-cicd-supply-chain , https://stepsecurity.io/blog/megalodon-mass-github-actions-secret-exfiltration-across-5-500-public-repositories |
+| sckit-memos | OpenClaw / MemoryOS (2026-09-23) | npm @memtensor/memos-cloud-openclaw-plugin 0.1.21 / 0.1.23 / 0.1.25, PyPI MemoryOS 2.0.34. C2 is skyleen[.]fr (Socket) | Match (versions and C2 missing from the specification) | https://thehackernews.com/2026/09/compromised-memtensor-packages-deliver.html , https://safedep.io/memtensor-sckit-worm-npm-pypi/ |
+| @redhat-cloud-services/* | MAL-2026-5141 / OIDC publisher compromise | MAL-2026-5141 covers only one package, host-inventory-client 5.0.3 / 5.0.4 / 5.0.6. Other packages have separate IDs such as MAL-2026-5142 / 5143. The abuse of the OIDC trusted publisher matches | Match (the ID covers only one package) | https://osv.dev/vulnerability/MAL-2026-5141 , https://www.bleepingcomputer.com/news/security/red-hat-npm-packages-compromised-to-steal-developer-credentials |
+| sap-npm | SAP related (2026-05) | Not investigated | Could not confirm | — |
+| nx-console | Malicious version | 18.95.0 (2026-05-18), CVE-2026-48027, listed in KEV, fixed version 18.100.0 | Match (version missing from the specification) | https://nx.dev/blog/nx-console-v18-95-0-postmortem , https://www.stepsecurity.io/blog/nx-console-vs-code-extension-compromised |
+| ovhcloud-cli | 2026-10-19 release / via GlassWorm | Release binaries of v0.11.0–v0.15.0 were replaced on 2026-10-19. The safe version is v0.16.0. The entry point was a compromised developer GitHub account. The link to GlassWorm is a researcher's hypothesis; OVHcloud does not mention it | Differs (attribution not settled) | https://www.helpnetsecurity.com/2026/10/21/ovhcloud-cli-github-malware/ , https://www.securityweek.com/hijacked-developer-account-used-to-plant-stealer-in-ovhcloud-cli/ |
+| typosquat-payment-sdk | Payment SDK typosquats (2026-06 to 07) | Not investigated | Could not confirm | — |
 
 ## 2. `worm_iocs`
 
-| 項目 | 仕様値 | 一次情報の値 | 判定 | 根拠URL |
+| Item | Specification value | Primary-source value | Verdict | Source URL |
 |---|---|---|---|---|
-| chaindrop.files | setup.mjs / Math_Symbol.js | 同じ 2 ファイル（ドロッパーと第 2 段） | 一致 | https://snyk.io/blog/inside-keyv-npm-compromise-preinstall-malware-trusted-provenance-ide-hooks/ |
-| chaindrop.files | math_init.js | 確認できなかった | 確認できず | — |
-| chaindrop.preinstall | `node setup.mjs` | preinstall フックで setup.mjs を実行する | 一致 | https://www.mend.io/blog/keyv-malicious-packages/ |
-| setup.mjs sha256 #1 | 54dc7ea5…b350668 | 同じ値 | 一致 | https://www.mend.io/blog/keyv-malicious-packages/ |
-| setup.mjs sha256 #2 | fd3ca400…5684b1eb | 検索結果に一致するものがなかった | 確認できず | — |
-| Math_Symbol.js sha256 | 9fc2570b…cf1bcc | Math_Symbol.js として同じ値。math_init.js にも同じ値を割り当てている根拠は見つからない | 一致（math_init.js 分は確認できず） | https://www.mend.io/blog/keyv-malicious-packages/ |
-| chaindrop C2 | npm-cache[.]com / pypi-get[.]com / js-mirror[.]com | 一致。ただし新しい C2 `awqhnjewqjkl[.]icu` と解決コントラクト `0xE1f2395ee43e45A1556EC6438a88c31B83493103` が仕様にない | 相違あり（IoC 不足） | https://unit42.paloaltonetworks.com/chaindrop-npm-worm-analysis/ , https://www.microsoft.com/en-us/security/blog/2026/08/04/chaindrop-supply-chain-compromise-anatomy-self-propagating-worm/ |
-| chaindrop RPC | eth-mainnet.nodereal.io / go.getblock.io / eth.llamarpc.com | IoC として列挙されている。ただし正規サービスなので、想定外の CI ランナーからの接続だけを調査対象にすべき | 一致（誤検知に注意） | https://op-c.net/blog/chaindrop-npm-supply-chain-attack/ |
-| teampcp.c2_ip | 83.142.209.194 / 94.154.172.43 | どちらも FBI の IoC セットに含まれる | 一致 | https://www.ic3.gov/CSA/2026/260702.pdf , https://research.jfrog.com/post/shai-hulud-here-we-go-again/ |
-| teampcp.c2_domains | api.masscan.cloud / git-tanstack.com | キャンペーンの C2 として記載されている | 一致 | https://crimson7.io/resources/blogs/teampcp-mini-shai-hulud-supply-chain-campaign/ |
-| teampcp.c2_domains | seed1 / seed2.getsession.org | 窃取データの搬送に使われた。ただし Session メッセンジャーの正規インフラで、DNS 単位での遮断が推奨されている | 一致（誤検知に注意） | https://phoenix.security/mini-shai-hulud-teampcp-tanstack/ |
-| teampcp.urls | https://83.142.209.194/v1/weights , /audio.mp3 | 確認できなかった | 確認できず | — |
-| teampcp.urls | api.github.com/search/commits?q=FIRESCALE | 確認できなかった | 確認できず | — |
-| teampcp.oidc_technique | `/proc/<pid>/mem` から OIDC を抽出 | TanStack の事後報告に「runner のメモリから OIDC トークンを抽出」とある | 一致 | https://corgea.com/research/tanstack-supply-chain-attack-mini-shai-hulud |
-| teampcp.deadman_switch | GitHub 認証情報の失効で $HOME を全削除 | 同じ挙動の記録は tensorlake（gh-token-monitor）と Miasma にある。TeamPCP 本体の記録としては、JFrog が「破壊的コマンドを実行する分岐がある」と記載するのみ | 相違あり（帰属が曖昧） | https://socket.dev/blog/tensorlake-compromise , https://research.jfrog.com/post/shai-hulud-here-we-go-again/ |
-| post_shaihulud / IronWorm | Rust 製の窃取マルウェア | Rust 製。eBPF ルートキットと Tor C2 を持ち、npm の 36〜37 パッケージに混入（2026-06） | 一致 | https://research.jfrog.com/post/iron-worm-shai-hulud-rustier-cousin/ |
-| IronWorm masquerade | cargo-install | Cargo では build-script フックを使う。「cargo-install」という名前での偽装は確認できなかった | 確認できず | https://research.jfrog.com/post/iron-worm-shai-hulud-rustier-cousin/ |
-| sckit | Go 製 / MemOS・MemoryOS / 2026-09-23 | 一致 | 一致 | https://safedep.io/memtensor-sckit-worm-npm-pypi/ |
-| miasma.deadman_switch | トークン失効を検知して $HOME を削除 | 失効を検知すると `rm -rf ~/` を実行（最大 72 時間） | 一致 | https://www.bleepingcomputer.com/news/security/the-miasma-worm-source-code-briefly-leaked-on-github/ |
-| miasma.leaked_source | 2026-06-10 に一時公開 | The Register によれば 2026-06-08 に公開された（報道は 06-09〜10） | 相違あり（日付） | https://www.theregister.com/cyber-crime/2026/06/09/miasma-supply-chain-attack-toolkit-goes-public-on-github/5253074 |
-| miasma の分類 | AI 武器化 | AI コーディングツールの設定を汚染する機能はある。リーク後に悪用された事例は確認されていない（Wiz の McCarthy） | 相違あり（表現が過大） | 同上 |
-| quasar_linux（QLNX） | userland LD_PRELOAD + kernel eBPF | `/etc/ld.so.preload` を使う LD_PRELOAD ルートキットと、BPF マップを管理する eBPF 部分（カーネル側プログラムの有無はソースで見解が分かれる） | 一致 | https://labs.cloudsecurityalliance.org/research/csa-research-note-quasar-linux-rat-supply-chain-20260509/ |
-| quasar_linux.persistence | systemd / crontab / init.d / XDG / .bashrc | 項目ごとには照合しなかった | 確認できず | — |
-| linkpro | eBPF + LD_PRELOAD フォールバック | eBPF Hide モジュールが使えないとき `/etc/ld.so.preload`（`/etc/libld.so`）に切り替える。報告は 2025-10（Synacktiv） | 一致 | https://thehackernews.com/2025/10/linkpro-linux-rootkit-uses-ebpf-to-hide.html |
-| voidlink | LD_PRELOAD / LKM / eBPF | 一致（Check Point 2026-01、Elastic の解析） | 一致 | https://research.checkpoint.com/2026/voidlink-the-cloud-native-malware-framework/ , https://www.elastic.co/security-labs/illuminating-voidlink |
+| chaindrop.files | setup.mjs / Math_Symbol.js | The same 2 files (dropper and second stage) | Match | https://snyk.io/blog/inside-keyv-npm-compromise-preinstall-malware-trusted-provenance-ide-hooks/ |
+| chaindrop.files | math_init.js | Could not be confirmed | Could not confirm | — |
+| chaindrop.preinstall | `node setup.mjs` | Runs setup.mjs from a preinstall hook | Match | https://www.mend.io/blog/keyv-malicious-packages/ |
+| setup.mjs sha256 #1 | 54dc7ea5…b350668 | Same value | Match | https://www.mend.io/blog/keyv-malicious-packages/ |
+| setup.mjs sha256 #2 | fd3ca400…5684b1eb | No match in the search results | Could not confirm | — |
+| Math_Symbol.js sha256 | 9fc2570b…cf1bcc | Same value for Math_Symbol.js. No grounds were found for assigning the same value to math_init.js | Match (could not confirm for math_init.js) | https://www.mend.io/blog/keyv-malicious-packages/ |
+| chaindrop C2 | npm-cache[.]com / pypi-get[.]com / js-mirror[.]com | Match. However, the new C2 `awqhnjewqjkl[.]icu` and the resolver contract `0xE1f2395ee43e45A1556EC6438a88c31B83493103` are not in the specification | Differs (missing IoCs) | https://unit42.paloaltonetworks.com/chaindrop-npm-worm-analysis/ , https://www.microsoft.com/en-us/security/blog/2026/08/04/chaindrop-supply-chain-compromise-anatomy-self-propagating-worm/ |
+| chaindrop RPC | eth-mainnet.nodereal.io / go.getblock.io / eth.llamarpc.com | Listed as IoCs. However, they are legitimate services, so only connections from unexpected CI runners should be investigated | Match (beware of false positives) | https://op-c.net/blog/chaindrop-npm-supply-chain-attack/ |
+| teampcp.c2_ip | 83.142.209.194 / 94.154.172.43 | Both are in the FBI's IoC set | Match | https://www.ic3.gov/CSA/2026/260702.pdf , https://research.jfrog.com/post/shai-hulud-here-we-go-again/ |
+| teampcp.c2_domains | api.masscan.cloud / git-tanstack.com | Listed as the campaign's C2 | Match | https://crimson7.io/resources/blogs/teampcp-mini-shai-hulud-supply-chain-campaign/ |
+| teampcp.c2_domains | seed1 / seed2.getsession.org | Used to carry stolen data. However, it is legitimate infrastructure of the Session messenger, and blocking at the DNS level is recommended | Match (beware of false positives) | https://phoenix.security/mini-shai-hulud-teampcp-tanstack/ |
+| teampcp.urls | https://83.142.209.194/v1/weights , /audio.mp3 | Could not be confirmed | Could not confirm | — |
+| teampcp.urls | api.github.com/search/commits?q=FIRESCALE | Could not be confirmed | Could not confirm | — |
+| teampcp.oidc_technique | Extract OIDC from `/proc/<pid>/mem` | TanStack's post-incident report says "extracted the OIDC token from the runner's memory" | Match | https://corgea.com/research/tanstack-supply-chain-attack-mini-shai-hulud |
+| teampcp.deadman_switch | Wipe all of $HOME when GitHub credentials are revoked | The same behavior is recorded for tensorlake (gh-token-monitor) and Miasma. For TeamPCP itself, JFrog only states that "there is a branch that runs destructive commands" | Differs (attribution unclear) | https://socket.dev/blog/tensorlake-compromise , https://research.jfrog.com/post/shai-hulud-here-we-go-again/ |
+| post_shaihulud / IronWorm | Rust stealer malware | Written in Rust. Has an eBPF rootkit and Tor C2, and was planted in 36–37 npm packages (2026-06) | Match | https://research.jfrog.com/post/iron-worm-shai-hulud-rustier-cousin/ |
+| IronWorm masquerade | cargo-install | On Cargo it uses build-script hooks. Masquerading under the name "cargo-install" could not be confirmed | Could not confirm | https://research.jfrog.com/post/iron-worm-shai-hulud-rustier-cousin/ |
+| sckit | Written in Go / MemOS, MemoryOS / 2026-09-23 | Match | Match | https://safedep.io/memtensor-sckit-worm-npm-pypi/ |
+| miasma.deadman_switch | Delete $HOME on detecting token revocation | Runs `rm -rf ~/` on detecting revocation (up to 72 hours) | Match | https://www.bleepingcomputer.com/news/security/the-miasma-worm-source-code-briefly-leaked-on-github/ |
+| miasma.leaked_source | Briefly public on 2026-06-10 | According to The Register it was published on 2026-06-08 (reported 06-09 to 10) | Differs (date) | https://www.theregister.com/cyber-crime/2026/06/09/miasma-supply-chain-attack-toolkit-goes-public-on-github/5253074 |
+| Classification of miasma | AI weaponization | It has a feature that poisons AI coding tool settings. No abuse after the leak has been confirmed (McCarthy of Wiz) | Differs (overstated) | Same as above |
+| quasar_linux (QLNX) | userland LD_PRELOAD + kernel eBPF | An LD_PRELOAD rootkit using `/etc/ld.so.preload` and an eBPF part that manages BPF maps (sources disagree on whether a kernel-side program exists) | Match | https://labs.cloudsecurityalliance.org/research/csa-research-note-quasar-linux-rat-supply-chain-20260509/ |
+| quasar_linux.persistence | systemd / crontab / init.d / XDG / .bashrc | Not checked item by item | Could not confirm | — |
+| linkpro | eBPF + LD_PRELOAD fallback | Switches to `/etc/ld.so.preload` (`/etc/libld.so`) when the eBPF Hide module cannot be used. Reported 2025-10 (Synacktiv) | Match | https://thehackernews.com/2025/10/linkpro-linux-rootkit-uses-ebpf-to-hide.html |
+| voidlink | LD_PRELOAD / LKM / eBPF | Match (Check Point 2026-01, Elastic's analysis) | Match | https://research.checkpoint.com/2026/voidlink-the-cloud-native-malware-framework/ , https://www.elastic.co/security-labs/illuminating-voidlink |
 
 ## 3. `infrastructures[]`
 
-| 項目 | 仕様値 | 一次情報の値 | 判定 | 根拠URL |
+| Item | Specification value | Primary-source value | Verdict | Source URL |
 |---|---|---|---|---|
-| GitLab CVE-2026-110264 | 10.0 / 認証不要の RCE | 10.0、2026-10-21 修正（18.11.13〜19.5.1 の 7 系列）、10-22 時点で KEV 未掲載 | 一致（修正版は仕様に不足） | https://thehackernews.com/2026/10/critical-gitlab-flaw-cvss-100-could.html , https://securityonline.info/gitlab-critical-patch-release-cve-2026-110264/ |
-| GitLab CVE-2026-85706 | 10.0 / パストラバーサル | 10.0、commits API 経由の認証不要な任意ファイル読取。修正版 19.1.8 / 19.2.6 / 19.3.2、KEV 掲載は 2026-09-11 | 一致 | https://www.rapid7.com/blog/post/etr-cve-2026-85706-critical-gitlab-path-traversal-exploited-in-the-wild/ |
-| GitLab CVE-2026-19478 | 9.4 / GraphQL コードインジェクション | GraphQL コードインジェクションで悪用されたとの言及はある。CVSS 9.4 と影響版は確認できなかった | 確認できず | https://www.securityweek.com/gitlab-vulnerability-exploited-one-day-after-disclosure/ |
-| TeamCity CVE-2026-63077 | 9.8 / <2026.1.3, <2025.11.7 / KEV 期限 2026-08-08 | 9.8、修正版 2025.11.7 / 2026.1.3、KEV 掲載は 2026-08-05 で期限 2026-08-08 | 一致 | https://www.rapid7.com/blog/post/etr-cve-2026-63077-critical-unauthenticated-remote-code-execution-in-jetbrains-teamcity/ , https://kev.5sn.com/2026/CVE-2026-63077 |
-| Artifactory CVE-2026-82329 | 9.8 / 6 系列の修正版 | 9.8、修正版 7.111.21 / 7.117.28 / 7.125.20 / 7.133.29 / 7.146.38 / 7.161.20。7.111.21 が境界値に含まれるかは JFrog の表記が曖昧 | 一致 | https://docs.jfrog.com/releases/docs/jfrog-security-advisories , https://bishopfox.com/blog/cve-2026-82329-unauthenticated-administrative-access-in-jfrog-artifactory-via-an-empty-cluster-join-key |
-| Docker CVE-2026-17106 | CopyEscape（docker cp） | `docker cp` でホスト上の任意ファイルに書き込める（Imperva）。修正が確認できたのは Docker Sandboxes 0.38.0 の `sbx cp` のみで、Docker CLI 側の修正版は見つからない | 一致（修正版は確認できず） | https://www.imperva.com/blog/copyescape-taking-over-docker-hosts-with-docker-cp/ |
-| Kernel CVE-2026-31431 | Copy Fail / CISA KEV | KEV 掲載は 2026-05-01（期限 05-15）。修正版 6.18.22 / 6.19.12 / 7.0 | 一致 | https://threatprotect.qualys.com/2026/05/04/linux-kernel-vulnerability-exploited-in-the-wild-copy-fail-cve-2026-31431/ |
-| Kernel CVE-2026-80521 | AF_UNIX UAF / コンテナからホスト root / 7.8 | 7.8、SCM_RIGHTS の GC 競合。修正版 6.12.111 / 6.18.53 / 7.1.10 / 7.2（二次情報） | 一致 | https://www.yorku.ca/uit/2026/09/linux-kernel-container-escape-vulnerability-cve-2026-80521/ |
-| Kernel CVE-2026-64564 | SCTPhantom / SCTP UAF / 「6/8 でエスケープ成功」 | ASCONF UAF（Tencent Zhuque Lab、2026-08-06）。修正版 6.6.148 / 6.12.101 / 6.18.42 / 7.1.6。「6/8」という成功率は確認できなかった | 相違あり（成功率の裏付けなし） | https://matrix.tencent.com/en/2026/08/06/sctphantom-CVE-2026-64564 , https://blog.cloudlinux.com/sctphantom-cve-2026-64564-local-root-exploit-status-and-fixes-for-cloudlinux/ |
-| Sigstore CVE-2026-22772 | Fulcio metaRegex SSRF / <1.8.5 | 一致（GHSA-59jp-pj84-45mr） | 一致 | https://nvd.nist.gov/vuln/detail/cve-2026-22772 |
-| Sigstore CVE-2026-22703 | Rekor の任意エントリ受理 / <2.6.2, <3.0.4 | 対象製品は **Cosign**。成果物を参照しない Rekor エントリを含むバンドルでも検証が通る。版範囲は一致 | 相違あり（製品名） | https://osv.dev/CVE-2026-22703 , https://advisories.gitlab.com/pkg/golang/github.com/sigstore/cosign/v2/CVE-2026-22703/ |
-| Sigstore CVE-2026-39395 | verify-blob-attestation の偽陽性 / 修正 3.0.6, 2.6.3 | 一致（GHSA-w6c6-c85g-mmv6、4.3） | 一致 | https://nvd.nist.gov/vuln/detail/CVE-2026-39395 |
-| Sigstore GHSA-fx35-mq7g-6g98 | レガシーバンドル検証バイパス / 修正 3.1.3 | 公開鍵を使ったレガシーバンドル検証バイパス。v2.6.5 にバックポートされたことは確認できたが、「3.1.3」は確認できなかった | 相違あり（修正版の裏付けが不足） | https://newreleases.io/project/github/sigstore/cosign/release/v2.6.5 |
-| Sigstore CVE-2026-31830 | sigstore-ruby / <0.2.3 | 一致（GHSA-mhg6-2q2v-9h2c、7.5） | 一致 | https://nvd.nist.gov/vuln/detail/CVE-2026-31830 |
+| GitLab CVE-2026-110264 | 10.0 / unauthenticated RCE | 10.0, fixed 2026-10-21 (7 release lines from 18.11.13 to 19.5.1), not in KEV as of 10-22 | Match (fixed versions missing from the specification) | https://thehackernews.com/2026/10/critical-gitlab-flaw-cvss-100-could.html , https://securityonline.info/gitlab-critical-patch-release-cve-2026-110264/ |
+| GitLab CVE-2026-85706 | 10.0 / path traversal | 10.0, unauthenticated arbitrary file read through the commits API. Fixed versions 19.1.8 / 19.2.6 / 19.3.2, added to KEV on 2026-09-11 | Match | https://www.rapid7.com/blog/post/etr-cve-2026-85706-critical-gitlab-path-traversal-exploited-in-the-wild/ |
+| GitLab CVE-2026-19478 | 9.4 / GraphQL code injection | There is mention of exploitation through GraphQL code injection. CVSS 9.4 and the affected versions could not be confirmed | Could not confirm | https://www.securityweek.com/gitlab-vulnerability-exploited-one-day-after-disclosure/ |
+| TeamCity CVE-2026-63077 | 9.8 / <2026.1.3, <2025.11.7 / KEV due 2026-08-08 | 9.8, fixed versions 2025.11.7 / 2026.1.3, added to KEV on 2026-08-05 with due date 2026-08-08 | Match | https://www.rapid7.com/blog/post/etr-cve-2026-63077-critical-unauthenticated-remote-code-execution-in-jetbrains-teamcity/ , https://kev.5sn.com/2026/CVE-2026-63077 |
+| Artifactory CVE-2026-82329 | 9.8 / fixed versions for 6 release lines | 9.8, fixed versions 7.111.21 / 7.117.28 / 7.125.20 / 7.133.29 / 7.146.38 / 7.161.20. JFrog's wording is ambiguous about whether 7.111.21 is included in the boundary | Match | https://docs.jfrog.com/releases/docs/jfrog-security-advisories , https://bishopfox.com/blog/cve-2026-82329-unauthenticated-administrative-access-in-jfrog-artifactory-via-an-empty-cluster-join-key |
+| Docker CVE-2026-17106 | CopyEscape (docker cp) | `docker cp` can write arbitrary files on the host (Imperva). The only confirmed fix is `sbx cp` in Docker Sandboxes 0.38.0; no fixed version on the Docker CLI side was found | Match (fixed version could not be confirmed) | https://www.imperva.com/blog/copyescape-taking-over-docker-hosts-with-docker-cp/ |
+| Kernel CVE-2026-31431 | Copy Fail / CISA KEV | Added to KEV on 2026-05-01 (due 05-15). Fixed versions 6.18.22 / 6.19.12 / 7.0 | Match | https://threatprotect.qualys.com/2026/05/04/linux-kernel-vulnerability-exploited-in-the-wild-copy-fail-cve-2026-31431/ |
+| Kernel CVE-2026-80521 | AF_UNIX UAF / container to host root / 7.8 | 7.8, a GC race in SCM_RIGHTS. Fixed versions 6.12.111 / 6.18.53 / 7.1.10 / 7.2 (secondary source) | Match | https://www.yorku.ca/uit/2026/09/linux-kernel-container-escape-vulnerability-cve-2026-80521/ |
+| Kernel CVE-2026-64564 | SCTPhantom / SCTP UAF / "escape succeeded 6/8 times" | ASCONF UAF (Tencent Zhuque Lab, 2026-08-06). Fixed versions 6.6.148 / 6.12.101 / 6.18.42 / 7.1.6. The "6/8" success rate could not be confirmed | Differs (no corroboration for the success rate) | https://matrix.tencent.com/en/2026/08/06/sctphantom-CVE-2026-64564 , https://blog.cloudlinux.com/sctphantom-cve-2026-64564-local-root-exploit-status-and-fixes-for-cloudlinux/ |
+| Sigstore CVE-2026-22772 | Fulcio metaRegex SSRF / <1.8.5 | Match (GHSA-59jp-pj84-45mr) | Match | https://nvd.nist.gov/vuln/detail/cve-2026-22772 |
+| Sigstore CVE-2026-22703 | Rekor accepts arbitrary entries / <2.6.2, <3.0.4 | The affected product is **Cosign**. Verification passes even for a bundle containing a Rekor entry that does not refer to the artifact. The version ranges match | Differs (product name) | https://osv.dev/CVE-2026-22703 , https://advisories.gitlab.com/pkg/golang/github.com/sigstore/cosign/v2/CVE-2026-22703/ |
+| Sigstore CVE-2026-39395 | False positive in verify-blob-attestation / fixed 3.0.6, 2.6.3 | Match (GHSA-w6c6-c85g-mmv6, 4.3) | Match | https://nvd.nist.gov/vuln/detail/CVE-2026-39395 |
+| Sigstore GHSA-fx35-mq7g-6g98 | Legacy bundle verification bypass / fixed 3.1.3 | A legacy bundle verification bypass using a public key. The backport to v2.6.5 was confirmed, but "3.1.3" could not be confirmed | Differs (insufficient corroboration of the fixed version) | https://newreleases.io/project/github/sigstore/cosign/release/v2.6.5 |
+| Sigstore CVE-2026-31830 | sigstore-ruby / <0.2.3 | Match (GHSA-mhg6-2q2v-9h2c, 7.5) | Match | https://nvd.nist.gov/vuln/detail/CVE-2026-31830 |
 
 ## 4. `mcp_poisoning` / `ai_coding_assistant`
 
-| 項目 | 仕様値 | 一次情報の値 | 判定 | 根拠URL |
+| Item | Specification value | Primary-source value | Verdict | Source URL |
 |---|---|---|---|---|
-| SymJack | 対象設定ファイル / `ln -s ../.claude/settings.json docs/vid-settings.mp4` | Adversa AI が 2026-05-26 に公表。検出ルール ATR-2026-00572 に同じ例がある。CVE は未割当 | 一致 | https://adversa.ai/blog/the-approval-prompt-is-lying-to-you-symlink-rce-in-five-ai-coding-agents-claude-code-cursor-antigravity-copilot-grok-build/ , https://agentthreatrule.org/zh/rules/ATR-2026-00572 |
-| SymJack 対策 | Claude Code v2.1.129+ | 「v2.1.129 で部分的に修正」とする二次情報がある | 一致（二次情報、部分的な修正） | http://sdd.sh/2026/06/symjack-trustfall-rce-ai-coding-agents/ |
-| Deadbugz | 最初の 3 回は正常、4 回目以降に悪性化 | 3 回目の tools/call 以降、tools/list と prompts/get の応答が改変される（Pillar） | 一致 | https://www.pillar.security/blog/deadbugz-currently-active-mcp-supply-chain-campaign |
-| NeighborJack | 隣接する脆弱な MCP 経由の間接侵害 / 内部 IP の登録を検出 | Backslash（2025-06）: MCP サーバーが 0.0.0.0 に bind し、LAN から到達できる設定不備 | 相違あり（定義・検出対象） | https://www.csoonline.com/article/4012712/misconfigured-mcp-servers-expose-ai-agent-systems-to-compromise.html |
-| SPECTER MCP-POISON | レジストリ汚染ツール | 該当するものが見つからない | 確認できず | — |
-| CVE-2026-52869 | MCP レジストリ供給網 / 7.6 | MCP Python SDK でセッション ID と認証主体が紐付けられていない不備。CVSS 7.1、修正版 1.27.2（GHSA-jpw9-pfvf-9f58） | 相違あり（内容と CVSS） | https://osv.dev/CVE-2026-52869 , https://advisories.gitlab.com/pypi/mcp/CVE-2026-52869/ |
-| CVE-2026-58500 | MCP Appium の XSS から RCE | appium-mcp の locator UI の XSS、8.2、修正版 1.85.10（GHSA-x975-rgx4-5fh4）。RCE とは記載されていない | 相違あり（RCE の表現） | https://osv.dev/vulnerability/CVE-2026-58500 |
-| CVE-2026-104850 | MCP TS SDK の OAuth 偽装 | 7.5、修正版 1.31.0 / 2.2.0（GHSA-6qxp-vccf-f47h） | 一致 | https://advisories.gitlab.com/npm/@modelcontextprotocol/sdk/CVE-2026-104850/ |
-| CVE-2026-104120 | mcp-server-fetch / everything の fetch_url | SSRF（≤2026.6.4）、修正版はまだない | 一致 | https://app.opencve.io/cve/CVE-2026-104120 |
-| CVE-2026-111767 | InMemoryTaskStore のアクセス制御不備 | 同種の不備は WS-2026-0090（@modelcontextprotocol/sdk 1.24.0〜1.31.0、修正版 1.32.0）。CVE 番号との対応は確認できなかった | 確認できず | https://mend.io/vulnerability-database/WS-2026-0090/ |
-| CVE-2026-59951 | FastMCP のセッション蓄積 | MCP Python SDK の Streamable HTTP でセッションが無制限に溜まる。修正版 1.30.0 / 2.2.0 | 一致 | https://osv.dev/vulnerability/CVE-2026-59951 |
-| CVE-2026-61559 | gitlab-mcp のサーバーサイド不備 | @zereight/mcp-gitlab の SSRF でトークンが漏れる。9.6、修正版 2.1.27 | 一致 | https://osv.dev/vulnerability/CVE-2026-61559 |
-| ToolHive GO-2026-5996 | IPv6 NAT64 レンジの見落とし | CVE-2026-54450。64:ff9b::/96 と 64:ff9b:1::/48 を見落とす | 一致 | https://osv.dev/vulnerability/GO-2026-5996 |
-| ToolHive GO-2026-6002 | NAT64 / host.docker.internal | GO-2026-6002 は認証ディスカバリ経路の SSRF（CVE-2026-58196）。host.docker.internal 経由の横移動は別件の CVE-2026-58197 | 相違あり（混同） | https://advisories.gitlab.com/pkg/golang/github.com/stacklok/toolhive/ |
-| Cursor CVE-2026-26268 | 9.9 / 2.5 で修正 | NVD は 9.9、GitHub（CNA）は 8.0。.git の設定・フックへの書き込みによるサンドボックス脱出で、2.5 で修正 | 一致 | https://nvd.nist.gov/vuln/detail/CVE-2026-26268 |
-| Cursor CVE-2026-50548 | Zero-Click プロンプトインジェクション（§41 では「<2.5」） | DuneSlide。9.8、`run_terminal_cmd` の working_directory を使ったパストラバーサル。**修正版は Cursor 3.0** | 相違あり（修正版） | https://thehackernews.com/2026/07/critical-cursor-flaws-could-let-prompt.html , https://www.catonetworks.com/blog/duneslide-two-critical-rce-vulnerabilities |
-| EUVD-2026-39537 | CVE-2026-50548 の別名 | 対応関係を確認できなかった | 確認できず | — |
-| Cursor CVE-2025-54136 | MCP JSON の Zero-Click 構成 RCE | MCPoison。7.2、1.3 で修正 | 一致 | https://blog.checkpoint.com/research/cursor-ide-persistent-code-execution-via-mcp-trust-bypass/ |
-| Cursor git.exe 0-day | 未修正 / リポジトリルートの git.exe を自動実行 | Mindgard が 2026-07-14 に公表（3.2.16 まで未修正）。同じ挙動は Copilot CLI / Gemini CLI / Codex でも報告されている | 一致 | https://www.securityweek.com/unpatched-cursor-vulnerability-exposes-users-to-code-execution/ |
-| Copilot CVE-2025-62222 | 信頼ダイアログ表示前のコマンド実行 | VS Code Copilot Chat 拡張のコマンドインジェクション（8.8、修正版 0.32.5）。「信頼ダイアログ表示前」の実行は確認できなかった | 相違あり（説明） | https://osv.dev/vulnerability/CVE-2025-62222 |
-| Copilot CVE-2026-50510 | JetBrains 版のローカルコード実行 | 7.8、<1.13.0（CWE-641） | 一致 | https://app.opencve.io/cve/CVE-2026-50510 |
+| SymJack | Targeted configuration files / `ln -s ../.claude/settings.json docs/vid-settings.mp4` | Disclosed by Adversa AI on 2026-05-26. Detection rule ATR-2026-00572 has the same example. No CVE assigned | Match | https://adversa.ai/blog/the-approval-prompt-is-lying-to-you-symlink-rce-in-five-ai-coding-agents-claude-code-cursor-antigravity-copilot-grok-build/ , https://agentthreatrule.org/zh/rules/ATR-2026-00572 |
+| SymJack mitigation | Claude Code v2.1.129+ | A secondary source says "partially fixed in v2.1.129" | Match (secondary source, partial fix) | http://sdd.sh/2026/06/symjack-trustfall-rce-ai-coding-agents/ |
+| Deadbugz | Normal for the first 3 calls, malicious from the 4th onward | From the 3rd tools/call onward, the responses to tools/list and prompts/get are altered (Pillar) | Match | https://www.pillar.security/blog/deadbugz-currently-active-mcp-supply-chain-campaign |
+| NeighborJack | Indirect compromise via an adjacent vulnerable MCP / detect registration of internal IPs | Backslash (2025-06): a misconfiguration where an MCP server binds to 0.0.0.0 and is reachable from the LAN | Differs (definition, detection target) | https://www.csoonline.com/article/4012712/misconfigured-mcp-servers-expose-ai-agent-systems-to-compromise.html |
+| SPECTER MCP-POISON | Registry-poisoning tool | Nothing matching was found | Could not confirm | — |
+| CVE-2026-52869 | MCP registry supply chain / 7.6 | A flaw in the MCP Python SDK where the session ID is not bound to the authenticated principal. CVSS 7.1, fixed version 1.27.2 (GHSA-jpw9-pfvf-9f58) | Differs (content and CVSS) | https://osv.dev/CVE-2026-52869 , https://advisories.gitlab.com/pypi/mcp/CVE-2026-52869/ |
+| CVE-2026-58500 | XSS to RCE in MCP Appium | XSS in the locator UI of appium-mcp, 8.2, fixed version 1.85.10 (GHSA-x975-rgx4-5fh4). Not described as RCE | Differs (the RCE wording) | https://osv.dev/vulnerability/CVE-2026-58500 |
+| CVE-2026-104850 | OAuth spoofing in the MCP TS SDK | 7.5, fixed versions 1.31.0 / 2.2.0 (GHSA-6qxp-vccf-f47h) | Match | https://advisories.gitlab.com/npm/@modelcontextprotocol/sdk/CVE-2026-104850/ |
+| CVE-2026-104120 | fetch_url in mcp-server-fetch / everything | SSRF (≤2026.6.4), no fixed version yet | Match | https://app.opencve.io/cve/CVE-2026-104120 |
+| CVE-2026-111767 | Broken access control in InMemoryTaskStore | A flaw of the same kind is WS-2026-0090 (@modelcontextprotocol/sdk 1.24.0–1.31.0, fixed version 1.32.0). The mapping to the CVE number could not be confirmed | Could not confirm | https://mend.io/vulnerability-database/WS-2026-0090/ |
+| CVE-2026-59951 | Session accumulation in FastMCP | Sessions accumulate without limit in the Streamable HTTP of the MCP Python SDK. Fixed versions 1.30.0 / 2.2.0 | Match | https://osv.dev/vulnerability/CVE-2026-59951 |
+| CVE-2026-61559 | Server-side flaw in gitlab-mcp | An SSRF in @zereight/mcp-gitlab leaks the token. 9.6, fixed version 2.1.27 | Match | https://osv.dev/vulnerability/CVE-2026-61559 |
+| ToolHive GO-2026-5996 | Missed IPv6 NAT64 ranges | CVE-2026-54450. Misses 64:ff9b::/96 and 64:ff9b:1::/48 | Match | https://osv.dev/vulnerability/GO-2026-5996 |
+| ToolHive GO-2026-6002 | NAT64 / host.docker.internal | GO-2026-6002 is an SSRF in the auth discovery path (CVE-2026-58196). Lateral movement through host.docker.internal is a separate CVE, CVE-2026-58197 | Differs (mixed up) | https://advisories.gitlab.com/pkg/golang/github.com/stacklok/toolhive/ |
+| Cursor CVE-2026-26268 | 9.9 / fixed in 2.5 | 9.9 in NVD, 8.0 from GitHub (CNA). A sandbox escape by writing to .git configuration and hooks, fixed in 2.5 | Match | https://nvd.nist.gov/vuln/detail/CVE-2026-26268 |
+| Cursor CVE-2026-50548 | Zero-Click prompt injection ("<2.5" in §41) | DuneSlide. 9.8, path traversal through the working_directory of `run_terminal_cmd`. **The fixed version is Cursor 3.0** | Differs (fixed version) | https://thehackernews.com/2026/07/critical-cursor-flaws-could-let-prompt.html , https://www.catonetworks.com/blog/duneslide-two-critical-rce-vulnerabilities |
+| EUVD-2026-39537 | Alias of CVE-2026-50548 | The mapping could not be confirmed | Could not confirm | — |
+| Cursor CVE-2025-54136 | Zero-Click configuration RCE through MCP JSON | MCPoison. 7.2, fixed in 1.3 | Match | https://blog.checkpoint.com/research/cursor-ide-persistent-code-execution-via-mcp-trust-bypass/ |
+| Cursor git.exe 0-day | Unfixed / automatically runs git.exe in the repository root | Disclosed by Mindgard on 2026-07-14 (unfixed up to 3.2.16). The same behavior has been reported in Copilot CLI / Gemini CLI / Codex | Match | https://www.securityweek.com/unpatched-cursor-vulnerability-exposes-users-to-code-execution/ |
+| Copilot CVE-2025-62222 | Command execution before the trust dialog is shown | Command injection in the VS Code Copilot Chat extension (8.8, fixed version 0.32.5). Execution "before the trust dialog is shown" could not be confirmed | Differs (description) | https://osv.dev/vulnerability/CVE-2025-62222 |
+| Copilot CVE-2026-50510 | Local code execution in the JetBrains version | 7.8, <1.13.0 (CWE-641) | Match | https://app.opencve.io/cve/CVE-2026-50510 |
 
 ## 5. `github_actions` / `browser_extensions`
 
-| 項目 | 仕様値 | 一次情報の値 | 判定 | 根拠URL |
+| Item | Specification value | Primary-source value | Verdict | Source URL |
 |---|---|---|---|---|
-| trivy-action | v0.69.4（76 タグ中 75 が汚染、2026-03） | 2026-03-19 に trivy-action のタグ 75/76 が強制 push された（Aqua 発表では 76/77）。**v0.69.4 は Trivy バイナリ**の悪性版。安全版は trivy-action v0.35.0 / trivy v0.69.3 | 相違あり（版番号の対象） | https://snyk.io/articles/trivy-github-actions-supply-chain-compromise/ , https://thehackernews.com/2026/03/trivy-security-scanner-github-actions.html |
-| megalodon | 5,561 リポジトリ / 2026-05 | 一致（2026-05-18） | 一致 | https://labs.cloudsecurityalliance.org/research/csa-research-note-megalodon-github-actions-cicd-supply-chain |
-| mass_workflow_planting / GhostAction | 500+ アカウント / 2026-10-07 以降 | Socket: 2026-10-07〜09 に 500+ アカウントが「security audit」に偽装したワークフローをコミット | 一致 | https://breached.company/ghostaction-returns-malicious-github-actions-workflow-hits-500-accounts-tens/ |
-| mass_workflow_planting.stolen_secrets | PyPI / npm / DockerHub | 照合できなかった | 確認できず | — |
-| ghostaction 偽装フォント | 偽装フォントにインフォスティーラーを隠し、第 2 ワークフローも設置 | 偽装フォント（`public/fonts/fa-solid-400.woff2`、94 リポジトリ、tasks.json の folderOpen で起動）は、500 アカウント波とは**別の後続／模倣活動**として報告されている | 相違あり（2 つの事案を混同） | https://thehackernews.com/2026/10/ghostaction-attackers-plant-credential.html , https://opensourcemalware.com/blog/ghostaction-copycats-polinrider-by-hiding-a-stealer-in-a-fake-font-file |
-| 19 件の Chrome/Edge 拡張（所有権移転） | 2026 | 「19 件」という数値は確認できなかった | 確認できず | — |
-| Save Image as Type | 100 万+ ユーザー、アフィリエイト詐欺 | 一致（Karma が 2025-11 に買収） | 一致 | https://www.techspot.com/news/111737-popular-chrome-extension-save-image-type-hijacked-impacting.html |
-| QuickLens | 約 7,000 ユーザー | 一致（2026-02-17 に悪性更新） | 一致 | https://cyberwarzone.com/2026/03/16/chrome-extensions-turned-malicious-after-ownership-transfer-pushing-code-injection-and-fake-updates/ |
-| ShotBird | 約 800 ユーザー | 一致 | 一致 | 同上 |
-| GlassWorm | WebSocket RAT | 調査していない | 確認できず | — |
-| ModHeader | 署名済み正規拡張に休眠中の窃取コード | 7.0.18 に休眠コード。約 160 万インストール、2026-07 にストアから削除。拡張 ID は idgpnmonknjnojddfkpgkljpfnnfcklj | 一致（ID は仕様に不足） | https://vpncentral.com/modheader-extension-with-1-6-million-installs-contained-dormant-data-exfiltration-code/ |
+| trivy-action | v0.69.4 (75 of 76 tags poisoned, 2026-03) | On 2026-03-19, tags 75/76 of trivy-action were force-pushed (76/77 according to Aqua's announcement). **v0.69.4 is the malicious version of the Trivy binary**. The safe versions are trivy-action v0.35.0 / trivy v0.69.3 | Differs (what the version number refers to) | https://snyk.io/articles/trivy-github-actions-supply-chain-compromise/ , https://thehackernews.com/2026/03/trivy-security-scanner-github-actions.html |
+| megalodon | 5,561 repositories / 2026-05 | Match (2026-05-18) | Match | https://labs.cloudsecurityalliance.org/research/csa-research-note-megalodon-github-actions-cicd-supply-chain |
+| mass_workflow_planting / GhostAction | 500+ accounts / from 2026-10-07 | Socket: from 2026-10-07 to 09, 500+ accounts committed workflows disguised as a "security audit" | Match | https://breached.company/ghostaction-returns-malicious-github-actions-workflow-hits-500-accounts-tens/ |
+| mass_workflow_planting.stolen_secrets | PyPI / npm / DockerHub | Could not be checked | Could not confirm | — |
+| ghostaction fake font | An infostealer hidden in a fake font, plus a second workflow | The fake font (`public/fonts/fa-solid-400.woff2`, 94 repositories, launched by folderOpen in tasks.json) is reported as **a separate follow-up / copycat activity**, distinct from the 500-account wave | Differs (two incidents mixed up) | https://thehackernews.com/2026/10/ghostaction-attackers-plant-credential.html , https://opensourcemalware.com/blog/ghostaction-copycats-polinrider-by-hiding-a-stealer-in-a-fake-font-file |
+| 19 Chrome/Edge extensions (ownership transfer) | 2026 | The figure "19" could not be confirmed | Could not confirm | — |
+| Save Image as Type | 1M+ users, affiliate fraud | Match (acquired by Karma in 2025-11) | Match | https://www.techspot.com/news/111737-popular-chrome-extension-save-image-type-hijacked-impacting.html |
+| QuickLens | About 7,000 users | Match (malicious update on 2026-02-17) | Match | https://cyberwarzone.com/2026/03/16/chrome-extensions-turned-malicious-after-ownership-transfer-pushing-code-injection-and-fake-updates/ |
+| ShotBird | About 800 users | Match | Match | Same as above |
+| GlassWorm | WebSocket RAT | Not investigated | Could not confirm | — |
+| ModHeader | Dormant stealing code in a signed legitimate extension | Dormant code in 7.0.18. About 1.6 million installs, removed from the store in 2026-07. Extension ID idgpnmonknjnojddfkpgkljpfnnfcklj | Match (ID missing from the specification) | https://vpncentral.com/modheader-extension-with-1-6-million-installs-contained-dormant-data-exfiltration-code/ |
 
-## 6. その他（§6 / markers / process_signatures）
+## 6. Other (§6 / markers / process_signatures)
 
-| 項目 | 仕様値 | 一次情報の値 | 判定 | 根拠URL |
+| Item | Specification value | Primary-source value | Verdict | Source URL |
 |---|---|---|---|---|
-| eMudhra テストホスト | dv-g3b-emudhra.we-have-a-problem.com（接続成功＝CRITICAL、SSL エラー＝SAFE） | 公式テストページにこのホスト名がある（ほかに dv-g3b-aaa-emudhra）。「証明書エラー＝侵害された中間 CA を信頼していない」 | 一致 | https://emudhra.we-have-a-problem.com/ |
-| eMudhra 事案の時期 | — | Mozilla への報告は 2026-10-17、中間 CA 8 件の秘密鍵が漏洩 | 一致（参考） | https://bugzilla.mozilla.org/show_bug.cgi?id=2083449 |
-| Homebrew ca-certificates | 2026-09-25_1+ | 事案（10-17）より前の日付で、修正版としては矛盾する。裏付けは取れていない | 確認できず（誤りの疑い） | — |
-| Go 1.27.3 / 1.26.10 | eMudhra 対応版 | 確認できなかった | 確認できず | — |
-| marker | /tmp/remote_code_loader.lock | litellm 1.107.0 の IoC として記載がある | 一致 | https://www.mend.io/blog/litellm-1-107-0-compromised/ |
-| process_signatures | litellm.dev | 偽ドメイン `www.litellm.dev` への送信 | 一致 | https://www.upwind.io/feed/litellm-1-107-0-supply-chain-attack-malicious-code-found-in-pypi-package |
+| eMudhra test host | dv-g3b-emudhra.we-have-a-problem.com (connection succeeds = CRITICAL, SSL error = SAFE) | The official test page has this host name (and also dv-g3b-aaa-emudhra). "A certificate error = you do not trust the compromised intermediate CA" | Match | https://emudhra.we-have-a-problem.com/ |
+| Timing of the eMudhra incident | — | Reported to Mozilla on 2026-10-17; the private keys of 8 intermediate CAs leaked | Match (reference) | https://bugzilla.mozilla.org/show_bug.cgi?id=2083449 |
+| Homebrew ca-certificates | 2026-09-25_1+ | Dated before the incident (10-17), which is contradictory for a fixed version. Not corroborated | Could not confirm (suspected error) | — |
+| Go 1.27.3 / 1.26.10 | Versions addressing eMudhra | Could not be confirmed | Could not confirm | — |
+| marker | /tmp/remote_code_loader.lock | Listed as an IoC of litellm 1.107.0 | Match | https://www.mend.io/blog/litellm-1-107-0-compromised/ |
+| process_signatures | litellm.dev | Sends to the fake domain `www.litellm.dev` | Match | https://www.upwind.io/feed/litellm-1-107-0-supply-chain-attack-malicious-code-found-in-pypi-package |
 
 ---
 
-## 確認できなかった項目一覧
+## Items that could not be confirmed
 
-（関連する行をまとめて記載しているため、表の「確認できず」23 行とは 1 対 1 に対応しない）
+(Related rows are grouped, so this does not correspond one-to-one with the 23 "Could not confirm" rows in the tables)
 
-1. @tanstack/* の悪性ファイル名（router_init.js / tanstack_runner.js / vite_setup.mjs）
-2. @asyncapi/*（未調査）
-3. @polymarket/*（未調査）
-4. cacheable 2.5.1 / @cacheable/memory 2.2.1 / @cacheable/node-cache 3.1.2 / @cacheable/utils 2.5.1 / @cacheable/net 2.1.1 の個別の版番号
-5. py2ops 2.2（ソース間で矛盾）
+1. Malicious file names of @tanstack/* (router_init.js / tanstack_runner.js / vite_setup.mjs)
+2. @asyncapi/* (not investigated)
+3. @polymarket/* (not investigated)
+4. Individual versions of cacheable 2.5.1 / @cacheable/memory 2.2.1 / @cacheable/node-cache 3.1.2 / @cacheable/utils 2.5.1 / @cacheable/net 2.1.1
+5. py2ops 2.2 (sources contradict each other)
 6. @solana-labs/spl-toke / web3-js / ancor
-7. sap-npm（未調査）
-8. typosquat-payment-sdk（未調査）
-9. chaindrop の math_init.js
-10. setup.mjs の 2 つ目のハッシュ fd3ca4007b225fdf8de7af4345a19179d5efa8c4bb9205f88cda806e5684b1eb
-11. teampcp の URL（/v1/weights、/audio.mp3、FIRESCALE）
-12. IronWorm の cargo-install 偽装
-13. QLNX の永続化手法の個別項目
-14. GitLab CVE-2026-19478 の CVSS 9.4 と影響版
+7. sap-npm (not investigated)
+8. typosquat-payment-sdk (not investigated)
+9. math_init.js of chaindrop
+10. The second hash of setup.mjs, fd3ca4007b225fdf8de7af4345a19179d5efa8c4bb9205f88cda806e5684b1eb
+11. teampcp URLs (/v1/weights, /audio.mp3, FIRESCALE)
+12. IronWorm's cargo-install masquerade
+13. Individual items of QLNX's persistence techniques
+14. CVSS 9.4 and affected versions of GitLab CVE-2026-19478
 15. SPECTER MCP-POISON
-16. CVE-2026-111767（WS-2026-0090 と同一かどうか）
+16. CVE-2026-111767 (whether it is the same as WS-2026-0090)
 17. EUVD-2026-39537
-18. GhostAction の窃取対象（PyPI / npm / DockerHub）
-19. 19 件の Chrome/Edge 拡張（所有権移転）
-20. GlassWorm（未調査）
+18. What GhostAction stole (PyPI / npm / DockerHub)
+19. 19 Chrome/Edge extensions (ownership transfer)
+20. GlassWorm (not investigated)
 21. Homebrew ca-certificates 2026-09-25_1
 22. Go 1.27.3 / 1.26.10
 
-**調査していない範囲**: §3.6〜§3.12 のうち CVE / キャンペーン名を含まない手法記述（`dangerous_patterns`、`build_hooks`、`persistence`、`anti_forensics` の一般的な手法）、`process_signatures` の残り（letters9813 / pythonclient-test / PRIVCOLLECT / npm-cache / math_init）、`markers` の `/tmp/.pc_once_*`、§9.4 の Djinn / OmniStealer、§5 の Python 3.15.1 / 3.14.9 / 3.13.17。
+**Not investigated**: the technique descriptions in §3.6–§3.12 that contain no CVE or campaign name (`dangerous_patterns`, `build_hooks`, `persistence`, the general techniques in `anti_forensics`), the rest of `process_signatures` (letters9813 / pythonclient-test / PRIVCOLLECT / npm-cache / math_init), `/tmp/.pc_once_*` in `markers`, Djinn / OmniStealer in §9.4, and Python 3.15.1 / 3.14.9 / 3.13.17 in §5.
 
 ---
 
-## 5.2.1 での反映（2026-10-22）
+## Applied in 5.2.1 (2026-10-22)
 
-ユーザー承認に基づき、一次情報で確認できた相違を `rules/ioc.json` と `zes-scan.sh` に反映した。確認できなかった値（「確認できず」の行）は変更せず、必要なものに注記を付けた。
+Based on the user's approval, the differences confirmed by primary sources were applied to `rules/ioc.json` and `zes-scan.sh`. Values that could not be confirmed (the "Could not confirm" rows) were not changed; notes were added where needed.
 
-| 項目 | 変更内容 | 根拠（本レポートの行） |
+| Item | Change | Basis (row of this report) |
 |---|---|---|
-| certifi | campaign を `litellm-oct2026` → `emudhra-ca-oct2026`、範囲を `>=2019.3.9 <2026.10.19` に | certifi 行（GHSA-6q48-6c7w-9gw2） |
-| intercom-client | 侵害版 7.0.4・安全版 7.0.3 を設定、「1,800+」の記述を削除 | intercom-client 行（GHSA-54pg-9963-v8vg） |
-| jscrambler | 悪性版を 8.14.0 / 8.16.0 / 8.17.0 / 8.18.0 / 8.20.0 に限定、安全版 8.22.0、campaign を `jscrambler-jul2026` に分離（TeamPCP 帰属は未確認） | jscrambler 行 |
-| lightning / telnyx | 値は据え置き。公開日（04-30 / 03-27）と GHSA を注記 | 各行 |
-| css-nesting-transform | MAL-2026-17804・公開日 10-07 を注記 | 同行 |
-| lerobot | 影響範囲 `<=0.5.1` を設定（CRITICAL）。CVSS のソース間不一致を注記 | lerobot 行 |
-| ovhcloud-cli | 影響 v0.11.0〜v0.15.0、安全版 v0.16.0。GlassWorm 帰属は未確定と注記 | ovhcloud-cli 行 |
-| ChainDrop | C2 `awqhnjewqjkl[.]icu` と解決コントラクト `0xE1f2…3103` を追加。Ethereum RPC 3 ホストは `legit_infra`（MEDIUM）へ | chaindrop C2 / RPC 行 |
-| TeamPCP | `seed1/seed2.getsession.org` を `legit_infra`（MEDIUM）へ。deadman_switch の帰属が曖昧なことを注記 | teampcp 各行 |
-| Miasma | 公開日 06-08、「AI 武器化」の表現を修正 | Miasma 行 |
-| GitLab CVE-2026-85706 | 修正版 19.1.8 / 19.2.6 / 19.3.2 を設定（§3 で CRITICAL 判定）。110264 は系列別修正版が未確認のため注記のみ | GitLab 行 |
-| Kernel | Copy Fail / CVE-2026-80521 / SCTPhantom の修正版を設定（§23 で HIGH 判定）。「6/8」の記述を削除 | Kernel 行 |
-| Docker CVE-2026-17106 | CLI の修正版が未確認であることを注記 | Docker 行 |
-| CVE-2026-22703 | 対象製品を Cosign に修正。§43 の Rekor イメージ判定を削除 | Sigstore 行 |
-| GHSA-fx35-mq7g-6g98 | 2.x 系の修正版 2.6.5 を追加（3.1.3 は未確認と注記） | 同行 |
-| NeighborJack | 定義を「0.0.0.0 での待ち受け」に修正（§20 は従来どおり両方を検出） | NeighborJack 行 |
-| CVE-2026-52869 / 58500 | mcp_cves へ移動し、`mcp<1.27.2` / `appium-mcp<1.85.10` を §37 で HIGH 判定 | 各行 |
-| ToolHive | GO-2026-6002 と CVE-2026-58197 の取り違えを修正 | ToolHive 行 |
-| Cursor CVE-2026-50548 | 修正版 3.0 を設定（§41 で <3.0 を CRITICAL） | Cursor 行 |
-| Copilot CVE-2025-62222 | Copilot Chat 拡張 <0.32.5 を §41 で HIGH 判定、説明を修正 | Copilot 行 |
-| trivy-action | v0.69.4 は Trivy 本体の版と修正。trivy-action は v0.35.0 以外のタグ参照を CRITICAL、Trivy 本体 v0.69.4 の指定を CRITICAL | trivy-action 行 |
-| GhostAction | 偽装フォント事案が別件であることを注記 | ghostaction 行 |
-| Homebrew ca-certificates | 基準値の誤りが疑われるため、判定を HIGH → MEDIUM（要確認）に変更 | Homebrew 行 |
+| certifi | campaign `litellm-oct2026` → `emudhra-ca-oct2026`; range set to `>=2019.3.9 <2026.10.19` | certifi row (GHSA-6q48-6c7w-9gw2) |
+| intercom-client | Set compromised version 7.0.4 and safe version 7.0.3; removed the "1,800+" statement | intercom-client row (GHSA-54pg-9963-v8vg) |
+| jscrambler | Limited malicious versions to 8.14.0 / 8.16.0 / 8.17.0 / 8.18.0 / 8.20.0, safe version 8.22.0, split the campaign into `jscrambler-jul2026` (TeamPCP attribution not confirmed) | jscrambler row |
+| lightning / telnyx | Values kept. Added notes on the publication dates (04-30 / 03-27) and GHSA | Each row |
+| css-nesting-transform | Added notes on MAL-2026-17804 and the publication date 10-07 | Same row |
+| lerobot | Set affected range `<=0.5.1` (CRITICAL). Added a note on the CVSS inconsistency between sources | lerobot row |
+| ovhcloud-cli | Affected v0.11.0–v0.15.0, safe version v0.16.0. Noted that the GlassWorm attribution is not settled | ovhcloud-cli row |
+| ChainDrop | Added C2 `awqhnjewqjkl[.]icu` and resolver contract `0xE1f2…3103`. Moved the 3 Ethereum RPC hosts to `legit_infra` (MEDIUM) | chaindrop C2 / RPC rows |
+| TeamPCP | Moved `seed1/seed2.getsession.org` to `legit_infra` (MEDIUM). Noted that the attribution of deadman_switch is unclear | teampcp rows |
+| Miasma | Publication date 06-08; corrected the "AI weaponization" wording | Miasma rows |
+| GitLab CVE-2026-85706 | Set fixed versions 19.1.8 / 19.2.6 / 19.3.2 (CRITICAL in §3). For 110264 only a note, because per-line fixed versions are not confirmed | GitLab rows |
+| Kernel | Set fixed versions for Copy Fail / CVE-2026-80521 / SCTPhantom (HIGH in §23). Removed the "6/8" statement | Kernel rows |
+| Docker CVE-2026-17106 | Noted that the CLI fixed version is not confirmed | Docker row |
+| CVE-2026-22703 | Corrected the affected product to Cosign. Removed the Rekor image check from §43 | Sigstore row |
+| GHSA-fx35-mq7g-6g98 | Added the 2.x fixed version 2.6.5 (noted that 3.1.3 is not confirmed) | Same row |
+| NeighborJack | Corrected the definition to "listening on 0.0.0.0" (§20 still detects both, as before) | NeighborJack row |
+| CVE-2026-52869 / 58500 | Moved to mcp_cves; `mcp<1.27.2` / `appium-mcp<1.85.10` rated HIGH in §37 | Each row |
+| ToolHive | Corrected the mix-up between GO-2026-6002 and CVE-2026-58197 | ToolHive rows |
+| Cursor CVE-2026-50548 | Set fixed version 3.0 (<3.0 is CRITICAL in §41) | Cursor row |
+| Copilot CVE-2025-62222 | Copilot Chat extension <0.32.5 rated HIGH in §41; corrected the description | Copilot row |
+| trivy-action | Corrected v0.69.4 to be the version of Trivy itself. For trivy-action, tag references other than v0.35.0 are CRITICAL, and pinning Trivy itself to v0.69.4 is CRITICAL | trivy-action row |
+| GhostAction | Noted that the fake-font incident is a separate case | ghostaction row |
+| Homebrew ca-certificates | Because the reference value is suspected to be wrong, changed the rating from HIGH → MEDIUM (needs confirmation) | Homebrew row |
 
-`incident_bundle` は `ZES-2026-OCT-EMERGENCY-V5.2` のまま（findings.json スキーマの形式 `V<major>.<minor>` を維持するため）。
+`incident_bundle` stays `ZES-2026-OCT-EMERGENCY-V5.2` (to keep the findings.json schema format `V<major>.<minor>`).
 
-## 5.2.2 で追加した収集インテル（2026-10-22）
+## Intelligence added in 5.2.2 (2026-10-22)
 
-2026-06〜10 に公開された脅威情報を、各ベンダー・研究機関の一次情報（NVD / CISA KEV / GHSA / OSV / ベンダー公告・研究ブログ）から収集し、`rules/ioc.json` の `packages[]`・`infrastructures[]`・`intel` に取り込みました。`verification` が `secondary` のものは一次情報に到達できず二次報道で補ったものです（検知はしますが、値の確度は一次情報より低い）。
+Threat information published from 2026-06 to 10 was collected from the primary sources of each vendor and research organization (NVD / CISA KEV / GHSA / OSV / vendor advisories and research blogs) and imported into `packages[]`, `infrastructures[]` and `intel` in `rules/ioc.json`. Entries whose `verification` is `secondary` could not be traced to a primary source and were filled in from secondary reporting (they are detected, but the values are less certain than primary-source values).
 
-取り込みの方針:
+Import policy:
 
-- **誤検知の抑制:** 汎用的なファイル名（`index.js`・`build.rs`・`settings.json` など）、汎用的な文字列、正規サービスのドメイン単体（github.com・api.telegram.org など）は照合に使いません。正規サービス上の特定 URL は `legit_infra`（MEDIUM）として扱います。
-- **重大度:** 悪性パッケージは CRITICAL、脆弱版（悪性ではなく CVE の影響範囲）は `match: vulnerable_versions` で HIGH です。ローカルツールのバージョン判定はディストリビューションのバックポートを考慮して上限を HIGH にしています。
-- **未対応（静的に判定できないもの）:** GitHub Enterprise Server・Tekton Pipelines-as-Code・Docker Sandboxes・7-Zip・Git for Windows（イメージ名・バイナリから版を取れないか、Windows のみ）、sudo CVE-2026-82474（修正版不明）、Jenkins Script Security プラグイン（プラグイン版の取得手段なし）、Windows 版 Kiro。データとしては記録しています。
+- **Suppressing false positives:** generic file names (`index.js`, `build.rs`, `settings.json`, etc.), generic strings, and domains of legitimate services on their own (github.com, api.telegram.org, etc.) are not used for matching. Specific URLs on legitimate services are treated as `legit_infra` (MEDIUM).
+- **Severity:** malicious packages are CRITICAL; vulnerable versions (not malicious, but within a CVE's affected range) are HIGH with `match: vulnerable_versions`. Version checks of local tools are capped at HIGH to allow for distribution backports.
+- **Not supported (cannot be determined statically):** GitHub Enterprise Server, Tekton Pipelines-as-Code, Docker Sandboxes, 7-Zip, Git for Windows (the version cannot be taken from the image name or binary, or Windows only), sudo CVE-2026-82474 (fixed version unknown), the Jenkins Script Security plugin (no way to get the plugin version), and Kiro for Windows. They are recorded as data.
 
-### パッケージ（41 件）
+### Packages (41 entries)
 
-| 公開日 | 対象 | 重大度 | 確度 | 一次情報 |
+| Published | Target | Severity | Confidence | Primary source |
 |---|---|---|---|---|
 | 2026-06-06 | hades-pypi-pth-jun2026 | HIGH | confirmed | https://orca.security/resources/blog/hades-pypi-supply-chain-attack/ |
 | 2026-06-06 | hades-pypi-pth-jun2026 | HIGH | confirmed | https://orca.security/resources/blog/hades-pypi-supply-chain-attack/ |
@@ -300,9 +302,9 @@
 | 2026-10-21 | litellm-pth-stealer-oct2026 | CRITICAL | confirmed | https://docs.litellm.ai/blog/security-incident-oct-21-2026 |
 | 2026-10-21 | litellm-pth-stealer-oct2026 | CRITICAL | confirmed | https://docs.litellm.ai/blog/security-incident-oct-21-2026 |
 
-### CI/CD（24 件）
+### CI/CD (24 entries)
 
-| 公開日 | 対象 | 重大度 | 確度 | 一次情報 |
+| Published | Target | Severity | Confidence | Primary source |
 |---|---|---|---|---|
 | 2026-06-01 | redhat-miasma-oidc-jun2026 | CRITICAL | confirmed | https://www.aikido.dev/blog/red-hat-npm-packages-compromised-credential-stealing-worm |
 | 2026-06-01 | claude-code-action-issue-injection-jun2026 | HIGH | confirmed | https://flatt.tech/research/posts/poisoning-claude-code-one-github-issue-to-break-the-supply-chain/ |
@@ -329,9 +331,9 @@
 | 2026-10-09 | ghostaction-security-audit-wave-2026 | CRITICAL | confirmed | https://www.stepsecurity.io/blog/ghostaction-returns |
 | 2026-10-21 | litellm-release-lookalike-oct2026 | CRITICAL | confirmed | https://docs.litellm.ai/blog/security-incident-oct-21-2026 |
 
-### 開発インフラ・ランタイム CVE（47 件）
+### Development infrastructure and runtime CVEs (47 entries)
 
-| 公開日 | 対象 | 重大度 | 確度 | 一次情報 |
+| Published | Target | Severity | Confidence | Primary source |
 |---|---|---|---|---|
 | 2022-03-03 | linux-kernel CVE-2022-0492 | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2022-0492 |
 | 2026-06-09 | openssl CVE-2026-45447 | HIGH | confirmed | https://openssl-library.org/news/secadv/20260609.txt |
@@ -381,9 +383,9 @@
 | 2026-10-21 | gitlab CVE-2026-110264 | CRITICAL | confirmed | https://docs.gitlab.com/releases/patches/patch-release-gitlab-19-5-1-released/ |
 | 2026-10-21 | nodejs CVE-2026-111497 | HIGH | confirmed | https://nodejs.org/en/blog/vulnerability/october-2026-security-releases |
 
-### ホスト（インフォスティーラー・永続化）（29 件）
+### Host (infostealers, persistence) (29 entries)
 
-| 公開日 | 対象 | 重大度 | 確度 | 一次情報 |
+| Published | Target | Severity | Confidence | Primary source |
 |---|---|---|---|---|
 | 2026-06-17 | mastra-npm-easy-day-js | CRITICAL | confirmed | https://www.microsoft.com/en-us/security/blog/2026/06/17/postinstall-payload-inside-mastra-npm-supply-chain-compromise/ |
 | 2026-06-23 | macos-gaslight-flatroof | HIGH | confirmed | https://www.sentinelone.com/labs/macos-gaslight-rust-backdoor-turns-prompt-injection-on-the-analyst-not-the-sandbox/ |
@@ -415,9 +417,9 @@
 | 2026-10-15 | cl-unk-1211-sysgorat | HIGH | confirmed | https://unit42.paloaltonetworks.com/ai-campaign-targets-linux-infrastructure/ |
 | 2026-10-21 | litellm-1-107-0-cook-pth | CRITICAL | confirmed | https://www.wiz.io/blog/litellm-compromised-steals-credentials |
 
-### AI ツール・MCP・拡張（40 件）
+### AI tools, MCP and extensions (40 entries)
 
-| 公開日 | 対象 | 重大度 | 確度 | 一次情報 |
+| Published | Target | Severity | Confidence | Primary source |
 |---|---|---|---|---|
 | 2026-06-01 | mini-shai-hulud-redhat-mcp | CRITICAL | confirmed | https://osv.dev/vulnerability/MAL-2026-5129 |
 | 2026-06-02 | kiro-file-write-autoexec | HIGH | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-10591 |
@@ -460,14 +462,14 @@
 | 2026-10-16 | claude-agent-sdk-resume-flag-injection | CRITICAL | confirmed | https://nvd.nist.gov/vuln/detail/CVE-2026-96620 |
 | 2026-10-20 | mcp-ts-sdk-oct-2026 | HIGH | confirmed | https://osv.dev/vulnerability/GHSA-46jr-4wx8-v453 |
 
-### 情報源間の食い違い（収集時に判明したもの）
+### Disagreements between sources (found during collection)
 
-- **GitLab CVE-2026-85706:** 2026-09-10 の初回修正は 19.3.2 / 19.2.6 / 19.1.8 のみで、19.0.9 / 18.11.12 は 09-23 に追加。
-- **CVSS の乖離:** Atlassian CVE-2026-21589（CNA 9.3 / NVD 7.5）、TeamCity CVE-2026-111094（8.1 / 9.8）・CVE-2026-106218（8.8 / 10.0）、PHP CVE-2026-17543（8.1 / 9.8）、containerd CVE-2026-53488（9.4 / 8.8）、Gemini CLI CVE-2026-12537（10.0 / 7.8）。
-- **Gitea CVE-2026-60004:** KEV は書込権限が必要とし、NVD の CVSS は認証不要（PR:N）。
-- **Argo CD CVE-2026-113672:** NVD の影響範囲「<3.3.1」が説明文の 3.3.15 と不一致。
-- **7-Zip CVE-2026-14266:** NVD は 26.01 のみを影響版とするが、公式履歴では 26.02 で修正。
-- **OpenJDK CVE-2026-41254:** lcms2 の CVE。OpenJDK の修正版は次期アップデート版からの導出（8u は不明のため未記載）。
-- **arrayref 0.3.10 のハッシュ:** 二次情報と Wiz で不一致。Wiz の値を採用。
-- **Superior（ブラウザ拡張）の ID:** THN の 31 文字表記ではなく Socket の 32 文字表記を採用。
-- **PamStealer（Wavel 亜種）と MacSync 新版:** インフラ・LaunchAgent・文字列が一致（同一ファミリーの別名の可能性）。両方を別キャンペーンとして収録。
+- **GitLab CVE-2026-85706:** the first fix on 2026-09-10 covered only 19.3.2 / 19.2.6 / 19.1.8; 19.0.9 / 18.11.12 were added on 09-23.
+- **CVSS divergence:** Atlassian CVE-2026-21589 (CNA 9.3 / NVD 7.5), TeamCity CVE-2026-111094 (8.1 / 9.8) and CVE-2026-106218 (8.8 / 10.0), PHP CVE-2026-17543 (8.1 / 9.8), containerd CVE-2026-53488 (9.4 / 8.8), Gemini CLI CVE-2026-12537 (10.0 / 7.8).
+- **Gitea CVE-2026-60004:** KEV says write permission is required, while the NVD CVSS says no authentication is required (PR:N).
+- **Argo CD CVE-2026-113672:** NVD's affected range "<3.3.1" does not match 3.3.15 in the description.
+- **7-Zip CVE-2026-14266:** NVD lists only 26.01 as affected, but the official history says it was fixed in 26.02.
+- **OpenJDK CVE-2026-41254:** a CVE in lcms2. The OpenJDK fixed versions are derived from the next update releases (8u is unknown and not listed).
+- **Hash of arrayref 0.3.10:** secondary sources and Wiz disagree. Wiz's value was adopted.
+- **ID of Superior (browser extension):** Socket's 32-character form was adopted rather than THN's 31-character form.
+- **PamStealer (Wavel variant) and the new MacSync version:** infrastructure, LaunchAgent and strings match (possibly aliases of the same family). Both are recorded as separate campaigns.
