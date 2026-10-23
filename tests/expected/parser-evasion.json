@@ -1,6 +1,12 @@
 {
   "findings": [
     {
+      "campaign": "solana-typosquat",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "g-nm-noversion/node_modules/@solana-labs/web3js/package.json"
+    },
+    {
       "campaign": "overlord-fake-zoom-dotnet",
       "level": "CRITICAL",
       "module": "§30",

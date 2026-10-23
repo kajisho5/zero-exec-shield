@@ -412,6 +412,10 @@ grep_lF() {
 }
 # 1ファイルに対する存在判定
 fgrep_q() { grep -q -I -E "$@" 2>/dev/null; }
+# TSV を空欄を保ったまま read するための変換。IFS=$'\t' はタブを空白類として扱い連続タブを 1 区切りに潰す
+# （空欄で後続の列がずれる）ため、空白類でない US（0x1f）に置き換えて IFS="$US" で読む
+US=$'\037'
+tsv_us() { tr '\t' '\037'; }
 
 # ---------------------------------------------------------------------------
 # 依存関係インベントリ（check_lockfile_versions の入力）
@@ -541,13 +545,13 @@ check_lockfile_versions() {
   build_deps
   local camp eco name match bads safev
   read_packages_tsv >"$TMP_DIR/packages.tsv"
-  while IFS=$'\t' read -r camp eco name match bads safev; do
+  while IFS="$US" read -r camp eco name match bads safev; do
     case "$eco" in npm|pypi|cargo|go|gem|packagist) ;; *) continue ;; esac
     case "$match" in versions|vulnerable_versions|any_version|unknown_versions) ;; *) continue ;; esac
     local qname="$name"
     [ "$eco" = "pypi" ] && qname="$(norm_pypi "$name")"
     local deco dname dver dsrc
-    while IFS=$'\t' read -r deco dname dver dsrc; do
+    while IFS="$US" read -r deco dname dver dsrc; do
       [ "$deco" = "$eco" ] || continue
       case "$qname" in
         *'/*') [[ "$dname" == "${qname%\*}"* ]] || continue ;;
@@ -569,8 +573,8 @@ check_lockfile_versions() {
       elif [ "$match" = "unknown_versions" ]; then
         medium "$camp" "$dsrc" "侵害報告のあるパッケージ ${dname}@${dver:-?}（侵害版の特定バージョン未定義のため要確認）"
       fi
-    done <"$DEPS_TSV"
-  done <"$TMP_DIR/packages.tsv"
+    done < <(tsv_us <"$DEPS_TSV")
+  done < <(tsv_us <"$TMP_DIR/packages.tsv")
 }
 
 # detect_service_version IMAGE_PATTERN … compose/k8s/Dockerfile の image タグからバージョンを抽出
@@ -653,7 +657,7 @@ intel_network_iocs() {
 intel_actions() {
   intel_ready || return 0
   local camp act sev bad safe f line ref
-  while IFS=$'\t' read -r camp act sev bad safe; do
+  while IFS="$US" read -r camp act sev bad safe; do
     [ -n "$act" ] || continue
     while IFS= read -r f; do
       [ -n "$f" ] || continue
@@ -665,7 +669,7 @@ intel_actions() {
         fi
       done
     done < <(workflow_files; files_path '/action\.ya?ml$')
-  done < <(intel_jq '.intel.actions[]? | [.campaign, .action, (.severity // "HIGH"), ((.bad_refs // []) | join(",")), ((.safe_refs // []) | join(","))] | @tsv')
+  done < <(intel_jq '.intel.actions[]? | [.campaign, .action, (.severity // "HIGH"), ((.bad_refs // []) | join(",")), ((.safe_refs // []) | join(","))] | @tsv' | tsv_us)
 }
 
 # ワークフロー・スクリプト内の悪性文字列（§38）
@@ -768,7 +772,7 @@ intel_infra() {
   intel_ready || return 0
   # 製品全体が generic、または個別判定のある製品に追記した CVE（cves[].generic）を対象にする
   local iid pat cve fixed sev cvss ver f
-  while IFS=$'\t' read -r iid pat cve fixed sev cvss; do
+  while IFS="$US" read -r iid pat cve fixed sev cvss; do
     [ -n "$pat" ] && [ -n "$fixed" ] || continue
     pat="${pat//\\\\/\\}"  # @tsv のエスケープを戻す
     local -a fx; IFS=',' read -r -a fx <<<"$fixed"
@@ -778,7 +782,7 @@ intel_infra() {
       version_branch_vulnerable "${ver#v}" "${fx[@]}" && lvl_emit "$sev" "" "$f" "${iid} ${ver} は ${cve}${cvss:+（CVSS ${cvss}）}の影響範囲（修正版: ${fixed//,/ }）"
     done < <(detect_service_version "$pat")
   done < <(intel_jq '.infrastructures[] | (.generic == true) as $g | .id as $i | (.image_patterns // []) as $p | .cves[] | select($g or .generic == true) | select((.fixed // []) | length > 0) |
-            [$i, ($p | join("|")), .id, (.fixed | join(",")), (.severity // (if (.cvss // 0) >= 9 or .kev then "CRITICAL" else "HIGH" end)), ((.cvss // "") | tostring)] | @tsv')
+            [$i, ($p | join("|")), .id, (.fixed | join(",")), (.severity // (if (.cvss // 0) >= 9 or .kev then "CRITICAL" else "HIGH" end)), ((.cvss // "") | tostring)] | @tsv' | tsv_us)
 }
 
 # ローカルツールのバージョン（§23）。起動してよいのはここに列挙したツールとバージョン引数だけ（データから任意コマンドを起動させない）
@@ -814,13 +818,13 @@ intel_apps() {
   intel_ready || return 0
   host_enabled || return 0
   local camp bundle cve sev fixed f v
-  while IFS=$'\t' read -r camp bundle cve sev fixed; do
+  while IFS="$US" read -r camp bundle cve sev fixed; do
     for f in "/Applications/$bundle/Contents/Info.plist" "$HOME_DIR/Applications/$bundle/Contents/Info.plist"; do
       [ -f "$f" ] || continue
       v="$(grep -A1 'CFBundleShortVersionString' "$f" | grep -o -E '[0-9]+(\.[0-9]+)+' | head -n1)"
       [ -n "$v" ] && version_lt "$v" "$fixed" && lvl_emit "$sev" "$camp" "$f" "${bundle%.app} ${v} は ${cve} の影響範囲（修正版 ${fixed}）"
     done
-  done < <(intel_jq '.intel.apps[]? | [.campaign, .bundle, .cve, (.severity // "HIGH"), .fixed] | @tsv')
+  done < <(intel_jq '.intel.apps[]? | [.campaign, .bundle, .cve, (.severity // "HIGH"), .fixed] | @tsv' | tsv_us)
 }
 
 # 任意ファイルの悪性文字列（§7 AI 指示ファイル・§20 MCP 定義など）。file_regex でファイルパスを絞る
@@ -1104,7 +1108,7 @@ check_s6() {
   done
   min="$(read_ioc '.runtime_minimums.certifi')"
   build_deps
-  awk -F'\t' '$1=="pypi" && $2=="certifi" {print $3"\t"$4}' "$DEPS_TSV" | while IFS=$'\t' read -r v d; do
+  awk -F'\t' '$1=="pypi" && $2=="certifi" {print $3"\t"$4}' "$DEPS_TSV" | tsv_us | while IFS="$US" read -r v d; do
     version_lt "$v" "$min" && high "$camp" "$d" "certifi ${v} は ${min} 未満（eMudhra 失効が未反映）"
   done
   local -a gmins; mapfile -t gmins < <(read_ioc '.runtime_minimums.go')
@@ -2091,7 +2095,7 @@ check_s36() {
     [ -n "$f" ] && high "hf-dataset-poisoning" "$f" "データセット設定にテンプレートインジェクション様の式"
   done
   build_deps
-  awk -F'\t' '$1=="pypi" && $2=="lerobot" {print $3"\t"$4}' "$DEPS_TSV" | while IFS=$'\t' read -r v f; do
+  awk -F'\t' '$1=="pypi" && $2=="lerobot" {print $3"\t"$4}' "$DEPS_TSV" | tsv_us | while IFS="$US" read -r v f; do
     high "hf-lerobot-rce" "$f" "lerobot ${v}: CVE-2026-25874（CVSS 9.8）の修正版を確認してください（ioc に修正版未定義）"
   done
   while IFS= read -r f; do [ -n "$f" ] && critical "hf-supply-chain" "$f" "transformers.pyz（正規配布物ではない偽装アーカイブ）"; done < <(files_named '^transformers\.pyz$')
@@ -2113,16 +2117,16 @@ check_s37() {
   build_deps
   if [ "$HAVE_JQ" -eq 1 ]; then
     local ce cp cf cid
-    while IFS=$'\t' read -r cid ce cp cf; do
-      awk -F'\t' -v e="$ce" -v n="$cp" '$1==e && $2==n {print $3"\t"$4}' "$DEPS_TSV" | sort -u | while IFS=$'\t' read -r v f; do
+    while IFS="$US" read -r cid ce cp cf; do
+      awk -F'\t' -v e="$ce" -v n="$cp" '$1==e && $2==n {print $3"\t"$4}' "$DEPS_TSV" | sort -u | tsv_us | while IFS="$US" read -r v f; do
         [ -n "$v" ] && version_lt "$v" "$cf" && high "mcp-poisoning" "$f" "${cp}@${v} は ${cid} の影響範囲（修正版 ${cf}）"
       done
-    done < <(jq -r '.mcp_poisoning.mcp_cves[] | select(.package and .fixed) | [.id, .eco, .package, .fixed] | @tsv' "$IOC_FILE")
+    done < <(jq -r '.mcp_poisoning.mcp_cves[] | select(.package and .fixed) | [.id, .eco, .package, .fixed] | @tsv' "$IOC_FILE" | tsv_us)
   fi
   awk -F'\t' '
     ($1=="npm" && ($2=="@modelcontextprotocol/sdk" || $2 ~ /appium.*mcp|mcp.*appium/ || $2=="@modelcontextprotocol/server-everything" || $2 ~ /gitlab-mcp/)) ||
     ($1=="pypi" && ($2=="mcp" || $2=="mcp-server-fetch" || $2=="fastmcp")) ||
-    ($1=="go" && $2 ~ /stacklok\/toolhive/) {print $2"\t"$3"\t"$4}' "$DEPS_TSV" | sort -u | while IFS=$'\t' read -r n v f; do
+    ($1=="go" && $2 ~ /stacklok\/toolhive/) {print $2"\t"$3"\t"$4}' "$DEPS_TSV" | sort -u | tsv_us | while IFS="$US" read -r n v f; do
     medium "mcp-poisoning" "$f" "MCP 関連依存 ${n}@${v}: CVE-2026-104850/104120/111767/59951/61559/52869/58500, GO-2026-5996/6002 の該当可否を確認（ioc に修正版未定義）"
   done
   return 0
@@ -2356,7 +2360,7 @@ check_s43() {
   local ver
   while IFS=$'\t' read -r ver f; do [ -n "$ver" ] && version_lt "${ver#v}" "1.8.5" && high "" "$f" "Fulcio ${ver} は CVE-2026-22772（metaRegex SSRF）の影響範囲（<1.8.5）"; done < <(detect_service_version 'projectsigstore/fulcio')
   build_deps
-  awk -F'\t' '$1=="gem" && $2=="sigstore" {print $3"\t"$4}' "$DEPS_TSV" | while IFS=$'\t' read -r v f; do
+  awk -F'\t' '$1=="gem" && $2=="sigstore" {print $3"\t"$4}' "$DEPS_TSV" | tsv_us | while IFS="$US" read -r v f; do
     version_lt "$v" "0.2.3" && high "" "$f" "sigstore-ruby ${v} は CVE-2026-31830（検証バイパス）の影響範囲（<0.2.3）"
   done
   return 0
@@ -2766,11 +2770,11 @@ check_skillpact() {
     local diff_anomaly=false diff_reason="" prev_path=""
     if [ -n "$author" ] && [ -n "$cname" ] && [ -n "$cversion" ]; then
       local pa pn pv pp best=""
-      while IFS=$'\t' read -r pa pn pv pp; do
+      while IFS="$US" read -r pa pn pv pp; do
         [ "$pa" = "$author" ] && [ "$pn" = "$cname" ] && [ "$pp" != "$cpath" ] && [ -n "$pv" ] || continue
         version_lt "$pv" "$cversion" || continue
         if [ -z "$best" ] || version_lt "$best" "$pv"; then best="$pv"; prev_path="$pp"; fi
-      done <"$TMP_DIR/sp_index.tsv"
+      done < <(tsv_us <"$TMP_DIR/sp_index.tsv")
       if [ -n "$prev_path" ]; then
         local prev_tokens
         prev_tokens="$(jq -c "$SP_EFFECTS_NORM"' [(.effects // [])[] | norm] + [(.operations // [])[] | (.effects // [])[] | norm] | map(select(length>0)) | unique' "$prev_path" 2>/dev/null)"
