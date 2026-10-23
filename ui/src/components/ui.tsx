@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { Component, createContext, useCallback, useContext, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import type { DisplaySeverity } from '../engine';
 
 // ---- アイコン（ui-components.svg §I。12/16/32 グリッド、stroke 1.5） ----------------------
@@ -126,4 +126,23 @@ export function useCopy() {
       toast({ tone: 'error', text: 'クリップボードを使えません。下の欄から手動でコピーしてください', fallback: text });
     }
   }, [toast]);
+}
+
+// ---- エラー境界（描画エラーで画面全体が空白にならないようにする） ---------------------------
+/** 子の描画で例外が起きたら、回復用のメッセージを出す。「クリアして再表示」で State を初期化して描画し直す。 */
+export class ErrorBoundary extends Component<{ children: ReactNode; onReset(): void }, { failed: boolean }> {
+  override state = { failed: false };
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+  override render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <Card className="flex flex-col items-start gap-3 border-critical p-5" role="alert" data-testid="render-error">
+        <div className="flex items-center gap-2 font-semibold text-critical"><Icon name="crit" size={16} />表示中にエラーが発生しました</div>
+        <p className="text-sm text-muted">取り込んだデータに表示できない値が含まれている可能性があります。結果をクリアして再表示してください（ファイル内容は外部に送信されません）。</p>
+        <Button onClick={() => { this.props.onReset(); this.setState({ failed: false }); }} data-testid="render-error-reset">クリアして再表示</Button>
+      </Card>
+    );
+  }
 }

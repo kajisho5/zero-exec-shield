@@ -5,7 +5,7 @@ import { fromDataTransfer, fromFileList, readFiles, type PickedFile } from './fi
 import { Header, TabBar } from './components/layout';
 import { BlastRadiusPanel, CliOnlyNotice, FindingsTable, FindingsToolbar, InputArea, SummaryCards, UndeterminedCard } from './components/overview';
 import { SkillPactTab } from './components/skillpact';
-import { Icon, useToast } from './components/ui';
+import { ErrorBoundary, Icon, useToast } from './components/ui';
 import { ActionsViewer, ExtensionViewer, McpViewer } from './components/viewers';
 import { ScanProvider, useScan } from './state/ScanContext';
 import { allFindings } from './state/reducer';
@@ -43,11 +43,11 @@ function Scanner() {
     const q = state.ui.query.trim().toLowerCase();
     return findingsForTab(tab, findings).filter((f: Finding) =>
       state.ui.severityFilter.has(f.level) && (!state.ui.moduleFilter || f.module === state.ui.moduleFilter)
-      && (!q || (f.path ?? '').toLowerCase().includes(q) || (f.campaign ?? '').toLowerCase().includes(q)));
+      && (!q || String(f.path ?? '').toLowerCase().includes(q) || String(f.campaign ?? '').toLowerCase().includes(q)));
   }, [tab, findings, state.ui]);
 
   const exportJson = () => {
-    const doc = toFindingsDoc(findings, state.result?.errors ?? [], IOC.incident_bundle, state.startedAt ?? nowIso(), state.finishedAt ?? nowIso());
+    const doc = toFindingsDoc(findings, state.result?.errors ?? [], IOC.incident_bundle, state.startedAt ?? nowIso(), state.finishedAt ?? nowIso(), state.imported);
     const url = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 2) + '\n'], { type: 'application/json' }));
     const a = document.createElement('a');
     a.href = url;
@@ -58,8 +58,10 @@ function Scanner() {
 
   const importJson = async (file: File) => {
     try {
-      dispatch({ type: 'IMPORT_FINDINGS', doc: parseFindingsDoc(await file.text()) });
-      toast({ tone: 'ok', text: 'CLI の findings.json を読み込みました' });
+      const doc = parseFindingsDoc(await file.text());
+      dispatch({ type: 'IMPORT_FINDINGS', doc });
+      if (doc.dropped) toast({ tone: 'error', text: `CLI の findings.json を読み込みました（スキーマに適合しない ${doc.dropped} 件を除外）` });
+      else toast({ tone: 'ok', text: 'CLI の findings.json を読み込みました' });
     } catch (e) {
       toast({ tone: 'error', text: e instanceof ImportError ? e.message : 'findings.json を読み込めませんでした' });
     }
@@ -77,6 +79,7 @@ function Scanner() {
       <Header onExport={exportJson} onClear={() => dispatch({ type: 'CLEAR' })} canExport={findings.length > 0 || !!r} />
       <TabBar active={tab.id} findings={findings} onSelect={(id) => dispatch({ type: 'SET_TAB', tab: id })} />
       <main id={`panel-${tab.id}`} role="tabpanel" aria-labelledby={`tab-${tab.id}`} className="px-8 py-6">
+        <ErrorBoundary onReset={() => dispatch({ type: 'CLEAR' })}>
         {tab.id === 'skillpact' ? (
           <SkillPactTab skills={r?.skillpact ?? []} selected={state.ui.selectedSkillId} onSelect={(id) => dispatch({ type: 'SELECT_SKILL', id })} />
         ) : (
@@ -97,7 +100,7 @@ function Scanner() {
                   <span className="flex items-center gap-1.5 text-muted"><Icon name="safe" size={14} className="text-safe" />スキャン完了 ・ {r.stats.files.toLocaleString()} ファイル ・ {(state.durationMs / 1000).toFixed(1)} 秒</span>
                 )}
                 {r && <span className="text-xs text-subtle">未判定 {r.stats.skippedSize + r.stats.skippedBinary + r.stats.zeroByteDecoys + r.stats.errors} 件（サイズ超過 {r.stats.skippedSize} / バイナリ {r.stats.skippedBinary} / リンク先不明 {r.stats.zeroByteDecoys}）→ 右パネル参照</span>}
-                {state.imported && <span className="text-xs text-accent">CLI 取り込み: {state.imported.findings.length} 件（status: {state.imported.status}）</span>}
+                {state.imported && <span className="text-xs text-accent" data-testid="import-status">CLI 取り込み: {state.imported.findings.length} 件（status: {state.imported.status}）{state.imported.dropped > 0 && <span className="ml-1 text-high">・スキーマ不適合で除外 {state.imported.dropped} 件</span>}</span>}
                 {state.phase === 'error' && <span className="text-critical">エラー: {state.errorMessage}</span>}
               </div>
               {tab.cliOnlyNote && <CliOnlyNotice note={tab.cliOnlyNote} compact />}
@@ -116,6 +119,7 @@ function Scanner() {
             </aside>
           </div>
         )}
+        </ErrorBoundary>
       </main>
     </div>
   );
