@@ -2,6 +2,9 @@
   "findings": [
     {
       "campaign": "ebpf-rootkit",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§40",
       "path": "ld_preload.sh"

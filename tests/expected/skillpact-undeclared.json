@@ -2,6 +2,9 @@
   "findings": [
     {
       "campaign": "skillpact-undeclared",
+      "evidence": {
+        "kind": "tree"
+      },
       "level": "INFO",
       "module": "§49",
       "path": "standalone"

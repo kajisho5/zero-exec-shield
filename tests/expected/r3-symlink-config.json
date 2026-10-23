@@ -2,13 +2,32 @@
   "findings": [
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "symlink"
+      },
+      "kind": "mcp.dangerous_command",
       "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/mcpServers/x"
+        }
+      ],
       "module": "§17",
       "path": "ev/.mcp.json"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "symlink"
+      },
       "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/tasks/0/runOptions/runOn"
+        }
+      ],
       "module": "§7",
       "path": "ev/.vscode/tasks.json"
     }

@@ -2,54 +2,81 @@
   "findings": [
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§4",
       "path": "tv-vuln/.tool-versions"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§4",
       "path": "deb12-vuln/var/lib/dpkg/status"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§4",
       "path": "ubuntu2404-vuln/var/lib/dpkg/status"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "INFO",
       "module": "§4",
       "path": "ubuntu2404-fixed/var/lib/dpkg/status"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "INFO",
       "module": "§4",
       "path": "ubuntu2404-fixed/var/lib/dpkg/status"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§4",
       "path": "deb11-unknown/var/lib/dpkg/status"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§4",
       "path": "tv-86/.tool-versions"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§4",
       "path": "tv-9/.tool-versions"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§4",
       "path": "tv-rc/.tool-versions"

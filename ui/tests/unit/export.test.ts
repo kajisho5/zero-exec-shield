@@ -66,8 +66,63 @@ describe('findings.json の書き出しは常にスキーマに適合', () => {
     expect(out.findings.length).toBe(all.length);
   });
   it('検証器自体が違反を検出する', () => {
-    expect(validate(JSON.parse(doc([{ ...good, id: 'x' }])))).not.toEqual([]);
-    expect(validate(JSON.parse(doc([good])))).toEqual([]);
+    const v11 = { schema_version: '1.1' };
+    expect(validate(JSON.parse(doc([{ ...good, id: 'x' }], [], v11)))).not.toEqual([]);
+    expect(validate(JSON.parse(doc([good], [], v11)))).toEqual([]);
+    // 書き出すのは 1.1 だけ（スキーマの schema_version は "1.1" 固定）
+    expect(validate(JSON.parse(doc([good])))).not.toEqual([]);
+  });
+  it('書き出しは schema_version 1.1 で、UI の finding に evidence と 1.1 の項目を付ける（scan_roots は出さない）', async () => {
+    const r = await analyzeFiles(['chaindrop', 'mcp', 'browser-ext'].flatMap((n) => loadFixture(n)));
+    const out = toFindingsDoc(r.findings, r.errors, IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z');
+    expect(out.schema_version).toBe('1.1');
+    expect('scan_roots' in out).toBe(false);
+    expect(out.findings.every((f) => f.evidence && ['file', 'detail'].includes(f.evidence.kind))).toBe(true);
+    const mcp = out.findings.find((f) => f.module === '§17' && f.kind === 'mcp.dangerous_command');
+    expect(mcp?.locators).toEqual([{ format: 'json', pointer: '/mcpServers/evil' }]);
+    const ext = out.findings.find((f) => f.module === '§24' && f.path === '/browser-ext/Extensions/abcd/manifest.json');
+    expect(ext?.related).toEqual([{ relation: 'ext_dir', path: '/browser-ext/Extensions/abcd' }]);
+    expect(validate(JSON.parse(JSON.stringify(out)))).toEqual([]);
+  });
+});
+
+describe('findings 1.1 / 1.0 の取り込み', () => {
+  const f11 = { ...good, kind: 'mcp.dangerous_command', locators: [{ format: 'json', pointer: '/mcpServers/evil' }, { format: 'text', line: 3, line_sha256: H('c') }],
+    related: [{ relation: 'ext_dir', path: '/x/Extensions/abcd' }], subject: { ecosystem: 'npm', package: 'keyv', version: '6.0.0', safe_version: 'latest 5.x', fixed_versions: [] },
+    evidence: { kind: 'file', hash: H('b') } };
+  it('1.1 の任意項目を読み込み、書き出しで保つ', () => {
+    const r = parseFindingsDoc(doc([f11], [], { schema_version: '1.1', scan_roots: ['/home/u/repo'] }));
+    expect(r.dropped).toBe(0);
+    expect(r.findings[0]).toMatchObject({ kind: f11.kind, locators: f11.locators, related: f11.related, subject: f11.subject, evidence: f11.evidence });
+    const out = toFindingsDoc(r.findings, [], IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z', r);
+    expect(out.findings[0]).toMatchObject({ kind: f11.kind, locators: f11.locators, related: f11.related, evidence: f11.evidence });
+    expect(validate(JSON.parse(JSON.stringify(out)))).toEqual([]);
+  });
+  it('1.0 の文書は今までどおり読み込める（1.1 の項目を持つ finding は除外）', () => {
+    const r = parseFindingsDoc(doc([good, { ...f11, id: H('d') }]));
+    expect(r.findings.map((f) => f.id)).toEqual([H('a')]);
+    expect(r.dropped).toBe(1);
+    expect(r.findings[0]!.evidence).toBeUndefined();
+    const out = toFindingsDoc(r.findings, [], IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z', r);
+    expect(validate(JSON.parse(JSON.stringify(out)))).toEqual([]);
+    // 1.0 の文書に scan_roots は無い
+    expect(() => parseFindingsDoc(doc([good], [], { scan_roots: ['/x'] }))).toThrow(ImportError);
+  });
+  it('1.1 の項目が不正な finding は除外する', () => {
+    const bad = [
+      { ...f11, id: H('1'), kind: 'Bad Kind' },
+      { ...f11, id: H('2'), locators: [{ format: 'xml', pointer: '/a' }] },
+      { ...f11, id: H('3'), locators: [{ format: 'text', line: 0 }] },
+      { ...f11, id: H('4'), locators: [{ format: 'text', line: 1, line_sha256: 'x' }] },
+      { ...f11, id: H('5'), related: [{ relation: 'ext_dir', path: 'relative' }] },
+      { ...f11, id: H('6'), evidence: { kind: 'blob', hash: H('b') } },
+      { ...f11, id: H('7'), subject: { ecosystem: 'npm', extra: 1 } },
+      { ...f11, id: H('8'), locators: [{ format: 'json', pointer: '/a', content: 'secret' }] },
+    ];
+    const r = parseFindingsDoc(doc([f11, ...bad], [], { schema_version: '1.1' }));
+    expect(r.findings.map((f) => f.id)).toEqual([H('a')]);
+    expect(r.dropped).toBe(bad.length);
+    expect(() => parseFindingsDoc(doc([], [], { schema_version: '1.1', scan_roots: ['rel'] }))).toThrow(ImportError);
   });
 });
 

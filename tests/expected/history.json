@@ -2,30 +2,45 @@
   "findings": [
     {
       "campaign": null,
+      "evidence": {
+        "kind": "detail"
+      },
       "level": "MEDIUM",
       "module": "§12",
       "path": null
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "detail"
+      },
       "level": "MEDIUM",
       "module": "§12",
       "path": null
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "detail"
+      },
       "level": "MEDIUM",
       "module": "§12",
       "path": ".npmrc"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§18",
       "path": ".zsh_history"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§18",
       "path": ".zsh_history"

@@ -2,6 +2,9 @@
   "findings": [
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "symlink"
+      },
       "level": "CRITICAL",
       "module": "§17",
       "path": "docs/vid-settings.mp4"

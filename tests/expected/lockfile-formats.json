@@ -2,51 +2,139 @@
   "findings": [
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "pnpm-v5/pnpm-lock.yaml"
+      "path": "pnpm-v5/pnpm-lock.yaml",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "@cacheable/memory",
+        "safe_version": null,
+        "version": "2.2.1"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "pnpm-v5/pnpm-lock.yaml"
+      "path": "pnpm-v5/pnpm-lock.yaml",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "flat-cache",
+        "safe_version": null,
+        "version": "6.1.24"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "pnpm-v5/pnpm-lock.yaml"
+      "path": "pnpm-v5/pnpm-lock.yaml",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "keyv",
+        "safe_version": "latest 5.x",
+        "version": "6.0.0"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "pnpm-v6/pnpm-lock.yaml"
+      "path": "pnpm-v6/pnpm-lock.yaml",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "cacheable",
+        "safe_version": null,
+        "version": "2.5.1"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "yarn-berry-alias/yarn.lock"
+      "path": "yarn-berry-alias/yarn.lock",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "cache-manager",
+        "safe_version": null,
+        "version": "7.2.10"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "yarn-berry-alias/yarn.lock"
+      "path": "yarn-berry-alias/yarn.lock",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "keyv",
+        "safe_version": "latest 5.x",
+        "version": "6.0.0"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "yarn-v1-alias/yarn.lock"
+      "path": "yarn-v1-alias/yarn.lock",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "@cacheable/memory",
+        "safe_version": null,
+        "version": "2.2.1"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "yarn-v1-alias/yarn.lock"
+      "path": "yarn-v1-alias/yarn.lock",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "keyv",
+        "safe_version": "latest 5.x",
+        "version": "6.0.0"
+      }
     }
   ],
   "home": "_home",

@@ -2,18 +2,27 @@
   "findings": [
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§18",
       "path": "lib/.hg/q.js"
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§18",
       "path": "lib/.svn/p.js"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§2",
       "path": "package.json"

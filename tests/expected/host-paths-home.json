@@ -2,48 +2,72 @@
   "findings": [
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "INFO",
       "module": "§10",
       "path": "Library/LaunchAgents/com.zoom.plist"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "detail"
+      },
       "level": "MEDIUM",
       "module": "§12",
       "path": null
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "detail"
+      },
       "level": "MEDIUM",
       "module": "§12",
       "path": null
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "detail"
+      },
       "level": "MEDIUM",
       "module": "§12",
       "path": ".npmrc"
     },
     {
       "campaign": "redc2-redshell-npm-streak",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§15",
       "path": ".config/.rsvc"
     },
     {
       "campaign": "amnesiastealer-clickfix-github",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§30",
       "path": ".pwd"
     },
     {
       "campaign": "redc2-redshell-npm-streak",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§30",
       "path": ".config/.rsvc"
     },
     {
       "campaign": "overlord-fake-zoom-dotnet",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§30",
       "path": "Library/LaunchAgents/com.zoom.plist"

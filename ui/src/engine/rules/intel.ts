@@ -4,6 +4,7 @@ import { homeLike, push, readable, rootRel, type RuleCtx } from '../context';
 import type { InfraCve } from '../ioc';
 import type { Severity } from '../types';
 import { basename, ere, versionCmp, versionMatches } from '../util';
+import { hookLocators } from './agentConfig';
 import { workflowText } from './ciAndExtensions';
 import { collectDeps } from './supplyChain';
 
@@ -61,7 +62,7 @@ export function infraRules(ctx: RuleCtx): void {
         const level: Severity = module === '§16' ? cveLevel(c) : 'CRITICAL';
         const name = inf.id === 'gitlab' ? 'GitLab' : inf.id;
         const what = `${c.id}${c.cvss ? `（CVSS ${c.cvss}）` : ''}`;
-        push(ctx, { level, module, campaign: null, path, detail: `${name} ${v} は ${what}の影響範囲（修正版: ${fixed.join(' ')}）`, ruleId: `${rule}:${inf.id}:${c.id}:${v}`, evidenceSha: sha });
+        push(ctx, { level, module, campaign: null, path, detail: `${name} ${v} は ${what}の影響範囲（修正版: ${fixed.join(' ')}）`, ruleId: `${rule}:${inf.id}:${c.id}:${v}`, evidenceSha: sha, kind: 'runtime.cve' });
       }
     }
   }
@@ -101,19 +102,19 @@ export function emudhraRules(ctx: RuleCtx): void {
       const osr = ctx.byPath.get(`${base}etc/os-release`) ?? ctx.byPath.get(`${base}usr/lib/os-release`);
       const osid = /^ID=["']?([^"'\r\n]*)/m.exec(osr?.text ?? '')?.[1] ?? '';
       const bad = v.includes('ubuntu') || osid === 'ubuntu' ? Number(v.slice(0, 8)) < Number(ubMin) : !debianCaFixed(v);
-      if (bad) push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, detail: `ca-certificates ${v}（dpkg）は eMudhra 侵害 CA を含む`, ruleId: 's6-emudhra-os:dpkg', evidenceSha: f.sha256 });
+      if (bad) push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, detail: `ca-certificates ${v}（dpkg）は eMudhra 侵害 CA を含む`, ruleId: 's6-emudhra-os:dpkg', evidenceSha: f.sha256, kind: 'runtime.cve' });
     } else if (/(^|\/)lib\/apk\/db\/installed$/.test(f.relPath)) {
       const v = /^P:ca-certificates\n(?:[^\n]+\n)*?V:(\S+)/m.exec(f.text)?.[1];
       const min = os.alpine ?? '20261020-r0';
       if (v && (v.split('-r')[0] ?? '') < (min.split('-r')[0] ?? '')) {
-        push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, detail: `ca-certificates ${v}（apk）は eMudhra 侵害 CA を含む（Alpine 修正版 ${min}）`, ruleId: 's6-emudhra-os:apk', evidenceSha: f.sha256 });
+        push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, detail: `ca-certificates ${v}（apk）は eMudhra 侵害 CA を含む（Alpine 修正版 ${min}）`, ruleId: 's6-emudhra-os:apk', evidenceSha: f.sha256, kind: 'runtime.cve' });
       }
     }
   }
   const fx = e.fixed ?? {};
   const judge = (name: string, v: string, path: string, sha: string | null, fixed: string[] | undefined) => {
     if (!/^\d+\.\d+\.\d+$/.test(v) || !fixed?.length || !versionBranchVulnerable(v, fixed)) return;
-    push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path, detail: `${name} ${v} は eMudhra 侵害 CA を信頼（修正版: ${fixed.join(' ')}）`, ruleId: `s6-emudhra-runtime:${name}:${v}`, evidenceSha: sha });
+    push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path, detail: `${name} ${v} は eMudhra 侵害 CA を信頼（修正版: ${fixed.join(' ')}）`, ruleId: `s6-emudhra-runtime:${name}:${v}`, evidenceSha: sha, kind: 'runtime.cve' });
   };
   for (const f of readable(ctx)) {
     if (f.name === '.nvmrc' || f.name === '.node-version') judge('Node.js', (f.text.split(/\r?\n/)[0] ?? '').trim().replace(/^v/, ''), f.relPath, f.sha256, fx.node);
@@ -129,7 +130,7 @@ export function emudhraRules(ctx: RuleCtx): void {
   if (certMin) {
     for (const d of collectDeps(ctx)) {
       if (d.eco === 'pypi' && d.name === 'certifi' && versionCmp(d.version, certMin) < 0) {
-        push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: d.path, detail: `certifi ${d.version} は ${certMin} 未満（eMudhra 失効が未反映）`, ruleId: `s6-emudhra-runtime:certifi:${d.version}`, evidenceSha: d.sha });
+        push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: d.path, detail: `certifi ${d.version} は ${certMin} 未満（eMudhra 失効が未反映）`, ruleId: `s6-emudhra-runtime:certifi:${d.version}`, evidenceSha: d.sha, kind: 'runtime.cve' });
       }
     }
   }
@@ -139,7 +140,7 @@ export function emudhraRules(ctx: RuleCtx): void {
     const v = (i.ver.split('_')[0] ?? '').split('+')[0] ?? '';
     const u8 = /^8u?(\d+)/.exec(v)?.[1];
     if (u8 !== undefined) {
-      if (Number(u8) < (fx.java8_update ?? 511)) push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: i.path, detail: `Java 8u${u8} は eMudhra 侵害 CA を信頼（修正版 8u${fx.java8_update ?? 511}）`, ruleId: `s6-emudhra-runtime:java8:${u8}`, evidenceSha: i.sha });
+      if (Number(u8) < (fx.java8_update ?? 511)) push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: i.path, detail: `Java 8u${u8} は eMudhra 侵害 CA を信頼（修正版 8u${fx.java8_update ?? 511}）`, ruleId: `s6-emudhra-runtime:java8:${u8}`, evidenceSha: i.sha, kind: 'runtime.cve' });
       continue;
     }
     judge('Java', v, i.path, i.sha, fx.java);
@@ -199,7 +200,11 @@ export function intelRules(ctx: RuleCtx): void {
     const strs = (s.strings ?? []).map((x) => x.toLowerCase());
     for (const f of readable(ctx).filter((x) => rx.test('/' + x.relPath))) {
       const low = f.text.toLowerCase();
-      if (strs.some((x) => low.includes(x))) push(ctx, { level: sev(s.severity, 'HIGH'), module: s.module, campaign: s.campaign, path: f.relPath, detail: `既知の攻撃キャンペーンの文字列（${s.campaign}）`, ruleId: `s7-intel-strings:${s.campaign}`, evidenceSha: f.sha256 });
+      const hit = strs.find((x) => low.includes(x));
+      if (hit === undefined) continue;
+      // エージェントの設定ファイルのフックなら、最初に一致した文字列を含むフックの位置（CLI の intel_strings と同じ）
+      const locators = /(^|\/)\.claude\/settings(\.local)?\.json$/.test(f.relPath) ? hookLocators(f.text, (c) => c.toLowerCase().includes(hit)) : undefined;
+      push(ctx, { level: sev(s.severity, 'HIGH'), module: s.module, campaign: s.campaign, path: f.relPath, detail: `既知の攻撃キャンペーンの文字列（${s.campaign}）`, ruleId: `s7-intel-strings:${s.campaign}`, evidenceSha: f.sha256, ...(locators ? { locators } : {}) });
     }
   }
 

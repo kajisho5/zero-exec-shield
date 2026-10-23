@@ -2,72 +2,145 @@
   "findings": [
     {
       "campaign": "jscrambler-jul2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "package-lock.json"
+      "path": "package-lock.json",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "jscrambler",
+        "safe_version": "8.22.0",
+        "version": "8.16.0"
+      }
     },
     {
       "campaign": "teampcp-mini-shai-hulud",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "package-lock.json"
+      "path": "package-lock.json",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "intercom-client",
+        "safe_version": "7.0.3",
+        "version": "7.0.4"
+      }
     },
     {
       "campaign": "teampcp-mini-shai-hulud",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "py-normalized/requirements.txt"
+      "path": "py-normalized/requirements.txt",
+      "subject": {
+        "ecosystem": "pypi",
+        "fixed_versions": [],
+        "package": "guardrails-ai",
+        "safe_version": "0.10.0",
+        "version": "0.10.1"
+      }
     },
     {
       "campaign": "mcp-python-sdk-jul-2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.vulnerable",
       "level": "HIGH",
       "module": "§15",
-      "path": "py/requirements.txt"
+      "path": "py/requirements.txt",
+      "subject": {
+        "ecosystem": "pypi",
+        "fixed_versions": [
+          "1.28.1"
+        ],
+        "package": "mcp",
+        "safe_version": "1.28.1",
+        "version": "1.27.1"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§18",
       "path": "relay.js"
     },
     {
       "campaign": "teampcp-mini-shai-hulud",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§18",
       "path": "relay.js"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
       "level": "CRITICAL",
       "module": "§22",
       "path": ".github/workflows/scan.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§22",
       "path": ".github/workflows/scan.yml"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§37",
       "path": "package-lock.json"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§37",
       "path": "py/requirements.txt"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§37",
       "path": "package-lock.json"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§37",
       "path": "py/requirements.txt"

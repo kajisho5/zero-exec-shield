@@ -2,9 +2,18 @@
   "findings": [
     {
       "campaign": "skillpact-account-compromise",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§49",
-      "path": "v2/skill.contract.json"
+      "path": "v2/skill.contract.json",
+      "related": [
+        {
+          "path": "v2",
+          "relation": "skill_dir"
+        }
+      ]
     }
   ],
   "home": "_home",

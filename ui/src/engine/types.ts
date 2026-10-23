@@ -38,6 +38,14 @@ export interface SkillPactFindingField {
   diff_anomaly: boolean;
 }
 
+/** findings 1.1 の任意項目（ZES schemas/findings.schema.json）。ファイル内容は含めない（pointer か、行番号と行の SHA-256 だけ） */
+export interface FindingSubject { ecosystem: string; package: string; version: string | null; safe_version: string | null; fixed_versions: string[] }
+export type LocatorFormat = 'json' | 'jsonc' | 'toml' | 'yaml' | 'ini' | 'text' | 'plist';
+export interface FindingLocator { format: LocatorFormat; pointer?: string; line?: number; line_sha256?: string }
+export interface FindingRelated { relation: string; path: string }
+export type EvidenceKind = 'file' | 'large_file' | 'tree' | 'symlink' | 'detail';
+export interface FindingEvidence { kind: EvidenceKind; hash: string }
+
 export interface Finding {
   id: string;
   level: Severity;
@@ -48,6 +56,12 @@ export interface Finding {
   /** 固定テンプレート由来の説明（ファイル由来の文字列を連結しない） */
   detail: string;
   evidence_hash: string;
+  kind?: string;
+  subject?: FindingSubject;
+  locators?: FindingLocator[];
+  related?: FindingRelated[];
+  /** 種類つきの証跡（CLI から取り込んだ 1.0 の finding には無い） */
+  evidence?: FindingEvidence;
   skillpact?: SkillPactFindingField;
   ruleId: string;
   source: 'ui' | 'cli-import';

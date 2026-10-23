@@ -2,42 +2,79 @@
   "findings": [
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "package-lock.json"
+      "path": "package-lock.json",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "keyv",
+        "safe_version": "latest 5.x",
+        "version": "6.0.0"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§15",
       "path": "package.json"
     },
     {
       "campaign": "solana-typosquat",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "package-lock.json"
+      "path": "package-lock.json",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "@solana-labs/web3js",
+        "safe_version": null,
+        "version": "1.0.2"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§15",
       "path": "Math_Symbol.js"
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§15",
       "path": "setup.mjs"
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§17",
       "path": "setup.mjs"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§2",
       "path": "package.json"

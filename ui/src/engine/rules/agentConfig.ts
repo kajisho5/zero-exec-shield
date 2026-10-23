@@ -2,7 +2,7 @@
 import { push, readable, type RuleCtx } from '../context';
 import type { McpServerView } from '../types';
 import { parseCodexToml } from '../toml';
-import { clip, parseJsonc, versionCmp } from '../util';
+import { clip, jsonPointer, parseJsonc, versionCmp, type LocatorSpec } from '../util';
 import { collectDeps } from './supplyChain';
 
 export { parseCodexToml };
@@ -24,8 +24,9 @@ const HIGH_CMD = new RegExp([
 ].join('|'), 'i');
 const MED_CMD = /(^|[\s"/])(npx|uvx|bunx|pnpm dlx)([\s"]|$)/;
 
-function collectServers(obj: unknown, out: { name: string; command: string; args: string[] }[], name = ''): void {
-  if (Array.isArray(obj)) { obj.forEach((v) => collectServers(v, out, name)); return; }
+type Server = { name: string; command: string; args: string[]; path: (string | number)[] };
+function collectServers(obj: unknown, out: Server[], name = '', path: (string | number)[] = []): void {
+  if (Array.isArray(obj)) { obj.forEach((v, i) => collectServers(v, out, name, [...path, i])); return; }
   if (!obj || typeof obj !== 'object') return;
   const o = obj as Record<string, unknown>;
   // CLI の jq 式と同じ: command を持つ全オブジェクト。args は配列（要素ごと）でも文字列（1 引数）でもよい
@@ -33,22 +34,73 @@ function collectServers(obj: unknown, out: { name: string; command: string; args
     const str = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
     const a = o['args'];
     const args = a === undefined || a === null || a === false ? [] : Array.isArray(a) ? a.map(str) : [str(a)];
-    out.push({ name, command: str(o['command']), args });
+    out.push({ name, command: str(o['command']), args, path });
   }
-  for (const [k, v] of Object.entries(o)) if (v && typeof v === 'object') collectServers(v, out, k);
+  for (const [k, v] of Object.entries(o)) if (v && typeof v === 'object') collectServers(v, out, k, [...path, k]);
+}
+
+/** jq と同じく先頭の BOM は厳密な JSON として受け付ける（locators の format を CLI と揃える） */
+const stripBom = (t: string) => (t.charCodeAt(0) === 0xfeff ? t.slice(1) : t);
+
+function riskOf(s: { command: string; args: string[] }): 'high' | 'medium' | 'none' {
+  const line = `${s.command} ${s.args.join(' ')}`;
+  return HIGH_CMD.test(line) ? 'high' : MED_CMD.test(line) ? 'medium' : 'none';
+}
+
+/** CLI の TASK_RUNON_PATHS と同じ: /tasks/<i>/runOptions/runOn（値が folderOpen） */
+function runOnLocators(text: string): LocatorSpec[] {
+  let fmt: 'json' | 'jsonc' = 'json';
+  let j: unknown;
+  try { j = JSON.parse(stripBom(text)); } catch { fmt = 'jsonc'; try { j = parseJsonc(text); } catch { return []; } }
+  const tasks = j && typeof j === 'object' && !Array.isArray(j) ? (j as Record<string, unknown>)['tasks'] : undefined;
+  if (!Array.isArray(tasks)) return [];
+  const out: LocatorSpec[] = [];
+  tasks.forEach((t, i) => {
+    const ro = t && typeof t === 'object' && !Array.isArray(t) ? (t as Record<string, unknown>)['runOptions'] : undefined;
+    if (ro && typeof ro === 'object' && !Array.isArray(ro) && (ro as Record<string, unknown>)['runOn'] === 'folderOpen') out.push({ format: fmt, pointer: jsonPointer(['tasks', i, 'runOptions', 'runOn']) });
+  });
+  return out;
+}
+
+/** CLI の HOOK_PATHS_STR / HOOK_PATHS_RE と同じ: hooks.<Event>[i] のうち、中の command が pred に一致するもの（/hooks/<Event>/<i>） */
+export function hookLocators(text: string, pred: (cmd: string) => boolean): LocatorSpec[] {
+  let fmt: 'json' | 'jsonc' = 'json';
+  let j: unknown;
+  try { j = JSON.parse(stripBom(text)); } catch { fmt = 'jsonc'; try { j = parseJsonc(text); } catch { return []; } }
+  const hooks = j && typeof j === 'object' && !Array.isArray(j) ? (j as Record<string, unknown>)['hooks'] : undefined;
+  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return [];
+  const cmds = (v: unknown, acc: string[] = []): string[] => {
+    if (Array.isArray(v)) v.forEach((x) => cmds(x, acc));
+    else if (v && typeof v === 'object') {
+      const o = v as Record<string, unknown>;
+      if (typeof o['command'] === 'string') acc.push(o['command']);
+      Object.values(o).forEach((x) => cmds(x, acc));
+    }
+    return acc;
+  };
+  const out: LocatorSpec[] = [];
+  for (const [ev, arr] of Object.entries(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(arr)) continue;
+    arr.forEach((e, i) => { if (cmds(e).some(pred)) out.push({ format: fmt, pointer: jsonPointer(['hooks', ev, i]) }); });
+  }
+  return out;
 }
 
 export function mcpRules(ctx: RuleCtx): void {
   ctx.checks.add('s17-mcp-command').add('s17-symjack').add('s17-setup-mjs').add('s7-folderopen').add('s20-injection').add('s20-runtime-gate').add('s37-host-docker');
   for (const f of readable(ctx).filter((x) => MCP_CONFIG.test(x.relPath))) {
-    let servers: { name: string; command: string; args: string[] }[] = [];
+    let servers: Server[] = [];
     let parseError = false;
+    // locators の形式（CLI と同じ: 厳密な JSON で読めれば json、JSONC としてだけ読めれば jsonc、Codex は toml）
+    let fmt: 'json' | 'jsonc' | 'toml' = 'json';
     if (f.relPath.endsWith('.toml')) {
       const r = parseCodexToml(f.text);
-      servers = r.servers;
+      servers = r.servers.map((x) => ({ ...x, path: ['mcp_servers', x.name] }));
+      fmt = 'toml';
       for (const p of r.problems) ctx.errors.push({ module: '§17', reason: `codex_toml_unparsed:${p}:${f.relPath}` });
     } else {
       // VS Code 等はコメント・末尾カンマを許すため JSONC として読む
+      try { JSON.parse(stripBom(f.text)); } catch { fmt = 'jsonc'; }
       try { collectServers(parseJsonc(f.text), servers); } catch { parseError = true; }
     }
     if (parseError) {
@@ -56,6 +108,7 @@ export function mcpRules(ctx: RuleCtx): void {
       ctx.errors.push({ module: '§17', reason: `mcp_config_parse_failed:${f.relPath}` });
       push(ctx, { level: 'MEDIUM', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'MCP/エージェント設定を解析できません（未判定。command/args を手動または CLI で確認）', ruleId: 's17-mcp-command:parse-error', evidenceSha: f.sha256 });
     }
+    const locs = (risk: string) => servers.filter((s) => riskOf(s) === risk).map((s) => ({ format: fmt, pointer: jsonPointer(s.path) }));
     const views: McpServerView[] = servers.map((s) => {
       const line = `${s.command} ${s.args.join(' ')}`;
       const risk = HIGH_CMD.test(line) ? 'high' : MED_CMD.test(line) ? 'medium' : 'none';
@@ -64,10 +117,10 @@ export function mcpRules(ctx: RuleCtx): void {
     });
     ctx.viewers.mcp.push({ path: f.relPath, servers: views, parseError });
     if (views.some((v) => v.risk === 'high')) {
-      push(ctx, { level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'MCP/エージェント設定の command/args に危険なコマンド（curl/wget/シェル -c/インタプリタの -e・--eval/powershell -Command 等）', ruleId: 's17-mcp-command:high', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'MCP/エージェント設定の command/args に危険なコマンド（curl/wget/シェル -c/インタプリタの -e・--eval/powershell -Command 等）', ruleId: 's17-mcp-command:high', evidenceSha: f.sha256, kind: 'mcp.dangerous_command', locators: locs('high') });
     }
     if (views.some((v) => v.risk === 'medium')) {
-      push(ctx, { level: 'MEDIUM', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'MCP の command が npx/uvx（実行時に最新版を取得。バージョン固定を確認）', ruleId: 's17-mcp-command:medium', evidenceSha: f.sha256 });
+      push(ctx, { level: 'MEDIUM', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'MCP の command が npx/uvx（実行時に最新版を取得。バージョン固定を確認）', ruleId: 's17-mcp-command:medium', evidenceSha: f.sha256, kind: 'mcp.unpinned', locators: locs('medium') });
     }
     if (/host\.docker\.internal/.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§37', campaign: 'mcp-poisoning', path: f.relPath, detail: 'MCP 設定が host.docker.internal を参照（コンテナからホストへの横移動）', ruleId: 's37-host-docker', evidenceSha: f.sha256 });
@@ -93,7 +146,7 @@ export function mcpRules(ctx: RuleCtx): void {
   }
   for (const f of readable(ctx).filter((x) => /(^|\/)\.(vscode|claude|cursor)\/tasks\.json$/.test(x.relPath))) {
     if (/"runOn"\s*:\s*"folderOpen"/.test(f.text)) {
-      push(ctx, { level: 'HIGH', module: '§7', campaign: 'mcp-poisoning', path: f.relPath, detail: 'フォルダを開くだけで自動実行されるタスク（runOn: folderOpen）', ruleId: 's7-folderopen', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§7', campaign: 'mcp-poisoning', path: f.relPath, detail: 'フォルダを開くだけで自動実行されるタスク（runOn: folderOpen）', ruleId: 's7-folderopen', evidenceSha: f.sha256, locators: runOnLocators(f.text) });
     }
   }
   const mcpSrc = readable(ctx).filter((x) => /\.(json|js|mjs|cjs|ts|py)$/.test(x.name) && /(inputSchema|mcpServers|@modelcontextprotocol|FastMCP|mcp\.server|"tools"\s*:)/.test(x.text));
@@ -139,7 +192,7 @@ export function mcpRegistryRules(ctx: RuleCtx): void {
     if (!c.package || !c.fixed) continue;
     for (const d of deps) {
       if (d.eco !== c.eco || d.name !== c.package || d.version === '' || versionCmp(d.version, c.fixed) >= 0) continue;
-      push(ctx, { level: 'HIGH', module: '§37', campaign: 'mcp-poisoning', path: d.path, detail: `${c.package}@${d.version} は ${c.id} の影響範囲（修正版 ${c.fixed}）`, ruleId: `s37-mcp-cves:${c.id}:${d.version}`, evidenceSha: d.sha });
+      push(ctx, { level: 'HIGH', module: '§37', campaign: 'mcp-poisoning', path: d.path, detail: `${c.package}@${d.version} は ${c.id} の影響範囲（修正版 ${c.fixed}）`, ruleId: `s37-mcp-cves:${c.id}:${d.version}`, evidenceSha: d.sha, kind: 'runtime.cve' });
     }
   }
   // ioc に修正版が未定義の MCP 関連 CVE は、該当しうる依存を要確認として出す

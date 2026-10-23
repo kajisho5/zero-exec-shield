@@ -2,48 +2,91 @@
   "findings": [
     {
       "campaign": "litellm-oct2026",
+      "evidence": {
+        "kind": "tree"
+      },
+      "kind": "pkg.compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "site-packages/litellm-1.107.0.dist-info"
+      "path": "site-packages/litellm-1.107.0.dist-info",
+      "subject": {
+        "ecosystem": "pypi",
+        "fixed_versions": [],
+        "package": "litellm",
+        "safe_version": "1.106.2",
+        "version": "1.107.0"
+      }
     },
     {
       "campaign": "emudhra-ca-oct2026",
+      "evidence": {
+        "kind": "tree"
+      },
+      "kind": "pkg.vulnerable",
       "level": "HIGH",
       "module": "§15",
-      "path": "site-packages/certifi-2026.9.1.dist-info"
+      "path": "site-packages/certifi-2026.9.1.dist-info",
+      "subject": {
+        "ecosystem": "pypi",
+        "fixed_versions": [
+          "2026.10.19"
+        ],
+        "package": "certifi",
+        "safe_version": "2026.10.19",
+        "version": "2026.9.1"
+      }
     },
     {
       "campaign": "litellm-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§2",
       "path": "site-packages/cook.pth"
     },
     {
       "campaign": "litellm-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§2",
       "path": "site-packages/cook.py"
     },
     {
       "campaign": "litellm-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§2",
       "path": "site-packages/cook.pth"
     },
     {
       "campaign": "litellm-1-107-0-cook-pth",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§30",
       "path": "site-packages/cook.pth"
     },
     {
       "campaign": "litellm-1-107-0-cook-pth",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§30",
       "path": "site-packages/cook.py"
     },
     {
       "campaign": "emudhra-ca-oct2026",
+      "evidence": {
+        "kind": "tree"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§6",
       "path": "site-packages/certifi-2026.9.1.dist-info"

@@ -209,13 +209,13 @@ export function actionsRules(ctx: RuleCtx): void {
     if (isWorkflow && prTarget && /actions\/checkout@/i.test(y) && /\$\{\{([^}\n]*[^A-Za-z0-9_.\n])?secrets([\][.\s)]|$)/im.test(y)) {
       const refs = checkoutRefs(y);
       if (refs.includes('prhead')) {
-        push(ctx, { level: 'CRITICAL', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + PR head の checkout + secrets 参照（pwn request）', ruleId: 's21-prtarget:prhead', evidenceSha: f.sha256 });
+        push(ctx, { level: 'CRITICAL', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + PR head の checkout + secrets 参照（pwn request）', ruleId: 's21-prtarget:prhead', evidenceSha: f.sha256, kind: 'gha.pwn_request' });
       }
       if (refs.includes('noref')) {
-        push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + actions/checkout(refなし) + secrets 参照', ruleId: 's21-prtarget:noref', evidenceSha: f.sha256 });
+        push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + actions/checkout(refなし) + secrets 参照', ruleId: 's21-prtarget:noref', evidenceSha: f.sha256, kind: 'gha.pwn_request' });
       }
       if (refs.includes('exprref')) {
-        push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + actions/checkout の ref が式（${{ … }}）+ secrets 参照（PR 由来の ref でないことを静的に確認できません）', ruleId: 's21-prtarget:exprref', evidenceSha: f.sha256 });
+        push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + actions/checkout の ref が式（${{ … }}）+ secrets 参照（PR 由来の ref でないことを静的に確認できません）', ruleId: 's21-prtarget:exprref', evidenceSha: f.sha256, kind: 'gha.pwn_request' });
       }
     }
     if (/key:.*github\.event\.pull_request\.number/.test(y)) {
@@ -236,7 +236,7 @@ export function actionsRules(ctx: RuleCtx): void {
       const at = ref.lastIndexOf('@');
       if (at < 0) {
         uses.push({ ref: clip(ref), kind: 'tag' });
-        push(ctx, { level: 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `uses: ${clip(ref, 80)} がバージョン未指定`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256 });
+        push(ctx, { level: 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `uses: ${clip(ref, 80)} がバージョン未指定`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
         continue;
       }
       const act = ref.slice(0, at).toLowerCase();
@@ -246,13 +246,13 @@ export function actionsRules(ctx: RuleCtx): void {
       const org = compromised.some((c) => c.action.endsWith('/*') && act.startsWith(c.action.slice(0, -1).toLowerCase()));
       if (known) {
         uses.push({ ref: clip(ref), kind: 'compromised' });
-        push(ctx, { level: 'CRITICAL', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `汚染されたタグ参照の可能性（${clip(ref, 80)}）。安全版タグまたは検証済み SHA に固定`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256 });
+        push(ctx, { level: 'CRITICAL', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `汚染されたタグ参照の可能性（${clip(ref, 80)}）。安全版タグまたは検証済み SHA に固定`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
       } else if (/^[0-9a-f]{40}$/.test(ver)) {
         uses.push({ ref: clip(ref), kind: 'sha' });
         if (org) push(ctx, { level: 'MEDIUM', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `侵害履歴のある発行元のアクション ${clip(act, 80)}（SHA 固定済み）`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256 });
       } else {
         uses.push({ ref: clip(ref), kind: 'tag' });
-        push(ctx, { level: org ? 'CRITICAL' : 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: org ? `侵害履歴のある発行元のアクションをタグ参照（${clip(ref, 80)}）` : `SHA 固定されていないアクション参照（${clip(ref, 80)}）`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256 });
+        push(ctx, { level: org ? 'CRITICAL' : 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: org ? `侵害履歴のある発行元のアクションをタグ参照（${clip(ref, 80)}）` : `SHA 固定されていないアクション参照（${clip(ref, 80)}）`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
       }
     }
     if (/(trivy-version|version):\s*["']?v?0\.69\.4["']?\s*$/m.test(y) && /trivy/.test(y)) {

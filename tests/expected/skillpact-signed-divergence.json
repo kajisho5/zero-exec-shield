@@ -2,15 +2,27 @@
   "findings": [
     {
       "campaign": "skillpact-divergence",
+      "evidence": {
+        "kind": "tree"
+      },
       "level": "HIGH",
       "module": "§49",
       "path": "v08-valid-signed"
     },
     {
       "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§49",
-      "path": "v08-valid-signed/skill.contract.json"
+      "path": "v08-valid-signed/skill.contract.json",
+      "related": [
+        {
+          "path": "v08-valid-signed",
+          "relation": "skill_dir"
+        }
+      ]
     }
   ],
   "home": "_home",

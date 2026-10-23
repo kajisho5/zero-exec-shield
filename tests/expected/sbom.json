@@ -2,18 +2,27 @@
   "findings": [
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§48",
       "path": "sbom.json"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "detail"
+      },
       "level": "MEDIUM",
       "module": "§48",
       "path": "."
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§48",
       "path": "sbom.json"

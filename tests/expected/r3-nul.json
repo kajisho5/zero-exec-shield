@@ -2,12 +2,19 @@
   "findings": [
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§18",
       "path": "p.js"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "secret.token",
       "level": "CRITICAL",
       "module": "§47",
       "path": "t.sh"

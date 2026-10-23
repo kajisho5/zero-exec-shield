@@ -2,12 +2,18 @@
   "findings": [
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§20",
       "path": "tool.json"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§20",
       "path": "tool.json"

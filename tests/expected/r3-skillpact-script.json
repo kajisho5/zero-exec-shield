@@ -2,24 +2,36 @@
   "findings": [
     {
       "campaign": "skillpact-divergence",
+      "evidence": {
+        "kind": "tree"
+      },
       "level": "HIGH",
       "module": "§49",
       "path": "noext"
     },
     {
       "campaign": "skillpact-divergence",
+      "evidence": {
+        "kind": "tree"
+      },
       "level": "HIGH",
       "module": "§49",
       "path": "symlinked"
     },
     {
       "campaign": "skillpact-divergence",
+      "evidence": {
+        "kind": "tree"
+      },
       "level": "MEDIUM",
       "module": "§49",
       "path": "noext"
     },
     {
       "campaign": "skillpact-divergence",
+      "evidence": {
+        "kind": "tree"
+      },
       "level": "MEDIUM",
       "module": "§49",
       "path": "symlinked"

@@ -2,36 +2,69 @@
   "findings": [
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
       "level": "MEDIUM",
       "module": "§28",
       "path": "Dockerfile"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
+      "locators": [
+        {
+          "format": "text",
+          "line": 2,
+          "line_sha256": "sha256:96b632e87d784bcc4584bebbdb29861263de48049cd28f5b658248f4c2b74505"
+        }
+      ],
       "module": "§4",
       "path": "php.ini"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§4",
       "path": "Dockerfile"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
+      "locators": [
+        {
+          "format": "text",
+          "line": 3,
+          "line_sha256": "sha256:315f1eccfb8cf60a7e9f0c069f35858978f5c9260aa0c88ef37be48bc0439a45"
+        }
+      ],
       "module": "§4",
       "path": "php.ini"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§8",
       "path": "Dockerfile"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§8",
       "path": "Dockerfile"

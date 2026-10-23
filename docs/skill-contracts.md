@@ -154,7 +154,7 @@
 - 全対象の事前検証。1 件でも失敗なら全体中止（部分適用禁止）
 - ZES 出力（findings.json）を直接読まない（`remediation-plan.json` のみ）
 - `allowed_actions` 外の操作を拒否（許可リスト方式）
-- 対象パスは `plan.items[].action.target`（＝ finding の `path`）に限定、親ディレクトリへの遡及禁止
+- 対象パスは `plan.items[].action.target` に限定。target は finding の `path` そのもの（relation `self`）か、finding の `path` から `relation`（`npm_pkg_dir` / `npm_installed` / `pypi_record` / `ext_dir` / `skill_dir`。findings 1.1 の `related` を含む）で導ける対象だけで、それ以外の親ディレクトリへは遡及しない
 - `chmod` は権限を狭める変更だけ（例: `0644` → `0600`）。権限を広げる `params` は ZET が拒否する
 - 全操作は冪等。`reversible: false` は二重承認必須
 - 1 件でも `failed` が出たら残りを実行せずロールバック
@@ -178,8 +178,15 @@
 
 判断層が依存してよい、findings.json の性質です（`tests/run-tests.sh` で検証）。
 
-- トップレベルキーは `schema_version` / `incident_bundle` / `scan_started_at` / `scan_finished_at` / `scan_mode` / `status` / `findings` / `errors` のみ
-- finding のキーは `id` / `level` / `module` / `campaign` / `path` / `detail` / `evidence_hash`（§49 のみ `skillpact` を追加）のみ
+- `schema_version` は `"1.1"`（ZES 0.4.0 以降。1.1 は 1.0 に任意の項目を足しただけで、`id` と `evidence_hash` の作り方は同じ）
+- トップレベルキーは `schema_version` / `scan_roots` / `incident_bundle` / `scan_started_at` / `scan_finished_at` / `scan_mode` / `status` / `findings` / `errors` のみ。`scan_roots` は `--root` の実パスの配列
+- finding のキーは `id` / `level` / `module` / `campaign` / `path` / `detail` / `evidence_hash` / `evidence`（§49 のみ `skillpact` を追加）と、任意の `kind` / `subject` / `locators` / `related` のみ
+  - `kind`: 機械可読な種別（`pkg.compromised` / `pkg.vulnerable` / `pkg.lockfile_compromised` / `mcp.dangerous_command` / `mcp.unpinned` / `gha.pwn_request` / `gha.unpinned` / `secret.token` / `runtime.cve`）。ZET の I-13 はこれで操作を絞る
+  - `subject`: パッケージの `{ecosystem, package, version, safe_version, fixed_versions}`（§15）
+  - `locators`: 同じファイルの該当箇所。JSON / JSONC / TOML は `{format, pointer}`（RFC 6901。例 `/mcpServers/<name>`）、テキストは `{format: "text", line, line_sha256}`（行の SHA-256。改行・行末の CR・1 行目の BOM を除く。GER の `remove_line` と同じ）。内容そのものは出さない
+  - `related`: finding の path から導ける別の対象 `{relation, path}`（`npm_installed`・`ext_dir`・`skill_dir`）
+  - `evidence`: 種類つきの証跡 `{kind, hash}`。`file`（100MB 超は `large_file`。`evidence_hash` と同じ値）/ `symlink`（readlink の値の SHA-256）/ `tree`（ディレクトリ。GER の ger-tree-v1）/ `detail`（それ以外。検査ルート・ホームそのものの finding も）
+- GER の隔離ストア（`.ger-quarantine-store` のあるディレクトリ。所有者が実行ユーザーで 0700）は走査しない（`errors[]` に `quarantine_store_skipped`。status は変えない）
 - `skillpact` のキーは `contract_path` / `contract_version` / `level` / `signed` / `author` / `declared_effects` / `observed_effects` / `policy_decision` / `l2_tested` / `divergence` / `diff_anomaly` のみ。効果名は SkillPact 0.8 の `read` / `write` / `network` / `exec` / `spend` / `send` のみ（`secrets` / `persist` / `longrun` は廃止）。`policy_decision` は常に `null`、`l2_tested` は常に `false`（ZES は評価しない）
 - `id` は `sha256:` + 64 桁 16 進で決定的。1 つの findings.json の中で一意（同じ `id` が重なったら 1 件だけ残し、`errors[]` に `duplicate_finding_id` を記録）。`path` は絶対パスまたは `null`
 - `evidence_hash` は通常ファイルならその SHA-256（100MB 超はパス・サイズ・mtime の SHA-256）
