@@ -39,6 +39,27 @@ export function TabBar({ active, findings, onSelect }: { active: TabId; findings
 
   useEffect(() => { refs.current[active]?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, [active]);
 
+  // 「すべてのタブ」メニュー: Escape・外側クリックで閉じる。Escape ではボタンへフォーカスを戻す
+  const menuWrap = useRef<HTMLDivElement>(null);
+  const menuButton = () => menuWrap.current?.querySelector<HTMLButtonElement>('[data-testid=all-tabs]');
+  const menuItems = () => [...(menuWrap.current?.querySelectorAll<HTMLButtonElement>('[role=menuitem]') ?? [])];
+  useEffect(() => {
+    if (!menu) return;
+    menuItems()[0]?.focus();
+    const onDown = (e: PointerEvent) => { if (!menuWrap.current?.contains(e.target as Node)) setMenu(false); };
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); setMenu(false); menuButton()?.focus(); } };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [menu]);
+  const menuKey = (e: KeyboardEvent) => {
+    const items = menuItems();
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    const to = e.key === 'ArrowDown' ? (i + 1) % items.length : e.key === 'ArrowUp' ? (i - 1 + items.length) % items.length : e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : -1;
+    if (to >= 0) { e.preventDefault(); items[to]?.focus(); }
+    if (e.key === 'Tab') setMenu(false);
+  };
+
   const move = (e: KeyboardEvent, i: number) => {
     const n = TABS.length;
     const to = e.key === 'ArrowRight' ? (i + 1) % n : e.key === 'ArrowLeft' ? (i - 1 + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
@@ -75,15 +96,15 @@ export function TabBar({ active, findings, onSelect }: { active: TabId; findings
         })}
       </div>
       <Button variant="icon" className="my-auto ml-2 shrink-0" aria-label="タブを右へスクロール" onClick={() => scrollBy(320)}><Icon name="chevron-right" /></Button>
-      <div className="relative my-auto ml-2 shrink-0">
-        <Button aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)} data-testid="all-tabs">
+      <div ref={menuWrap} className="relative my-auto ml-2 shrink-0">
+        <Button aria-haspopup="menu" aria-expanded={menu} aria-controls={menu ? 'all-tabs-menu' : undefined} onClick={() => setMenu((m) => !m)} data-testid="all-tabs">
           すべてのタブ <span className="text-xs text-muted">{TABS.length}</span> <Icon name="chevron-down" size={14} />
         </Button>
         {menu && (
-          <ul role="menu" className="absolute right-0 top-10 z-40 max-h-[70vh] w-60 overflow-auto rounded-xl border border-border-strong bg-surface-2 py-1 shadow-xl">
+          <ul id="all-tabs-menu" role="menu" aria-label="すべてのタブ" onKeyDown={menuKey} className="absolute right-0 top-10 z-40 max-h-[70vh] w-60 overflow-auto rounded-xl border border-border-strong bg-surface-2 py-1 shadow-xl">
             {TABS.map((t) => (
               <li key={t.id} role="none">
-                <button role="menuitem" className="flex w-full items-center justify-between px-4 py-2 text-left text-sm hover:bg-[#242424]" onClick={() => { onSelect(t.id); setMenu(false); }}>
+                <button type="button" role="menuitem" tabIndex={-1} className="flex w-full items-center justify-between px-4 py-2 text-left text-sm hover:bg-[#242424]" onClick={() => { onSelect(t.id); setMenu(false); refs.current[t.id]?.focus(); }}>
                   {t.label}
                   {counts[t.id]!.n > 0 && <span className="text-xs text-muted">{counts[t.id]!.n}</span>}
                 </button>

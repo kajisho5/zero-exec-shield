@@ -170,3 +170,29 @@ test('375px 幅でページ全体が横スクロールしない', async ({ page 
     expect(sw, `${tab}`).toBeLessThanOrEqual(cw);
   }
 });
+
+test('「すべてのタブ」メニュー: Escape・外側クリックで閉じ、フォーカスを戻す', async ({ page }) => {
+  await open(page);
+  const btn = page.getByTestId('all-tabs');
+  const menu = page.getByRole('menu', { name: 'すべてのタブ' });
+  await btn.click();
+  await expect(menu).toBeVisible();
+  await expect(btn).toHaveAttribute('aria-expanded', 'true');
+  await expect(btn).toHaveAttribute('aria-controls', await menu.getAttribute('id') ?? 'missing');
+  await expect(page.getByRole('menuitem').first()).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(btn).toHaveAttribute('aria-expanded', 'false');
+  await expect(btn).toBeFocused();
+  await btn.click();
+  await expect(menu).toBeVisible();
+  await page.getByRole('heading', { name: 'Zero-Exec Shield' }).click();
+  await expect(menu).toBeHidden();
+  // 矢印キーで移動して選択すると、そのタブが選択されフォーカスされる
+  await btn.click();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeHidden();
+  await expect(page.getByRole('tab', { name: /^SkillPact/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: /^SkillPact/ })).toBeFocused();
+});
