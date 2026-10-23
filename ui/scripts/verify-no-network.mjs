@@ -15,7 +15,7 @@ for (const d of ["default-src 'none'", "connect-src 'none'", "script-src 'sha256
   if (!csp.includes(d)) problems.push(`CSP に ${d} がありません`);
 }
 if (/unsafe-inline|unsafe-eval/.test(csp)) problems.push('CSP に unsafe-inline / unsafe-eval が含まれます');
-for (const re of [/<script[^>]+src=/i, /<link[^>]+href="(?!data:)/i, /<img[^>]+src="(?!data:)/i, /<iframe/i]) {
+for (const re of [/<script[^>]+src=/i, /<link\b[^>]*?\bhref\s*=\s*(?!["']?data:)/i, /<img\b[^>]*?\bsrc\s*=\s*(?!["']?data:)/i, /<iframe/i]) {
   if (re.test(original)) problems.push(`成果物に外部読み込みタグ: ${re}`);
 }
 
