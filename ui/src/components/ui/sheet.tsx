@@ -5,6 +5,7 @@ import type * as React from 'react';
 import * as SheetPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useLang } from '@/i18n';
 import { Button } from './button';
 
 function Sheet(props: React.ComponentProps<typeof SheetPrimitive.Root>) {
@@ -26,6 +27,7 @@ function SheetContent({ className, children, title, count, description, ...props
   /** 見出しの下の補足。無いときは読み上げ用の説明を付けない */
   description?: React.ReactNode;
 }) {
+  const { t } = useLang();
   return (
     <SheetPrimitive.Portal>
       <SheetPrimitive.Overlay data-slot="sheet-overlay" className="fixed inset-0 z-50 bg-scrim data-[state=closed]:animate-fade-out data-[state=open]:animate-fade-in" />
@@ -45,7 +47,7 @@ function SheetContent({ className, children, title, count, description, ...props
             {count != null && <span className="text-[13px] font-medium text-muted-foreground tabular-nums">{count}</span>}
           </SheetPrimitive.Title>
           <SheetPrimitive.Close asChild>
-            <Button variant="ghost" size="icon-touch" aria-label="閉じる"><X /></Button>
+            <Button variant="ghost" size="icon-touch" aria-label={t('ui.sheet.close')}><X /></Button>
           </SheetPrimitive.Close>
         </div>
         {description && <SheetPrimitive.Description className="px-4 text-xs text-muted-foreground">{description}</SheetPrimitive.Description>}

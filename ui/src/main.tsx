@@ -4,10 +4,12 @@ import { App } from './App';
 import { ToastProvider } from './components/ui/toast';
 import { TooltipProvider } from './components/ui/tooltip';
 import { applyTheme } from './hooks/useTheme';
+import { applyLang } from './i18n';
 import './styles/index.css';
 
 // 描画の前にテーマのクラスを付ける（別のインラインスクリプトは CSP のハッシュが増えるので作らない）
 applyTheme();
+applyLang();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -4,6 +4,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CircleDashed, Copy, ListFilter, Search } from 'lucide-react';
 import type { Finding } from '@/engine';
+import { textLang, useLang } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { virtualWindow } from '@/lib/virtualWindow';
 import { visibleOpt, visiblePath } from '@/lib/visiblePath';
@@ -41,9 +42,10 @@ function Empty({ children }: { children: ReactNode }) {
 }
 
 export function ModuleSelect({ modules, value, onChange, className }: { modules: string[]; value: string | null; onChange(m: string | null): void; className?: string }) {
+  const { t } = useLang();
   return (
-    <NativeSelect value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} aria-label="モジュールで絞り込み" wrapperClassName={className}>
-      <NativeSelectOption value="">モジュール: すべて</NativeSelectOption>
+    <NativeSelect value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} aria-label={t('ui.findings.module_filter')} wrapperClassName={className}>
+      <NativeSelectOption value="">{t('ui.findings.module_all')}</NativeSelectOption>
       {modules.map((m) => <NativeSelectOption key={m} value={m}>{m}</NativeSelectOption>)}
     </NativeSelect>
   );
@@ -53,22 +55,23 @@ export function FindingsTable({ findings, total, empty, query, onQuery, modules,
   findings: Finding[]; total: number; empty: string; query: string; onQuery(q: string): void; modules: string[]; module: string | null; onModule(m: string | null): void;
 }) {
   const copy = useCopy();
+  const { t } = useLang();
   const v = useVirtual(findings.length, ROW, 600);
   return (
     <Card data-testid="findings-table" className="overflow-hidden">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2 py-2.5 pr-4 pl-5">
-        <h2 className="mr-auto flex items-baseline gap-2 text-base font-semibold">検出<span className="text-sm font-normal text-muted-foreground tabular-nums">{findings.length === total ? `${total} 件` : `${findings.length} / ${total} 件`}</span></h2>
-        <Input icon={<Search aria-hidden="true" className="size-4 shrink-0" />} value={query} onChange={(e) => onQuery(e.target.value)} placeholder="パス・キャンペーンで検索" aria-label="パス・キャンペーンで検索" data-testid="search" className="w-[300px] max-lg:w-auto max-lg:flex-1 max-lg:basis-48" />
+        <h2 className="mr-auto flex items-baseline gap-2 text-base font-semibold">{t('ui.findings.title')}<span className="text-sm font-normal text-muted-foreground tabular-nums">{findings.length === total ? t('ui.findings.count', { n: total }) : t('ui.findings.count_filtered', { shown: findings.length, n: total })}</span></h2>
+        <Input icon={<Search aria-hidden="true" className="size-4 shrink-0" />} value={query} onChange={(e) => onQuery(e.target.value)} placeholder={t('ui.findings.search')} aria-label={t('ui.findings.search')} data-testid="search" className="w-[300px] max-lg:w-auto max-lg:flex-1 max-lg:basis-48" />
         <ModuleSelect modules={modules} value={module} onChange={onModule} className="w-[176px]" />
       </div>
-      <div role="table" aria-label="検出一覧" aria-rowcount={findings.length + 1} className="border-t border-border">
+      <div role="table" aria-label={t('ui.findings.table')} aria-rowcount={findings.length + 1} className="border-t border-border">
         <div role="rowgroup">
           <div role="row" aria-rowindex={1} className={cn(COLS, 'h-8 items-center border-b border-border pr-4 pl-5 text-xs font-medium text-muted-foreground')}>
-            <span role="columnheader">重大度</span>
-            <span role="columnheader">パス / 詳細</span>
-            <span role="columnheader">キャンペーン</span>
-            <span role="columnheader" className="max-md:hidden">モジュール</span>
-            <span role="columnheader"><span className="sr-only">コピー</span></span>
+            <span role="columnheader">{t('ui.findings.col.severity')}</span>
+            <span role="columnheader">{t('ui.findings.col.path')}</span>
+            <span role="columnheader">{t('ui.findings.col.campaign')}</span>
+            <span role="columnheader" className="max-md:hidden">{t('ui.findings.col.module')}</span>
+            <span role="columnheader"><span className="sr-only">{t('ui.findings.col.copy')}</span></span>
           </div>
         </div>
         {findings.length === 0 ? <Empty>{empty}</Empty> : (
@@ -84,8 +87,8 @@ export function FindingsTable({ findings, total, empty, query, onQuery, modules,
                     <span aria-hidden="true" className="absolute right-0 bottom-0 left-1 h-px bg-border" />
                     <span role="cell" className="pt-0.5"><SeverityMark level={f.level} /></span>
                     <span role="cell" className="min-w-0 pr-4">
-                      {f.path ? <PathText path={f.path} className="text-sm leading-5" /> : <span className="block text-sm leading-5 text-muted-foreground">（貼り付けテキスト）</span>}
-                      <span className="mt-0.5 block truncate text-[12.5px] text-muted-foreground" title={visiblePath(f.detail)}>{visiblePath(f.detail)}</span>
+                      {f.path ? <PathText path={f.path} className="text-sm leading-5" /> : <span className="block text-sm leading-5 text-muted-foreground">{t('ui.findings.pasted')}</span>}
+                      <span lang={textLang(f.detail)} className="mt-0.5 block truncate text-[12.5px] text-muted-foreground" title={visiblePath(f.detail)}>{visiblePath(f.detail)}</span>
                     </span>
                     <span role="cell" className={cn('min-w-0 truncate pr-3 text-[13px] leading-5', !f.campaign && 'text-muted-foreground')} title={visibleOpt(f.campaign) ?? undefined}>
                       {visibleOpt(f.campaign) ?? '—'}
@@ -94,9 +97,9 @@ export function FindingsTable({ findings, total, empty, query, onQuery, modules,
                     <span role="cell" className="text-[13px] leading-5 text-muted-foreground max-md:hidden">{f.module}</span>
                     <span role="cell" className="-mt-[3px] flex justify-end">
                       {f.path && (
-                        <Tip label="パスをコピー" side="left">
+                        <Tip label={t('ui.findings.copy_path')} side="left">
                           {/* コピーは元の値のまま（利用者が求めたのはそのパス）。読み上げ名だけ目印付きの表示用 */}
-                          <Button variant="ghost" size="icon-sm" aria-label={`パスをコピー: ${visiblePath(f.path)}`} onClick={() => copy(f.path!)}><Copy /></Button>
+                          <Button variant="ghost" size="icon-sm" aria-label={t('ui.findings.copy_path_aria', { path: visiblePath(f.path) })} onClick={() => copy(f.path!)}><Copy /></Button>
                         </Tip>
                       )}
                     </span>
@@ -116,6 +119,7 @@ export function FindingList({ findings, empty, query, onQuery, modules, module, 
   findings: Finding[]; empty: string; query: string; onQuery(q: string): void; modules: string[]; module: string | null; onModule(m: string | null): void;
 }) {
   const copy = useCopy();
+  const { t } = useLang();
   const v = useVirtual(findings.length, CARD_ROW, CARD_ROW * 6);
   const [detail, setDetail] = useState<Finding | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -124,22 +128,22 @@ export function FindingList({ findings, empty, query, onQuery, modules, module, 
   return (
     <>
       <div className="flex gap-2">
-        <Input icon={<Search aria-hidden="true" className="size-4 shrink-0" />} value={query} onChange={(e) => onQuery(e.target.value)} placeholder="パス・キャンペーンで検索" aria-label="パス・キャンペーンで検索" data-testid="search" className="h-11 flex-1" />
+        <Input icon={<Search aria-hidden="true" className="size-4 shrink-0" />} value={query} onChange={(e) => onQuery(e.target.value)} placeholder={t('ui.findings.search')} aria-label={t('ui.findings.search')} data-testid="search" className="h-11 flex-1" />
         <Sheet open={filterOpen} onOpenChange={setFilterOpen}>
           {/* Trigger にすると、閉じたとき（Escape・選択・閉じる）に Radix がフォーカスをこのボタンへ戻す */}
           <SheetTrigger asChild>
-            <Button variant="outline" size="icon-touch" aria-label={`モジュールで絞り込み（${module ?? 'すべて'}）`} className="relative">
+            <Button variant="outline" size="icon-touch" aria-label={t('ui.findings.module_filter_btn', { m: module ?? t('ui.findings.module_all') })} className="relative">
               <ListFilter />
               {module && <span aria-hidden="true" className="absolute top-2 right-2 size-1.5 rounded-full bg-foreground" />}
             </Button>
           </SheetTrigger>
-          <SheetContent title="モジュールで絞り込み" className="pb-[max(env(safe-area-inset-bottom),12px)]">
+          <SheetContent title={t('ui.findings.module_filter')} className="pb-[max(env(safe-area-inset-bottom),12px)]">
             <ul className="overflow-y-auto px-2 pt-2">
               {[null, ...modules].map((m) => (
                 <li key={m ?? ''}>
                   <SheetClose asChild>
                     <button type="button" aria-pressed={m === module} onClick={() => onModule(m)} className={cn('flex h-11 w-full items-center rounded-md px-3 text-left text-[15px] hover:bg-accent', m === module && 'bg-accent font-semibold')}>
-                      {m ?? 'すべて'}
+                      {m ?? t('ui.findings.all')}
                     </button>
                   </SheetClose>
                 </li>
@@ -150,7 +154,7 @@ export function FindingList({ findings, empty, query, onQuery, modules, module, 
       </div>
       <Card data-testid="findings-table" className="overflow-hidden">
         {findings.length === 0 ? <Empty>{empty}</Empty> : (
-          <div ref={v.ref} role="list" aria-label={`検出 ${findings.length} 件`} className="relative overflow-y-auto" style={{ height: v.height }} onScroll={v.onScroll}>
+          <div ref={v.ref} role="list" aria-label={t('ui.findings.list_aria', { n: findings.length })} className="relative overflow-y-auto" style={{ height: v.height }} onScroll={v.onScroll}>
             <div style={{ height: findings.length * CARD_ROW }}>
               {findings.slice(v.start, v.end).map((f, i) => {
                 const idx = v.start + i;
@@ -159,17 +163,17 @@ export function FindingList({ findings, empty, query, onQuery, modules, module, 
                     <span aria-hidden="true" className={cn('absolute inset-y-0 left-0 z-10 w-1', SEV[f.level].bar)} />
                     <span aria-hidden="true" className="absolute right-0 bottom-0 left-1 h-px bg-border" />
                     <button type="button" data-finding={f.id} onClick={(e) => { opener.current = e.currentTarget; setDetail(byId.get(f.id) ?? null); }}
-                      aria-label={`${f.level} ${f.path ? visiblePath(f.path) : '貼り付けテキスト'} の詳細`}
+                      aria-label={t('ui.findings.row_aria', { level: f.level, path: f.path ? visiblePath(f.path) : t('ui.findings.pasted_aria') })}
                       className="flex h-full w-full flex-col items-start justify-center gap-1 pr-14 pl-4 text-left outline-offset-[-3px] hover:bg-accent">
                       <span className="flex max-w-full min-w-0 items-center gap-2.5">
                         <SeverityMark level={f.level} />
                         <span className="truncate text-xs text-muted-foreground">{f.module}{'　'}{visibleOpt(f.campaign) ?? '—'}</span>
                       </span>
-                      {f.path ? <PathText path={f.path} className="max-w-full text-[13.5px]" /> : <span className="text-[13.5px] text-muted-foreground">（貼り付けテキスト）</span>}
-                      <span className="block max-w-full truncate text-xs text-muted-foreground">{visiblePath(f.detail)}</span>
+                      {f.path ? <PathText path={f.path} className="max-w-full text-[13.5px]" /> : <span className="text-[13.5px] text-muted-foreground">{t('ui.findings.pasted')}</span>}
+                      <span lang={textLang(f.detail)} className="block max-w-full truncate text-xs text-muted-foreground">{visiblePath(f.detail)}</span>
                     </button>
                     {/* コピーは元の値のまま。読み上げ名だけ表示用 */}
-                    {f.path && <Button variant="ghost" size="icon-touch" aria-label={`パスをコピー: ${visiblePath(f.path)}`} onClick={() => copy(f.path!)} className="absolute top-[18px] right-1"><Copy /></Button>}
+                    {f.path && <Button variant="ghost" size="icon-touch" aria-label={t('ui.findings.copy_path_aria', { path: visiblePath(f.path) })} onClick={() => copy(f.path!)} className="absolute top-[18px] right-1"><Copy /></Button>}
                   </div>
                 );
               })}
@@ -185,6 +189,7 @@ export function FindingList({ findings, empty, query, onQuery, modules, module, 
 /** 詳細のシート（承認済み §16-5）。パスと詳細の全文、キャンペーン、モジュール、「パスをコピー」。 */
 function FindingSheet({ finding, onClose, returnFocus }: { finding: Finding | null; onClose(): void; returnFocus(): HTMLElement | null }) {
   const copy = useCopy();
+  const { t } = useLang();
   // 閉じるアニメーションの間も内容を残す
   const last = useRef<Finding | null>(null);
   if (finding) last.current = finding;
@@ -200,14 +205,14 @@ function FindingSheet({ finding, onClose, returnFocus }: { finding: Finding | nu
         >
           <span aria-hidden="true" className={cn('absolute top-5 left-0 h-9 w-1', SEV[f.level].bar)} />
           <div className="flex flex-col gap-4 overflow-y-auto px-4 pt-3">
-            {f.path ? <PathText path={f.path} wrap className="text-[15px] leading-snug" /> : <span className="text-muted-foreground">（貼り付けテキスト）</span>}
-            <p className="text-sm leading-relaxed">{visiblePath(f.detail)}</p>
+            {f.path ? <PathText path={f.path} wrap className="text-[15px] leading-snug" /> : <span className="text-muted-foreground">{t('ui.findings.pasted')}</span>}
+            <p lang={textLang(f.detail)} className="text-sm leading-relaxed">{visiblePath(f.detail)}</p>
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 border-t border-border pt-3 text-[13px]">
-              <dt className="text-muted-foreground">キャンペーン</dt><dd className="wrap-anywhere">{visibleOpt(f.campaign) ?? '—'}</dd>
-              <dt className="text-muted-foreground">モジュール</dt><dd>{f.module}</dd>
+              <dt className="text-muted-foreground">{t('ui.findings.campaign')}</dt><dd className="wrap-anywhere">{visibleOpt(f.campaign) ?? '—'}</dd>
+              <dt className="text-muted-foreground">{t('ui.findings.module')}</dt><dd>{f.module}</dd>
             </dl>
             {/* コピーは元の値のまま（表示用の目印を付けない） */}
-            {f.path && <Button variant="ink" size="touch" className="w-full" onClick={() => copy(f.path!)}><Copy />パスをコピー</Button>}
+            {f.path && <Button variant="ink" size="touch" className="w-full" onClick={() => copy(f.path!)}><Copy />{t('ui.findings.copy_path')}</Button>}
           </div>
         </SheetContent>
       )}

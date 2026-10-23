@@ -3,6 +3,7 @@
 // 右端に「すべてのタブ 18」（タブ検索）。<640: 44px の横スクロール＋右端に検索ボタン（下からのシート）。
 // 収まらないタブも DOM には残す（←→ / Home / End で移れる。フォーカスしたタブは列の中でスクロールして見せる）。
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLang } from '@/i18n';
 import { TABS, type TabId } from '@/tabs/definitions';
 import { TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CountChip } from './CountChip';
@@ -13,6 +14,7 @@ export function TabBar({ active, counts, onPick, mobile }: { active: TabId; coun
   const wrap = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState<number | undefined>(undefined);
+  const { lang, t } = useLang();
 
   useLayoutEffect(() => {
     const w = wrap.current;
@@ -32,27 +34,27 @@ export function TabBar({ active, counts, onPick, mobile }: { active: TabId; coun
     const ro = new ResizeObserver(measure);
     ro.observe(w);
     return () => ro.disconnect();
-  }, [mobile, counts]);
+  }, [mobile, counts, lang]);
 
   useEffect(() => {
     list.current?.querySelector<HTMLElement>(`[data-tab="${active}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [active]);
 
   return (
-    <nav aria-label="タブ" className="flex h-11 items-stretch gap-4 border-b border-border px-6 max-lg:px-4 max-sm:gap-2">
+    <nav aria-label={t('ui.tabs.nav')} className="flex h-11 items-stretch gap-4 border-b border-border px-6 max-lg:px-4 max-sm:gap-2">
       <div ref={wrap} className="flex min-w-0 flex-1 items-stretch">
         <TabsList
           ref={list}
-          aria-label="検査カテゴリ"
+          aria-label={t('ui.tabs.list')}
           style={fit ? { maxWidth: fit } : undefined}
           className="scrollbar-none relative -ml-2.5 min-w-0 gap-1.5 snap-x snap-mandatory overflow-x-auto max-sm:snap-none"
           onFocus={(e) => (e.target as HTMLElement).scrollIntoView({ block: 'nearest', inline: 'nearest' })}
         >
-          {TABS.map((t) => {
-            const c = counts[t.id];
+          {TABS.map((d) => {
+            const c = counts[d.id];
             return (
-              <TabsTrigger key={t.id} value={t.id} data-tab={t.id} className="snap-start" aria-label={`${t.label}、検出 ${c.n} 件${c.max ? `、最大 ${c.max}` : ''}`}>
-                {t.label}
+              <TabsTrigger key={d.id} value={d.id} data-tab={d.id} className="snap-start" aria-label={c.max ? t('ui.tabs.trigger_max', { label: t(d.label), n: c.n, max: c.max }) : t('ui.tabs.trigger', { label: t(d.label), n: c.n })}>
+                {t(d.label)}
                 <CountChip c={c} />
               </TabsTrigger>
             );

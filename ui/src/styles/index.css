@@ -177,6 +177,14 @@
     line-break: strict;
     -webkit-text-size-adjust: 100%;
   }
+  /* Japanese text (the Japanese UI, and Japanese strings inside the English UI) puts the Japanese fonts first, so
+     Windows does not draw kana and kanji with the fallback of Segoe UI (i18n DESIGN §3.5). */
+  :lang(ja) {
+    --font-sans: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Yu Gothic', Meiryo, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+  [lang] {
+    font-family: var(--font-sans);
+  }
   h1, h2, h3, button, [role='tab'] {
     word-break: auto-phrase;
   }

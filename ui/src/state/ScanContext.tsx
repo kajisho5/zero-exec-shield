@@ -10,6 +10,6 @@ export function ScanProvider({ children }: { children: ReactNode }) {
 
 export function useScan() {
   const v = useContext(Ctx);
-  if (!v) throw new Error('ScanProvider がありません');
+  if (!v) throw new Error('ScanProvider is missing');
   return v;
 }

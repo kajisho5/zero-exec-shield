@@ -2,6 +2,7 @@
 // 台紙に CRITICAL の帯。描画エラーの回復（ErrorBoundary）で使う。
 import { Component, type ReactNode } from 'react';
 import { OctagonAlert } from 'lucide-react';
+import { t } from '@/i18n';
 import { Button } from './button';
 
 export function Alert({ title, children, ...rest }: { title: ReactNode; children: ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
@@ -23,9 +24,9 @@ export class ErrorBoundary extends Component<{ children: ReactNode; onReset(): v
   override render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <Alert title="表示中にエラーが発生しました" data-testid="render-error">
-        <p>取り込んだデータに表示できない値が含まれている可能性があります。結果をクリアして再表示してください（ファイル内容は外部に送信されません）。</p>
-        <Button onClick={() => { this.props.onReset(); this.setState({ failed: false }); }} data-testid="render-error-reset">クリアして再表示</Button>
+      <Alert title={t('ui.error.title')} data-testid="render-error">
+        <p>{t('ui.error.body')}</p>
+        <Button onClick={() => { this.props.onReset(); this.setState({ failed: false }); }} data-testid="render-error-reset">{t('ui.error.reset')}</Button>
       </Alert>
     );
   }

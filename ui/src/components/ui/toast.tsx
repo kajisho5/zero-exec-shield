@@ -2,6 +2,7 @@
 // 浮きの地、罫、角丸 6、影。主列の右下に出す。role="status" aria-live="polite"。
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
 import { Check, OctagonAlert, X } from 'lucide-react';
+import { t, useLang } from '@/i18n';
 import { Button } from './button';
 
 interface ToastMsg { id: number; tone: 'ok' | 'error'; text: string; fallback?: string }
@@ -10,6 +11,7 @@ export const useToast = () => useContext(ToastCtx);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [list, setList] = useState<ToastMsg[]>([]);
+  const { t: tr } = useLang();
   const dismiss = useCallback((id: number) => setList((l) => l.filter((x) => x.id !== id)), []);
   const show = useCallback((t: Omit<ToastMsg, 'id'>) => {
     const id = Date.now() + Math.random();
@@ -28,9 +30,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 ? <Check aria-hidden="true" strokeWidth={2.25} className="mt-0.5 size-4 shrink-0" />
                 : <OctagonAlert aria-hidden="true" strokeWidth={2.25} className="mt-0.5 size-4 shrink-0 text-critical" />}
               <span className="min-w-0 flex-1 py-px">{t.text}</span>
-              <Button variant="ghost" size="icon-sm" className="-my-1 shrink-0" aria-label="通知を閉じる" onClick={() => dismiss(t.id)}><X /></Button>
+              <Button variant="ghost" size="icon-sm" className="-my-1 shrink-0" aria-label={tr('ui.toast.close')} onClick={() => dismiss(t.id)}><X /></Button>
             </div>
-            {t.fallback && <input readOnly value={t.fallback} aria-label="コピー用のパス" onFocus={(e) => e.currentTarget.select()} className="mt-2 mb-1 w-full rounded-md border border-input bg-muted px-2 py-1 font-mono text-xs" />}
+            {t.fallback && <input readOnly value={t.fallback} aria-label={tr('ui.toast.copy_field')} onFocus={(e) => e.currentTarget.select()} className="mt-2 mb-1 w-full rounded-md border border-input bg-muted px-2 py-1 font-mono text-xs" />}
           </div>
         ))}
       </div>
@@ -41,12 +43,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 /** クリップボードへコピー（ネットワーク非使用）。file:// で権限が無い場合は選択できる欄を出す。 */
 export function useCopy() {
   const toast = useToast();
-  return useCallback(async (text: string, label = 'パス') => {
+  // label is read at call time, so it follows the language at the moment of copying
+  return useCallback(async (text: string, label?: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      toast({ tone: 'ok', text: `${label}をコピーしました` });
+      toast({ tone: 'ok', text: t('ui.toast.copied', { label: label ?? t('ui.copy.path') }) });
     } catch {
-      toast({ tone: 'error', text: 'クリップボードを使えません。下の欄から手動でコピーしてください', fallback: text });
+      toast({ tone: 'error', text: t('ui.toast.clipboard_fail'), fallback: text });
     }
   }, [toast]);
 }
