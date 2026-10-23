@@ -117,8 +117,14 @@ export function tomlLockDeps(text: string): { name: string; version: string }[] 
   return out;
 }
 
+const depsCache = new WeakMap<RuleCtx, Dep[]>();
+
+/** 依存関係インベントリ（CLI build_deps の DEPS_TSV 相当）。1 回のスキャンで 1 度だけ作る。 */
 export function collectDeps(ctx: RuleCtx): Dep[] {
+  const cached = depsCache.get(ctx);
+  if (cached) return cached;
   const out: Dep[] = [];
+  depsCache.set(ctx, out);
   const parseFailed = (path: string) => ctx.errors.push({ module: '§15', reason: `lockfile_parse_failed:${path}` });
   for (const f of readable(ctx)) {
     const add = (eco: Dep['eco'], xs: { name: string; version: string }[]) => { for (const x of xs) out.push({ eco, name: x.name, version: x.version, path: f.relPath, sha: f.sha256 }); };

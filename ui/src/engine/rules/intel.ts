@@ -4,6 +4,7 @@ import { push, readable, type RuleCtx } from '../context';
 import type { InfraCve } from '../ioc';
 import type { Severity } from '../types';
 import { basename, ere, versionCmp, versionMatches } from '../util';
+import { collectDeps } from './supplyChain';
 
 const NUM = /^\d+(\.\d+)+$/;
 const sev = (s: string | undefined, d: Severity): Severity => (s === 'CRITICAL' || s === 'HIGH' || s === 'MEDIUM' || s === 'LOW' || s === 'INFO' ? s : d);
@@ -108,6 +109,15 @@ export function emudhraRules(ctx: RuleCtx): void {
       const deno = /^deno\s+(\S+)/m.exec(f.text)?.[1];
       if (node) judge('Node.js', node, f.relPath, f.sha256, fx.node);
       if (deno) judge('Deno', deno, f.relPath, f.sha256, fx.deno);
+    }
+  }
+  // certifi の最低版（CLI check_s6 の runtime_minimums.certifi と同じ。依存インベントリから判定）
+  const certMin = ctx.ioc.runtime_minimums?.certifi;
+  if (certMin) {
+    for (const d of collectDeps(ctx)) {
+      if (d.eco === 'pypi' && d.name === 'certifi' && versionCmp(d.version, certMin) < 0) {
+        push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: d.path, detail: `certifi ${d.version} は ${certMin} 未満（eMudhra 失効が未反映）`, ruleId: `s6-emudhra-runtime:certifi:${d.version}`, evidenceSha: d.sha });
+      }
     }
   }
   for (const i of imageVersions(ctx, '(^|[[:space:]/"=])node')) judge('Node.js', i.ver.replace(/^v/, ''), i.path, i.sha, fx.node);

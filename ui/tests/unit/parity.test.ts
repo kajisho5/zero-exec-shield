@@ -106,3 +106,10 @@ describe('JSONC の MCP 設定', () => {
     expect(r.findings.map((f) => `${f.level} ${f.module} ${f.path}`)).toEqual(['MEDIUM §17 p/.mcp.json']);
   });
 });
+
+describe('eMudhra: certifi の最低版（CLI check_s6）', () => {
+  it('certifi が runtime_minimums 未満なら HIGH §6（修正版以上は検出しない）', async () => {
+    const r = await analyzeFiles([file('p/requirements.txt', 'certifi==2026.10.1\n'), file('q/poetry.lock', '[[package]]\nname = "certifi"\nversion = "2026.10.19"\n')]);
+    expect(r.findings.filter((f) => f.module === '§6').map((f) => `${f.level} ${f.path} ${f.campaign}`)).toEqual(['HIGH p/requirements.txt emudhra-ca-oct2026']);
+  });
+});
