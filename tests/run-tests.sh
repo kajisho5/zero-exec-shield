@@ -348,6 +348,9 @@ mkdir -p "$TMP/cdpath/decoy/chaindrop" "$TMP/cdpath/cwd" && cp -R "$FIX/chaindro
 n="$(cd "$TMP/cdpath/cwd" && CDPATH="$TMP/cdpath/decoy" ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --quick --root chaindrop --json 2>/dev/null | jq --arg r "$TMP/cdpath/cwd/chaindrop/" '[.findings[] | select((.path // "") | startswith($r))] | length' 2>/dev/null)"
 [ "${n:-0}" -gt 0 ] && ok "CDPATH が相対 --root を書き換えない" || ng "CDPATH により相対 --root が別ディレクトリへ解決されました（${n:-?} 件）"
 
+# 版の一致: CHANGELOG の先頭の版 = zes-scan.sh の ZES_VERSION = ui/package.json の version
+if out="$(bash "$TESTS_DIR/check-versions.sh" 2>&1)"; then ok "$out"; else ng "版がずれています" "$out"; fi
+
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]
