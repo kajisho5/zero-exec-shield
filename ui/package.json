@@ -1,7 +1,7 @@
 {
   "name": "zes-ui",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Zero-Exec Shield v5.2 Web Scanner UI（ビルド成果物はリポジトリ直下の index.html 1 ファイル）",
   "type": "module",
   "scripts": {
