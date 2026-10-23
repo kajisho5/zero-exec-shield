@@ -172,7 +172,7 @@ async function overflow(page: Page) {
 const NARROW: [string, RegExp, string?][] = [
   ['chaindrop', /^総合/],
   ['skillpact-signed-divergence', /^SkillPact/, 'skillpact-viewer'],
-  ['skillpact-diff-anomaly', /^SkillPact/, 'diff-alert'],
+  ['skillpact-divergence', /^SkillPact/, 'rule-row'],
   ['skillpact-diff-anomaly', /^SkillPact/, 'skill-item'],
   ['mcp-visible', /^MCP/, 'mcp-viewer'],
   ['github-actions', /^GitHub Actions/, 'actions-viewer'],
