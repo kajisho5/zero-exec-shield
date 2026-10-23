@@ -60,7 +60,7 @@ export interface IntelDb {
   workflow_strings?: { campaign: string; severity?: string; strings?: string[] }[];
   strings?: { campaign: string; module: string; severity?: string; file_regex?: string; strings?: string[] }[];
   extensions?: { campaign: string; eco: string; severity?: string; ids?: string[]; bad_versions?: string[] }[];
-  host?: { campaign: string; severity?: string; paths?: string[]; modified_files?: string[]; launch_labels?: string[]; systemd_units?: string[]; process_names?: string[] }[];
+  host?: { campaign: string; severity?: string; paths?: string[]; file_names?: string[] | null; modified_files?: string[]; launch_labels?: string[]; systemd_units?: string[]; process_names?: string[] }[];
   apps?: { campaign: string; bundle: string; cve: string; severity?: string; fixed: string }[];
 }
 

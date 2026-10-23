@@ -3,7 +3,7 @@ import { IOC, type IocDb } from './ioc';
 import { aiAssistantRules, mcpRules } from './rules/agentConfig';
 import { actionsRules, extensionRules } from './rules/ciAndExtensions';
 import { emudhraRules, infraRules, intelRules } from './rules/intel';
-import { buildHookRules, credentialRules, ebpfRules, modelSupplyRules, persistenceRules, sigstoreRules } from './rules/codeAndHost';
+import { buildHookRules, credentialRules, homeRules, ebpfRules, modelSupplyRules, persistenceRules, sigstoreRules } from './rules/codeAndHost';
 import { analyzePasteText } from './rules/network';
 import { networkRules } from './rules/network';
 import { blastRadius, filenameRules, packageRules } from './rules/supplyChain';
@@ -40,6 +40,7 @@ export async function analyzeFiles(input: FileInput[], ioc: IocDb = IOC): Promis
   buildHookRules(ctx);
   modelSupplyRules(ctx);
   persistenceRules(ctx);
+  homeRules(ctx);
   ebpfRules(ctx);
   sigstoreRules(ctx);
   credentialRules(ctx);

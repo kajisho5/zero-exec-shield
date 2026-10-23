@@ -1,6 +1,6 @@
 // 5.2.2 の検知データ: 開発インフラ CVE（§3 / §4 / §16）、eMudhra（§6）、収集インテル（§7 / §15 / §22 / §30 / §38 / §42）。
 // CLI の check_s3 / check_s4 / emudhra_* / intel_* と同じ rules/ioc.json を参照する。ホスト状態（パッケージ DB 以外）は CLI のみ。
-import { push, readable, type RuleCtx } from '../context';
+import { homeLike, push, readable, rootRel, type RuleCtx } from '../context';
 import type { InfraCve } from '../ioc';
 import type { Severity } from '../types';
 import { basename, ere, versionCmp, versionMatches } from '../util';
@@ -208,14 +208,26 @@ export function intelRules(ctx: RuleCtx): void {
     }
   }
 
-  // §30 ホストの痕跡（投入フォルダ内のパス・LaunchAgent Label・systemd ユニット）
+  // §30 ホストの痕跡（CLI intel_host_files と同じく、パスの種類ごとに照合先を分ける）
+  //   ~/… / $HOME/… … 投入フォルダが HOME と見なせるとき（homeLike）に限り、その直下からの相対パスと完全一致
+  //   /… / $TMPDIR/… … ホストの実パス。ブラウザは読めないため照合しない（CLI のホスト検査）
+  //   それ以外（site-packages/cook.pth 等）… 投入フォルダ内のサフィックス一致
+  const asHome = homeLike(ctx);
   for (const h of intel.host ?? []) {
     const level = sev(h.severity, 'HIGH');
     for (const p of h.paths ?? []) {
-      const rel = p.replace(/^~\//, '').replace(/^\//, '');
+      if (p.startsWith('/') || p.startsWith('$TMPDIR/')) continue;
+      const home = /^(~|\$HOME)\//.exec(p);
+      if (home && !asHome) continue;
+      const rel = home ? p.slice(home[0].length) : p;
       for (const f of ctx.files) {
-        if (('/' + f.relPath).endsWith('/' + rel)) push(ctx, { level, module: '§30', campaign: h.campaign, path: f.relPath, detail: '既知のマルウェア痕跡パス', ruleId: `s30-intel-host:path:${rel}`, evidenceSha: f.sha256 });
+        if (home ? rootRel(ctx, f) !== rel : !('/' + f.relPath).endsWith('/' + rel)) continue;
+        push(ctx, { level, module: '§30', campaign: h.campaign, path: f.relPath, detail: home ? '既知のマルウェア痕跡パス' : '既知のマルウェア痕跡パス（検査ルート内）', ruleId: `s30-intel-host:path:${rel}`, evidenceSha: f.sha256 });
       }
+    }
+    const fileNames = new Set(h.file_names ?? []);
+    for (const f of ctx.files) {
+      if (fileNames.has(f.name)) push(ctx, { level, module: '§30', campaign: h.campaign, path: f.relPath, detail: `既知のマルウェアのファイル名（${f.name}）`, ruleId: `s30-intel-host:file:${f.name}`, evidenceSha: f.sha256 });
     }
     const labels = new Set(h.launch_labels ?? []);
     for (const f of readable(ctx).filter((x) => /(^|\/)Launch(Agents|Daemons)\/[^/]+\.plist$/.test(x.relPath))) {

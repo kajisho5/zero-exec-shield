@@ -1,6 +1,6 @@
 // §10 / §26 / §27 / §28 / §30 / §31 / §32 / §33 / §35 / §36 / §40 / §43 / §48
 // ブラウザで判定できるのは「投入されたファイルの中身」まで。ホスト状態は CliOnlyNotice で CLI に案内する。
-import { named, push, readable, type RuleCtx } from '../context';
+import { HOME_RC_FILES, homeLike, named, push, readable, rootRel, type RuleCtx } from '../context';
 import { extname } from '../util';
 
 const RC = /(^|\/)(\.bashrc|\.bash_profile|\.profile|\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bash_login)$/;
@@ -129,4 +129,28 @@ export function credentialRules(ctx: RuleCtx): void {
       push(ctx, { level: 'HIGH', module: '§47', campaign: null, path: f.relPath, detail: 'シェル履歴に export *_TOKEN= 等（平文の認証情報）', ruleId: 's47-history-export', evidenceSha: f.sha256 });
     }
   }
+}
+
+/**
+ * 投入フォルダを HOME と見なせるとき（homeLike）だけ行う、CLI の HOME 前提の検査。
+ *   §10: ~/Library/LaunchAgents/*.plist（参考 INFO）・対話履歴ファイルの存在
+ *   §12: ワクチン 3 点（~/.npmrc の ignore-scripts=true、シェル設定の PYTHONNOUSERSITE=1 / PIP_REQUIRE_VIRTUALENV、pip.conf）
+ * 環境変数（npm_config_ignore_scripts 等）はブラウザから読めないため、CLI のホスト検査を無効にしたときと同じくファイルだけで判定する。
+ */
+export function homeRules(ctx: RuleCtx): void {
+  if (!homeLike(ctx)) return;
+  ctx.checks.add('s10-home').add('s12-vaccines');
+  const at = (rel: string) => ctx.files.find((f) => rootRel(ctx, f) === rel);
+  const prefix = ctx.root ? `${ctx.root}/` : '';
+  for (const f of ctx.files) {
+    const rel = rootRel(ctx, f);
+    if (/^Library\/LaunchAgents\/[^/]+\.plist$/.test(rel)) push(ctx, { level: 'INFO', module: '§10', campaign: null, path: f.relPath, detail: 'LaunchAgent（§30 で詳細検査）', ruleId: 's10-home:launchagent', evidenceSha: f.sha256 });
+    if (/^\.(lesshst|viminfo|python_history|node_repl_history|mysql_history|psql_history)$/.test(rel)) push(ctx, { level: 'INFO', module: '§10', campaign: null, path: f.relPath, detail: '対話履歴ファイル（内容は読み取りません。侵害時はシークレット混入を確認）', ruleId: 's10-home:history' });
+  }
+  const text = (rel: string) => at(rel)?.text ?? '';
+  const rc = HOME_RC_FILES.map(text).join('\n');
+  if (!/^\s*ignore-scripts\s*=\s*true/m.test(text('.npmrc'))) push(ctx, { level: 'MEDIUM', module: '§12', campaign: null, path: `${prefix}.npmrc`, detail: 'npm の ignore-scripts=true が未設定', ruleId: 's12-vaccines:npm' });
+  if (!/PYTHONNOUSERSITE=1/.test(rc)) push(ctx, { level: 'MEDIUM', module: '§12', campaign: null, path: null, detail: 'PYTHONNOUSERSITE=1 が未設定（ユーザー site-packages 経由のフック実行）', ruleId: 's12-vaccines:pythonnousersite' });
+  const pipConf = ['.config/pip/pip.conf', '.pip/pip.conf', 'Library/Application Support/pip/pip.conf'].some((p) => /^\s*require-virtualenv\s*=\s*(true|1)/m.test(text(p)));
+  if (!/PIP_REQUIRE_VIRTUALENV=(true|1)/.test(rc) && !pipConf) push(ctx, { level: 'MEDIUM', module: '§12', campaign: null, path: null, detail: 'PIP_REQUIRE_VIRTUALENV=true が未設定（グローバル環境への pip install）', ruleId: 's12-vaccines:pip' });
 }
