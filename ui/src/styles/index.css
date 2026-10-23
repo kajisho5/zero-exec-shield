@@ -1,60 +1,216 @@
 @import 'tailwindcss';
 
-/* デザイントークン（docs/design/ui-design.md §2 / ui-components.svg と同一値） */
-@theme {
-  --color-bg: #0a0a0a;
-  --color-surface: #141414;
-  --color-surface-2: #1c1c1c;
-  --color-border: #2a2a2a;
-  --color-border-strong: #3a3a3a;
-  --color-text: #ededed;
-  --color-muted: #a3a3a3;
-  --color-subtle: #8a8a8a;
-  --color-accent: #38bdf8;
-  --color-critical: #ef4444;
-  --color-critical-bg: #2a0f0f;
-  --color-high: #f97316;
-  --color-high-bg: #2a170a;
-  --color-medium: #eab308;
-  --color-medium-bg: #262008;
-  --color-low: #3b82f6;
-  --color-low-bg: #0d1a30;
-  --color-info: #a3a3a3;
-  --color-info-bg: #1c1c1c;
-  --color-safe: #22c55e;
-  --color-safe-bg: #0c2214;
-  --color-signed: #a78bfa;
-  --color-signed-bg: #1b1430;
-  --font-sans: system-ui, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+/*
+ * 「検疫台」のデザイントークン（設計書 v0.2 §5.2・§5.3。値は palette.json と同じ）。
+ * shadcn/ui の変数名をそのまま使い、値を検疫台の道具に割り当てる:
+ *   background = 作業台 / card = 台紙 / popover = 浮き / muted = 凹み / accent = 選択行
+ *   foreground・primary・ring = 墨 / muted-foreground = 鉛筆 / border = 罫 / input = 縁 / signed = 紫印
+ * 色相が付くのは検出（重大度）と紫印だけ。
+ *
+ * テーマ: 既定はダーク。クラスが無いときは OS の設定に従い（prefers-color-scheme: light のときだけライト）、
+ * html.light / html.dark で明示的に切り替える（useTheme）。dark: バリアントは使わず、すべてトークンで切り替える。
+ */
+:root {
+  color-scheme: dark;
+  --background: oklch(0.255 0.006 75);
+  --card: oklch(0.295 0.006 75);
+  --popover: oklch(0.335 0.007 75);
+  --muted: oklch(0.225 0.006 75);
+  --accent: oklch(0.355 0.007 75);
+  --foreground: oklch(0.945 0.008 85);
+  --muted-foreground: oklch(0.775 0.008 75);
+  --border: oklch(0.405 0.007 75);
+  --input: oklch(0.585 0.008 75);
+  --destructive: #d02c2e;
+  --signed: #d2b1f9;
+  --signed-tint: #3f2c53;
+  --wordmark: #f5f5f7;
+  --scrim: rgb(0 0 0 / 0.55);
+  --lift: 0 6px 18px rgb(0 0 0 / 0.45);
+
+  --critical: #fe938d; --critical-tint: #562422; --critical-solid: #d02c2e; --critical-solid-fg: #fcfcfc;
+  --high: #fdb171;     --high-tint: #4c2d13;     --high-solid: #e87f25;     --high-solid-fg: #252220;
+  --medium: #f3d761;   --medium-tint: #3d3515;   --medium-solid: #f3c935;   --medium-solid-fg: #252220;
+  --low: #89c8fe;      --low-tint: #1d3850;      --low-solid: #2378c2;      --low-solid-fg: #fcfcfc;
+  --info: #c8c3bd;     --info-tint: #3c3935;     --info-solid: #6c6863;     --info-solid-fg: #fcfcfc;
+  --safe: #7ee09b;     --safe-tint: #1b3b25;     --safe-solid: #43b966;     --safe-solid-fg: #252220;
 }
 
-html,
-body,
-#root {
-  height: 100%;
+/* ライトの値（OS の設定と html.light の 2 か所で使うため、同じ宣言を 2 回書く） */
+@media (prefers-color-scheme: light) {
+  :root:not(.dark) {
+    color-scheme: light;
+    --background: oklch(0.925 0.004 75);
+    --card: oklch(0.995 0.002 75);
+    --popover: oklch(1 0 0);
+    --muted: oklch(0.955 0.004 75);
+    --accent: oklch(0.945 0.006 75);
+    --foreground: oklch(0.235 0.01 70);
+    --muted-foreground: oklch(0.445 0.01 75);
+    --border: oklch(0.855 0.005 75);
+    --input: oklch(0.585 0.008 75);
+    --destructive: #cb1e21;
+    --signed: #713dab;
+    --signed-tint: #f4eefe;
+    --wordmark: #1d1d1f;
+    --scrim: rgb(0 0 0 / 0.4);
+    --lift: 0 6px 18px rgb(0 0 0 / 0.16);
+
+    --critical: #b21a1c; --critical-tint: #fdecea; --critical-solid: #cb1e21; --critical-solid-fg: #fcfcfc;
+    --high: #9e480f;     --high-tint: #feefe1;     --high-solid: #ef7926;     --high-solid-fg: #211d19;
+    --medium: #79570b;   --medium-tint: #fcf3d1;   --medium-solid: #f2c02a;   --medium-solid-fg: #211d19;
+    --low: #0b5bae;      --low-tint: #e9f1fc;      --low-solid: #1b6ad4;      --low-solid-fg: #fcfcfc;
+    --info: #5a5651;     --info-tint: #f0eeeb;     --info-solid: #67635d;     --info-solid-fg: #fcfcfc;
+    --safe: #1b6c3a;     --safe-tint: #e1f8e6;     --safe-solid: #1d7d3e;     --safe-solid-fg: #fcfcfc;
+  }
 }
-body {
-  margin: 0;
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
+:root.light {
+  color-scheme: light;
+  --background: oklch(0.925 0.004 75);
+  --card: oklch(0.995 0.002 75);
+  --popover: oklch(1 0 0);
+  --muted: oklch(0.955 0.004 75);
+  --accent: oklch(0.945 0.006 75);
+  --foreground: oklch(0.235 0.01 70);
+  --muted-foreground: oklch(0.445 0.01 75);
+  --border: oklch(0.855 0.005 75);
+  --input: oklch(0.585 0.008 75);
+  --destructive: #cb1e21;
+  --signed: #713dab;
+  --signed-tint: #f4eefe;
+  --wordmark: #1d1d1f;
+  --scrim: rgb(0 0 0 / 0.4);
+  --lift: 0 6px 18px rgb(0 0 0 / 0.16);
+
+  --critical: #b21a1c; --critical-tint: #fdecea; --critical-solid: #cb1e21; --critical-solid-fg: #fcfcfc;
+  --high: #9e480f;     --high-tint: #feefe1;     --high-solid: #ef7926;     --high-solid-fg: #211d19;
+  --medium: #79570b;   --medium-tint: #fcf3d1;   --medium-solid: #f2c02a;   --medium-solid-fg: #211d19;
+  --low: #0b5bae;      --low-tint: #e9f1fc;      --low-solid: #1b6ad4;      --low-solid-fg: #fcfcfc;
+  --info: #5a5651;     --info-tint: #f0eeeb;     --info-solid: #67635d;     --info-solid-fg: #fcfcfc;
+  --safe: #1b6c3a;     --safe-tint: #e1f8e6;     --safe-solid: #1d7d3e;     --safe-solid-fg: #fcfcfc;
 }
-:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--foreground);
+  --color-primary-foreground: var(--background);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--foreground);
+  --color-destructive: var(--destructive);
+  --color-signed: var(--signed);
+  --color-signed-tint: var(--signed-tint);
+  --color-wordmark: var(--wordmark);
+  --color-scrim: var(--scrim);
+
+  --color-critical: var(--critical);
+  --color-critical-tint: var(--critical-tint);
+  --color-critical-solid: var(--critical-solid);
+  --color-critical-solid-fg: var(--critical-solid-fg);
+  --color-high: var(--high);
+  --color-high-tint: var(--high-tint);
+  --color-high-solid: var(--high-solid);
+  --color-high-solid-fg: var(--high-solid-fg);
+  --color-medium: var(--medium);
+  --color-medium-tint: var(--medium-tint);
+  --color-medium-solid: var(--medium-solid);
+  --color-medium-solid-fg: var(--medium-solid-fg);
+  --color-low: var(--low);
+  --color-low-tint: var(--low-tint);
+  --color-low-solid: var(--low-solid);
+  --color-low-solid-fg: var(--low-solid-fg);
+  --color-info: var(--info);
+  --color-info-tint: var(--info-tint);
+  --color-info-solid: var(--info-solid);
+  --color-info-solid-fg: var(--info-solid-fg);
+  --color-safe: var(--safe);
+  --color-safe-tint: var(--safe-tint);
+  --color-safe-solid: var(--safe-solid);
+  --color-safe-solid-fg: var(--safe-solid-fg);
+
+  /* 角丸は役割ごと（§7）: 押印 2 / タグ・件数 3 / 台紙・行 4 / ボタン・入力・トースト 6 / シートの上端 14 */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-2xl: 14px;
+
+  --shadow-lift: var(--lift);
+
+  --font-sans: system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Yu Gothic', Meiryo, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Cascadia Mono', 'Noto Sans Mono', 'Hiragino Sans', 'Noto Sans JP', monospace;
+
+  --animate-fade-in: zes-fade-in 120ms ease-out;
+  --animate-fade-out: zes-fade-out 100ms ease-in;
+  --animate-sheet-in: zes-sheet-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-sheet-out: zes-sheet-out 150ms ease-in;
+  --animate-tip-in: zes-fade-in 80ms ease-out;
 }
-.scrollbar-none {
-  scrollbar-width: none;
-}
-.scrollbar-none::-webkit-scrollbar {
-  display: none;
-}
-@media (prefers-reduced-motion: reduce) {
+
+@keyframes zes-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes zes-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes zes-sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes zes-sheet-out { from { transform: translateY(0); } to { transform: translateY(100%); } }
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    line-break: strict;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1, h2, h3, button, [role='tab'] {
+    word-break: auto-phrase;
+  }
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+  ::placeholder {
+    color: var(--muted-foreground);
+    opacity: 1;
+  }
   * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  /* フォーカス: 墨の 2px の輪郭＋2px の空き。色相を持たないので、重大度の色とぶつからない（§5.4） */
+  :focus-visible {
+    outline: 2px solid var(--foreground);
+    outline-offset: 2px;
+  }
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
     animation: none !important;
     transition: none !important;
+    scroll-behavior: auto !important;
   }
 }

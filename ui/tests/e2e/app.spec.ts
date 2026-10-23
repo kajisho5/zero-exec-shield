@@ -68,7 +68,7 @@ test('SkillPact タブ: 乖離の赤ハイライト、署名を「安全」と�
   for (const word of ['安全', '信頼済み', 'Verified', 'Trusted', 'L3']) await expect(badge).not.toContainText(word);
   await expect(page.getByTestId('level-note')).toContainText('実験的');
   // SkillPact タブでは SAFE バッジ・安全色（緑）の表示を使わない
-  await expect(page.getByRole('tabpanel').locator('[data-severity=SAFE], .text-safe, .bg-safe')).toHaveCount(0);
+  await expect(page.getByRole('tabpanel').locator('[data-severity=SAFE], .text-safe, .bg-safe, .border-safe')).toHaveCount(0);
   await expect(page.getByTestId('rule-row').filter({ hasText: '未宣言の network' })).toHaveAttribute('data-status', 'hit');
 });
 
@@ -178,7 +178,7 @@ const NARROW: [string, RegExp, string?][] = [
   ['github-actions', /^GitHub Actions/, 'actions-viewer'],
   ['browser-ext', /^ブラウザ拡張/, 'extension-viewer'],
 ];
-for (const width of [375, 320]) {
+for (const width of [768, 375, 320]) {
   test(`${width}px 幅でページ全体が横スクロールしない（総合 / SkillPact / MCP / Actions / 拡張）`, async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', 'Playwright WebKit は隠しエントリだけのフォルダを setInputFiles できない（github-actions）');
     await page.setViewportSize({ width, height: 800 });
@@ -200,28 +200,32 @@ for (const width of [375, 320]) {
   });
 }
 
-test('「すべてのタブ」メニュー: Escape・外側クリックで閉じ、フォーカスを戻す', async ({ page }) => {
+// 「すべてのタブ」はメニューからタブ検索（Popover＋cmdk の Command）に変わった（設計書 §10.2、§14）。
+// menu / menuitem は dialog / combobox / listbox / option になる。閉じ方とフォーカスの戻り方は同じことを確かめる。
+test('「すべてのタブ」タブ検索: Escape・外側クリックで閉じ、フォーカスを戻す', async ({ page }) => {
   await open(page);
   const btn = page.getByTestId('all-tabs');
-  const menu = page.getByRole('menu', { name: 'すべてのタブ' });
+  const dialog = page.getByRole('dialog', { name: 'すべてのタブ' });
   await btn.click();
-  await expect(menu).toBeVisible();
+  await expect(dialog).toBeVisible();
   await expect(btn).toHaveAttribute('aria-expanded', 'true');
-  await expect(btn).toHaveAttribute('aria-controls', await menu.getAttribute('id') ?? 'missing');
-  await expect(page.getByRole('menuitem').first()).toBeFocused();
+  await expect(btn).toHaveAttribute('aria-controls', await dialog.getAttribute('id') ?? 'missing');
+  // 入力欄にフォーカスがあり、18 タブすべてが候補
+  await expect(dialog.getByRole('combobox')).toBeFocused();
+  await expect(dialog.getByRole('option')).toHaveCount(18);
   await page.keyboard.press('Escape');
-  await expect(menu).toBeHidden();
+  await expect(dialog).toBeHidden();
   await expect(btn).toHaveAttribute('aria-expanded', 'false');
   await expect(btn).toBeFocused();
   await btn.click();
-  await expect(menu).toBeVisible();
+  await expect(dialog).toBeVisible();
   await page.getByRole('heading', { name: 'Zero-Exec Shield' }).click();
-  await expect(menu).toBeHidden();
-  // 矢印キーで移動して選択すると、そのタブが選択されフォーカスされる
+  await expect(dialog).toBeHidden();
+  // 矢印キーで移動して選択すると、そのタブが選択されフォーカスされる（最初の候補は選択中のタブ＝総合）
   await btn.click();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
-  await expect(menu).toBeHidden();
+  await expect(dialog).toBeHidden();
   await expect(page.getByRole('tab', { name: /^SkillPact/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: /^SkillPact/ })).toBeFocused();
 });

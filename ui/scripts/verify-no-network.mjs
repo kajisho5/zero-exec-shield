@@ -38,6 +38,8 @@ for (const re of [/\bfetch\s*\(/, /XMLHttpRequest/, /new\s+WebSocket/, /EventSou
 const ALLOW = [
   /^http:\/\/www\.w3\.org\/(2000\/svg|1999\/xhtml|1998\/Math\/MathML|1999\/xlink|XML\/1998\/(namespace|space))$/,
   /^https:\/\/reactjs\.org\/(docs\/)?error-decoder\.html\?invariant=$/,
+  // React 19 の本番エラーメッセージ（"Minified React error #N; visit https://react.dev/errors/N"）。文字列として連結されるだけで通信しない
+  /^https:\/\/react\.dev\/errors\/$/,
   /^https:\/\/tailwindcss\.com$/,
 ];
 for (const m of html.matchAll(/https?:\/\/[^\s"'`<>)\\*]+/g)) {
