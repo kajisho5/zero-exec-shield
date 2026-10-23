@@ -1721,7 +1721,7 @@ codex_toml_mcp_commands() {
 check_s17() {
   log_section "§17" "MCP静的ポイズニング"
   local f cmdline
-  local mcpq='[.. | objects | select(has("command")) | ((.command | tostring) + " " + ((.args // []) | map(tostring) | join(" ")))] | .[]'
+  local mcpq='[.. | objects | select(has("command")) | ((.command | tostring) + " " + ((.args // []) | if type == "array" then map(tostring) | join(" ") else tostring end))] | .[]'
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if [[ "$f" == *.toml ]]; then

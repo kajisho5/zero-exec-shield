@@ -74,6 +74,12 @@
     },
     {
       "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "o-mcp-string-args/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
       "level": "MEDIUM",
       "module": "§17",
       "path": "n-codex/.codex/config.toml"
