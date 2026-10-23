@@ -57,7 +57,8 @@ export function reducer(s: ScanState, a: Action): ScanState {
   if ((a.type === 'SCAN_PROGRESS' || a.type === 'SCAN_RESULT' || a.type === 'SCAN_FAIL') && a.scanId !== s.scanId) return s;
   switch (a.type) {
     case 'SCAN_START':
-      return { ...s, phase: 'reading', scanId: a.scanId, progress: { processed: 0, total: a.total }, startedAt: a.startedAt, errorMessage: null };
+      // 前回のスキャン結果は消す（新しい startedAt と古い結果・finishedAt を混ぜて表示・書き出ししない）
+      return { ...s, phase: 'reading', scanId: a.scanId, progress: { processed: 0, total: a.total }, startedAt: a.startedAt, finishedAt: null, durationMs: 0, result: null, errorMessage: null };
     case 'SCAN_PROGRESS':
       return { ...s, phase: a.phase ?? s.phase, progress: { ...s.progress, processed: a.processed } };
     case 'SCAN_RESULT':

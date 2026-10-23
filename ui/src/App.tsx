@@ -87,7 +87,7 @@ function Scanner() {
 
   return (
     <div className="min-h-full">
-      <Header onExport={exportJson} onClear={() => { cancelScan(); dispatch({ type: 'CLEAR' }); }} canExport={findings.length > 0 || !!r} />
+      <Header onExport={exportJson} onClear={() => { cancelScan(); dispatch({ type: 'CLEAR' }); }} canExport={!busy && (findings.length > 0 || !!r)} />
       <TabBar active={tab.id} findings={findings} onSelect={(id) => dispatch({ type: 'SET_TAB', tab: id })} />
       <main id={`panel-${tab.id}`} role="tabpanel" aria-labelledby={`tab-${tab.id}`} className="px-4 py-6 sm:px-8">
         <ErrorBoundary onReset={() => { cancelScan(); dispatch({ type: 'CLEAR' }); }}>

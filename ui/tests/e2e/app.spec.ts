@@ -1,6 +1,8 @@
 // index.html（ビルド成果物）を file:// で開き、外部リクエストゼロと主要操作を確認する。
 import { expect, test, type Page } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validate } from '../unit/schema';
 
@@ -210,4 +212,23 @@ test('書き出した findings.json を取り込み直しても件数が増え�
   const ids = JSON.parse(readFileSync(await dl2.path(), 'utf8')).findings.map((f: { id: string }) => f.id);
   expect(new Set(ids).size).toBe(ids.length);
   expect(ids.length).toBe(JSON.parse(first).findings.length);
+});
+
+test('次のスキャン中は前回の結果を表示せず、書き出しもできない', async ({ page }) => {
+  await open(page);
+  await scan(page, 'chaindrop');
+  await expect(page.getByTestId('count-CRITICAL')).not.toHaveText('0');
+  const big = mkdtempSync(join(tmpdir(), 'zes-big-'));
+  mkdirSync(join(big, 'd'));
+  for (let i = 0; i < 1500; i++) writeFileSync(join(big, 'd', `f${i}.txt`), 'hello ' + i);
+  await page.getByTestId('dir-input').setInputFiles(big);
+  const status = page.getByTestId('scan-status');
+  await expect(status).toContainText(/読み取り中|判定中|スキャン完了/);
+  if (!(await status.textContent())?.includes('スキャン完了')) {
+    await expect(page.getByTestId('count-CRITICAL')).toHaveText('0');
+    await expect(page.getByTestId('export')).toBeDisabled();
+  }
+  await expect(status).toContainText('スキャン完了', { timeout: 30_000 });
+  await expect(page.getByTestId('count-CRITICAL')).toHaveText('0');
+  await expect(page.getByTestId('export')).toBeEnabled();
 });

@@ -39,3 +39,23 @@ describe('スキャンのキャンセル', () => {
     expect(seen).toEqual([50]);
   });
 });
+
+describe('次のスキャン中は前のスキャン結果を表示・書き出ししない', () => {
+  it('SCAN_START で前回の result / finishedAt / durationMs を消す', () => {
+    const s = run([
+      { type: 'SCAN_START', scanId: 1, total: 10, startedAt: '2026-10-01T00:00:00Z' },
+      { type: 'SCAN_RESULT', scanId: 1, result: result(10), finishedAt: '2026-10-01T00:00:05Z', durationMs: 5000 },
+      { type: 'SCAN_START', scanId: 2, total: 3, startedAt: '2026-10-02T00:00:00Z' },
+    ]);
+    expect([s.phase, s.result, s.finishedAt, s.durationMs, s.startedAt]).toEqual(['reading', null, null, 0, '2026-10-02T00:00:00Z']);
+  });
+  it('SCAN_FAIL 後も前回の結果は戻らない', () => {
+    const s = run([
+      { type: 'SCAN_START', scanId: 1, total: 10, startedAt: 't' },
+      { type: 'SCAN_RESULT', scanId: 1, result: result(10), finishedAt: 'f', durationMs: 1 },
+      { type: 'SCAN_START', scanId: 2, total: 3, startedAt: 't2' },
+      { type: 'SCAN_FAIL', scanId: 2, message: 'x' },
+    ]);
+    expect([s.phase, s.result, s.finishedAt]).toEqual(['error', null, null]);
+  });
+});
