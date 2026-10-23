@@ -7,7 +7,8 @@
 import { push, type RuleCtx } from './context';
 import type { DiffAnomaly, Effect, FileInput, RuleResult, Severity, SkillPactAnalysis, SkillPactDivergence, SkillPactFindingField } from './types';
 import { SEVERITY_RANK } from './types';
-import { basename, dirname, ere } from './util';
+import type { MsgKey } from '../i18n';
+import { basename, dirname, ere, type FCode } from './util';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -404,14 +405,22 @@ function policyProblem(p: Obj, R: RuleCtx['ioc']['skillpact']): string {
 }
 
 // ---------------------------------------------------------------- 本体
-const EFFECT_LABEL: Record<Effect, string> = {
-  exec: 'exec（他のプログラムの実行）', network: 'network（外部ホストとの通信）', spend: 'spend（課金・決済）', send: 'send（メール・投稿・メッセージの送信）',
-  read: 'read（機密ファイル: ~/.ssh・.env・認証情報など）', write: 'write（ファイルの書き込み）',
+/** Divergence codes (the CLI's s49.divergence.*): [unsigned, signed contract]. ZES does not verify signatures and a
+ *  signature never changes the severity; a signed contract only gets the sentence that says so. */
+const DIVERGENCE_CODES: Record<'exec' | 'network' | 'spend' | 'send' | 'read_sensitive_none' | 'read_sensitive_scoped' | 'write_durable_none' | 'write_durable_scoped', [FCode, FCode]> = {
+  exec: ['s49.divergence.exec', 's49.divergence.exec.signed'],
+  network: ['s49.divergence.network', 's49.divergence.network.signed'],
+  spend: ['s49.divergence.spend', 's49.divergence.spend.signed'],
+  send: ['s49.divergence.send', 's49.divergence.send.signed'],
+  read_sensitive_none: ['s49.divergence.read_sensitive_none', 's49.divergence.read_sensitive_none.signed'],
+  read_sensitive_scoped: ['s49.divergence.read_sensitive_scoped', 's49.divergence.read_sensitive_scoped.signed'],
+  write_durable_none: ['s49.divergence.write_durable_none', 's49.divergence.write_durable_none.signed'],
+  write_durable_scoped: ['s49.divergence.write_durable_scoped', 's49.divergence.write_durable_scoped.signed'],
 };
-export const RULE_TITLES: [string, Severity][] = [
-  ['契約を JSON / 構造として検証できる', 'MEDIUM'], ['対応する contract_version（0.1〜0.8）', 'MEDIUM'],
-  ['未宣言の exec', 'HIGH'], ['未宣言の network', 'HIGH'], ['未宣言の spend', 'HIGH'], ['未宣言の send', 'HIGH'],
-  ['未宣言の read（機密ファイル）', 'MEDIUM'], ['未宣言の write（作業領域外を含む）', 'MEDIUM'], ['前版から major を上げずに権限拡大', 'HIGH'],
+export const RULE_TITLES: [MsgKey, Severity][] = [
+  ['ui.sp.rule.contract_valid', 'MEDIUM'], ['ui.sp.rule.version_supported', 'MEDIUM'],
+  ['ui.sp.rule.undeclared_exec', 'HIGH'], ['ui.sp.rule.undeclared_network', 'HIGH'], ['ui.sp.rule.undeclared_spend', 'HIGH'], ['ui.sp.rule.undeclared_send', 'HIGH'],
+  ['ui.sp.rule.undeclared_read', 'MEDIUM'], ['ui.sp.rule.undeclared_write', 'MEDIUM'], ['ui.sp.widened', 'HIGH'],
 ];
 
 const emptyField = (): SkillPactFindingField => ({
@@ -434,7 +443,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
     policyPaths.add(f.relPath);
     const prob = ijsonProblem(f.text);
     const bad = prob ? `JSON: ${prob}` : policyProblem(p, R);
-    if (bad) push(ctx, { level: 'MEDIUM', module: '§49', campaign: 'skillpact-invalid', path: f.relPath, detail: `SkillPact ポリシーを検証できません（${bad}）。ZES はポリシーの allow/ask/deny 判定を行いません`, ruleId: 's49-policy', skillpact: emptyField() });
+    if (bad) push(ctx, { level: 'MEDIUM', module: '§49', campaign: 'skillpact-invalid', path: f.relPath, code: 's49.policy_invalid', params: { problems: bad }, ruleId: 's49-policy', skillpact: emptyField() });
   }
 
   const dirs = [...new Set(ctx.files.filter((f) => f.name === 'SKILL.md' || f.name === CONTRACT).map((f) => dirname(f.relPath)))].sort();
@@ -470,7 +479,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
       skillName: null, skillVersion: null, level: null, signed: false, signers: [], author: null,
       declared: [], observed, divergence: [], diffAnomaly: null, results: [], maxLevel: null, counts: {},
     };
-    const hits: { level: Severity; path: string; detail: string; ruleId: string; campaign: string }[] = [];
+    const hits: { level: Severity; path: string; code: FCode; params?: Record<string, string>; ruleId: string; campaign: string }[] = [];
     const field = (): SkillPactFindingField => ({
       contract_path: a.contract.path, contract_version: a.contract.contractVersion, level: a.level, signed: a.signed, author: a.author,
       declared_effects: a.declared, observed_effects: a.observed, policy_decision: null, l2_tested: false,
@@ -478,13 +487,13 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
     });
     if (!cfile) {
       if (ctx.byPath.has(prefix + 'SKILL.md') && (obs.exec || obs.network || obs.spend || obs.send)) {
-        hits.push({ level: 'INFO', campaign: 'skillpact-undeclared', path: dir || '.', ruleId: 's49-no-contract', detail: `このスキルには SkillPact 契約（skill.contract.json）がないため、宣言との比較は行いません（参考: コードに見える効果 ${observed.join(',')}）` });
+        hits.push({ level: 'INFO', campaign: 'skillpact-undeclared', path: dir || '.', ruleId: 's49-no-contract', code: 's49.undeclared', params: { effects: observed.join(',') } });
       }
     } else {
       const prob = cfile.text == null ? 'file not readable' : ijsonProblem(cfile.text);
       if (prob) {
         a.contract.status = 'unparseable'; a.contract.problem = prob;
-        hits.push({ level: 'MEDIUM', campaign: 'skillpact-invalid', path: cfile.relPath, ruleId: 's49-contract-json', detail: `SkillPact 契約を検証できません（CONTRACT_JSON: ${prob}）。宣言を読めないため乖離判定は行いません` });
+        hits.push({ level: 'MEDIUM', campaign: 'skillpact-invalid', path: cfile.relPath, ruleId: 's49-contract-json', code: 's49.contract_unparseable', params: { problem: prob } });
         ctx.errors.push({ module: '§49', reason: `contract_unparseable:${cfile.relPath}` });
       } else {
         const c = JSON.parse(cfile.text!.replace(/^﻿/, '')) as Obj;
@@ -496,17 +505,15 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
         a.contract.status = r.vstatus !== 'ok' ? 'unsupported' : r.errors.length ? 'invalid' : 'ok';
         a.skillName = r.name; a.skillVersion = r.sver; a.level = r.level; a.signed = r.signed; a.signers = r.signers; a.author = r.authors[0] ?? null; a.declared = r.declared;
         if (r.vstatus !== 'ok') {
-          hits.push({ level: 'MEDIUM', campaign: 'skillpact-invalid', path: cfile.relPath, ruleId: 's49-version', detail: `SkillPact 契約の contract_version「${r.cv ?? '未指定'}」には対応していません（ZES の対応: 0.1〜0.8）。宣言を解釈できないため乖離判定は行いません` });
+          hits.push({ level: 'MEDIUM', campaign: 'skillpact-invalid', path: cfile.relPath, ruleId: 's49-version', code: 's49.unsupported_version', params: { version: r.cv ?? 'unspecified' } });
         } else {
-          if (r.errors.length) hits.push({ level: 'MEDIUM', campaign: 'skillpact-invalid', path: cfile.relPath, ruleId: 's49-invalid', detail: `SkillPact 契約を検証できません（ZES の部分検査: ${r.errors.join(',')}）。L1 とは見なしません` });
-          const sigNote = r.signed ? '（契約に署名がありますが ZES は署名を検証しません。署名の有無で重大度は変えません）' : '';
+          if (r.errors.length) hits.push({ level: 'MEDIUM', campaign: 'skillpact-invalid', path: cfile.relPath, ruleId: 's49-invalid', code: 's49.partial_check_errors', params: { errors: r.errors.join(',') } });
           a.divergence = r.divergence.map((d) => ({ ...d, level: HIGH_EFFECTS.includes(d.effect) ? 'HIGH' : 'MEDIUM' }));
           for (const d of a.divergence) {
-            let txt: string;
-            if (d.durable) txt = `コードに作業領域外への永続的な書き込み（crontab・.bashrc・authorized_keys など）が見えますが、契約の write は${d.why === 'none' ? '宣言されていません（permissions.write: none）' : ' $WORKDIR / $OUTPUT / $TMPDIR 内に限られています'}`;
-            else if (d.sensitive) txt = `コードが ${EFFECT_LABEL.read}を読む可能性がありますが、契約の read は${d.why === 'none' ? '宣言されていません（permissions.read: none）' : 'その範囲を含みません'}`;
-            else txt = `コードに ${EFFECT_LABEL[d.effect]}が見えますが、契約は ${d.effect} を宣言していません（permissions.${d.effect}: none）`;
-            hits.push({ level: d.level, campaign: 'skillpact-divergence', path: dir || '.', ruleId: `s49-divergence:${d.effect}`, detail: txt + sigNote });
+            const why = d.why === 'none' ? 'none' : 'scoped';
+            const k = d.durable ? (`write_durable_${why}` as const) : d.sensitive ? (`read_sensitive_${why}` as const) : d.effect === 'exec' || d.effect === 'network' || d.effect === 'spend' || d.effect === 'send' ? d.effect : null;
+            if (k === null) continue;
+            hits.push({ level: d.level, campaign: 'skillpact-divergence', path: dir || '.', ruleId: `s49-divergence:${d.effect}`, code: DIVERGENCE_CODES[k][r.signed ? 1 : 0] });
           }
           // 前版との差分（spec §17）
           const cv = semv(r.sver);
@@ -530,8 +537,8 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
                 const ident: DiffAnomaly['identity'] = r.authors.length && prev.authors.length ? (r.authors.some((k) => prev.authors.includes(k)) ? 'same' : 'changed') : 'unsigned';
                 const level: Severity = widened.some((w) => HIGH_EFFECTS.includes(w.effect)) ? 'HIGH' : 'MEDIUM';
                 a.diffAnomaly = { previousVersion: prev.ver, previousPath: prev.path, widened: widened.map((w) => w.text), identity: ident, level };
-                const idt = ident === 'same' ? '前版と同一（未検証。正規の鍵で署名された静かな拡大はアカウント侵害の兆候）' : ident === 'changed' ? '前版と異なる（未検証）' : '署名なし';
-                hits.push({ level, campaign: 'skillpact-account-compromise', path: cfile.relPath, ruleId: 's49-diff-anomaly', detail: `前版 ${prev.ver}（${prev.path}）から権限が拡大していますが（${widened.map((w) => w.text).join(' / ')}）、skill.version の major が上がっていません（SkillPact §17）。作者署名鍵: ${idt}` });
+                const code: FCode = ident === 'same' ? 's49.account_compromise.same' : ident === 'changed' ? 's49.account_compromise.changed' : 's49.account_compromise.unsigned';
+                hits.push({ level, campaign: 'skillpact-account-compromise', path: cfile.relPath, ruleId: 's49-diff-anomaly', code, params: { changes: widened.map((w) => w.text).join(' / '), prev_path: prev.path, prev_version: prev.ver } });
               }
             }
           }
@@ -555,7 +562,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
     for (const h of hits) {
       a.counts[h.level] = (a.counts[h.level] ?? 0) + 1;
       if (!a.maxLevel || SEVERITY_RANK[h.level] > SEVERITY_RANK[a.maxLevel]) a.maxLevel = h.level;
-      push(ctx, { level: h.level, module: '§49', campaign: h.campaign, path: h.path, detail: h.detail, ruleId: h.ruleId, skillpact: field() });
+      push(ctx, { level: h.level, module: '§49', campaign: h.campaign, path: h.path, code: h.code, ...(h.params ? { params: h.params } : {}), ruleId: h.ruleId, skillpact: field() });
     }
     out.push(a);
   }

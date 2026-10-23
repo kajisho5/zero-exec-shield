@@ -420,10 +420,11 @@ if out="$(bash "$TESTS_DIR/check-versions.sh" 2>&1)"; then ok "$out"; else ng "�
 echo "== i18n（メッセージカタログ・findings 1.2） =="
 # Catalog files: same keys and placeholders in en / ja, one entry per line in C-locale key order, only \" and \\ escapes,
 #   no URL / HTML / control characters, no Japanese in en.json; every f.* / log.* / cli.* key used by zes-scan.sh exists
-#   and every such key is used; the inline cli.* block of zes-scan.sh equals the catalog; no CJK outside comments in
+#   and every such key is used (an f.* key also counts as used when the browser engine in ui/src uses it, and every
+#   code ui/src uses exists); the inline cli.* block of zes-scan.sh equals the catalog; no CJK outside comments in
 #   zes-scan.sh except the Bash < 4 message and the Japanese cli.* block
 if out="$(python3 -I - "$REPO" <<'PY' 2>&1
-import json, re, subprocess, sys
+import json, os, re, subprocess, sys
 repo = sys.argv[1]
 err = []
 raw = {l: open(f"{repo}/i18n/{l}.json", encoding="utf-8").read() for l in ("en", "ja")}
@@ -450,9 +451,13 @@ for k in cat["en"]:
 src = open(f"{repo}/zes-scan.sh", encoding="utf-8").read()
 code = "\n".join(l for l in src.split("\n") if not l.lstrip().startswith("#"))
 used_f = set(re.findall(r"(?<![\w.$/-])((?:s[0-9]+|intel)\.[a-z0-9_.]*[a-z0-9_])(?!\w)", code))
+# The browser engine (ui/src) uses the same codes as string literals, plus a few UI-only codes (paste.*, ...)
+ui_src = "\n".join(open(os.path.join(d, n), encoding="utf-8").read() for d, _, ns in os.walk(f"{repo}/ui/src") for n in sorted(ns) if n.endswith((".ts", ".tsx")))
+used_ui = set(re.findall(r"'((?:s[0-9]+|intel|paste)\.[a-z0-9_.]*[a-z0-9_])'", ui_src))
 cat_f = {k[2:] for k in cat["en"] if k.startswith("f.")}
 if used_f - cat_f: err.append(f"codes missing from the catalog: {sorted(used_f - cat_f)}")
-if cat_f - used_f: err.append(f"f.* keys not used by zes-scan.sh: {sorted(cat_f - used_f)}")
+if used_ui - cat_f: err.append(f"codes of ui/src missing from the catalog: {sorted(used_ui - cat_f)}")
+if cat_f - used_f - used_ui: err.append(f"f.* keys used neither by zes-scan.sh nor by ui/src: {sorted(cat_f - used_f - used_ui)}")
 used_l = set(re.findall(r"(?:log_info|safe|msg) (log\.[a-z0-9_.]+)", code)) | {f"log.section.s{n}" for n in re.findall(r'log_section "§([0-9]+)"', code)}
 cat_l = {k for k in cat["en"] if k.startswith("log.")}
 if used_l ^ cat_l: err.append(f"log.* keys: missing {sorted(used_l - cat_l)} unused {sorted(cat_l - used_l)}")
@@ -473,7 +478,7 @@ for i, l in enumerate(src.split("\n"), 1):
     m = CJK.search(l)
     if not m or l.lstrip().startswith("#") or (l in blk and l.lstrip().startswith("[cli.")) or l.startswith('  echo "ZES: Bash 4 以上'): continue
     if not re.search(r"\s#", l[:m.start()]): err.append(f"zes-scan.sh:{i}: Japanese outside a comment")
-print("\n".join(err[:30]) or f"f.*={len(cat_f)} log.*={len(cat_l)} cli.*={len(inline['en'])}")
+print("\n".join(err[:30]) or f"f.*={len(cat_f)} (CLI {len(used_f)}, UI {len(used_ui)}, UI only {len(used_ui - used_f)}) log.*={len(cat_l)} cli.*={len(inline['en'])}")
 sys.exit(1 if err else 0)
 PY
 )"; then ok "カタログ i18n/en.json・ja.json（$out）: 形式・キー・プレースホルダ・zes-scan.sh の使用と一致"

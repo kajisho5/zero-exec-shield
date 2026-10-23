@@ -74,7 +74,7 @@ describe('GitHub Actions の YAML 正規化（CLI workflow_text の移植）', (
     expect(r.findings.filter((f) => f.path === 'github-actions/.github/workflows/safe-base-ref.yml')).toEqual([]);
     expect(keys(await analyzeFiles(loadFixture('parser-evasion')), '§22')).toEqual([]);
     const noVer = await analyzeFiles([file('p/.github/workflows/a.yml', 'jobs:\n  a:\n    steps:\n      - uses: actions/checkout\n')]);
-    expect(noVer.findings.map((f) => `${f.level} ${f.detail}`)).toEqual(['HIGH uses: actions/checkout がバージョン未指定']);
+    expect(noVer.findings.map((f) => `${f.level} ${f.code} ${f.params?.['ref']} | ${f.detail}`)).toEqual(['HIGH s22.no_version actions/checkout | uses: actions/checkout has no version']);
   });
 });
 

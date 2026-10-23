@@ -3,7 +3,6 @@
 //   Dockerfile の FROM php、php*.ini。インストール済み php の版・RHEL の案内・--url のヘッダ判定はホスト/通信が必要なため CLI のみ。
 import { push, readable, type RuleCtx } from '../context';
 import type { IocDb } from '../ioc';
-import type { Severity } from '../types';
 import { textLocators, versionCmp } from '../util';
 
 export type PhpStatus = 'fixed' | 'vulnerable' | 'prerelease' | 'unknown_branch' | 'unparsed';
@@ -86,14 +85,12 @@ export function phpRules(ctx: RuleCtx): void {
   const judge = (ver: string, path: string, sha: string | null, key: string) => {
     const st = phpStatus(ver, ctx.ioc);
     const mm = /^v?(\d+)\.(\d+)\./.exec(ver);
-    const eol = mm && versionCmp(`${mm[1]}.${mm[2]}.0`, '8.2.0') < 0 ? '（8.1 以前は公式の修正リリースなし。サポート版へ移行）' : '';
-    let level: Severity | null = null;
-    let detail = '';
-    if (st === 'prerelease') { level = 'MEDIUM'; detail = `PHP ${ver} はプレリリース版（dev/alpha/beta/RC）。PHP2Shell（CVE-2026-109618/109619）の修正有無を版番号から判断できません（要確認）`; }
-    else if (st === 'unknown_branch') { level = 'MEDIUM'; detail = `PHP ${ver} は PHP2Shell の修正版一覧（${fixList}）にないブランチ。修正済みとは判断できません（要確認）`; }
-    else if (st === 'unparsed') { level = 'MEDIUM'; detail = `PHP のバージョン表記（${ver}）を解釈できません。PHP2Shell（CVE-2026-109618/109619）の修正状況は不明（要確認）`; }
-    else if (st === 'vulnerable') { level = 'CRITICAL'; detail = `PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の影響範囲（修正版: ${fixList}）${eol}`; }
-    if (level) push(ctx, { level, module: '§4', campaign: null, path, detail, ruleId: `s4-php2shell:${key}:${st}:${ver}`, evidenceSha: sha });
+    const eol = !!mm && versionCmp(`${mm[1]}.${mm[2]}.0`, '8.2.0') < 0;
+    const base = { module: '§4', campaign: null, path, ruleId: `s4-php2shell:${key}:${st}:${ver}`, evidenceSha: sha };
+    if (st === 'prerelease') push(ctx, { ...base, level: 'MEDIUM', code: 's4.php_prerelease', params: { version: ver } });
+    else if (st === 'unknown_branch') push(ctx, { ...base, level: 'MEDIUM', code: 's4.php_unknown_branch', params: { fixed: fixList, version: ver } });
+    else if (st === 'unparsed') push(ctx, { ...base, level: 'MEDIUM', code: 's4.php_unparsed', params: { version: ver } });
+    else if (st === 'vulnerable') push(ctx, { ...base, level: 'CRITICAL', code: eol ? 's4.php_vulnerable_eol' : 's4.php_vulnerable', params: { fixed: fixList, version: ver } });
   };
 
   // コンテナイメージのタグ（CLI detect_service_version '(^|[[:space:]/"=])php'。latest 等の浮動タグは FROM の検査で扱う）
@@ -115,20 +112,19 @@ export function phpRules(ctx: RuleCtx): void {
     for (const m of f.text.matchAll(/^[ \t]*FROM[ \t]+([^ \n]*\/)?php(:[^ \n]+)?/gim)) {
       const line = m[0].replace(/\r$/, '');
       if (/php:.*latest/.test(line) || line.endsWith('php')) {
-        push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, detail: 'PHP ベースイメージが浮動タグ（latest/タグなし）', ruleId: 's4-php-image:floating', evidenceSha: f.sha256 });
+        push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, code: 's4.php_image_floating', ruleId: 's4-php-image:floating', evidenceSha: f.sha256 });
       } else {
         const img = line.slice(line.lastIndexOf(' ') + 1);
-        push(ctx, { level: 'INFO', module: '§4', campaign: null, path: f.relPath, detail: `PHP ベースイメージ: ${img}`, ruleId: `s4-php-image:${img}`, evidenceSha: f.sha256 });
+        push(ctx, { level: 'INFO', module: '§4', campaign: null, path: f.relPath, code: 's4.php_image', params: { image: img }, ruleId: `s4-php-image:${img}`, evidenceSha: f.sha256 });
       }
     }
   }
   // php*.ini
   for (const f of readable(ctx).filter((x) => /^php.*\.ini$/.test(x.name))) {
-    if (/^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\s;]/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§4', campaign: null, path: f.relPath, detail: 'php.ini の auto_prepend_file が設定されています（全リクエストで実行）', ruleId: 's4-php-ini:auto_prepend', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\s;]/) });
-    if (/^[ \t]*disable_functions[ \t]*=[ \t]*\r?$/m.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, detail: 'php.ini の disable_functions が空欄', ruleId: 's4-php-ini:disable_functions', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*disable_functions[ \t]*=[ \t]*$/) });
+    if (/^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\s;]/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§4', campaign: null, path: f.relPath, code: 's4.auto_prepend', ruleId: 's4-php-ini:auto_prepend', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\s;]/) });
+    if (/^[ \t]*disable_functions[ \t]*=[ \t]*\r?$/m.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, code: 's4.disable_functions_empty', ruleId: 's4-php-ini:disable_functions', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*disable_functions[ \t]*=[ \t]*$/) });
   }
   // dpkg のパッケージ DB（ベンダー修正版表。OS は同じルートの etc/os-release / usr/lib/os-release）
-  const note = 'パッケージが修正済みでも、稼働中の PHP-FPM / Apache ワーカーが更新後に再起動されたか（配信中のバイナリ）を確認';
   for (const f of readable(ctx).filter((x) => /(^|\/)var\/lib\/dpkg\/status$/.test(x.relPath))) {
     const pkgs = dpkgPhpPackages(f.text);
     if (!pkgs.length) continue;
@@ -142,11 +138,11 @@ export function phpRules(ctx: RuleCtx): void {
     for (const { pkg, ver, src } of pkgs) {
       const row = (ctx.ioc.php2shell_distro?.packages ?? []).find((r) => r.vendor === id && r.release === vid && r.source_package === src);
       if (!row) {
-        push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, detail: `${pkg} ${ver}（${id || 'OS 不明'} ${vid}、ソース ${src}）: PHP2Shell（CVE-2026-109618/109619）の対応するベンダー勧告を特定できません。修正状況は不明（ベンダーの勧告で確認）。${note}`, ruleId: `s4-php2shell:dpkg:${pkg}:${ver}:unknown`, evidenceSha: f.sha256 });
+        push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, code: 's4.dpkg_no_advisory', params: { os: id || 'unknown', os_version: vid, package: pkg, source: src, version: ver }, ruleId: `s4-php2shell:dpkg:${pkg}:${ver}:unknown`, evidenceSha: f.sha256 });
       } else if (debVersionCmp(ver, row.fixed) < 0) {
-        push(ctx, { level: 'HIGH', module: '§4', campaign: null, path: f.relPath, detail: `${pkg} ${ver}（${id} ${vid}）は PHP2Shell（CVE-2026-109618/109619）のベンダー修正版 ${row.fixed}（${row.advisory ?? ''} ${row.url ?? ''}）未満。潜在的に脆弱。${note}`, ruleId: `s4-php2shell:dpkg:${pkg}:${ver}:vulnerable`, evidenceSha: f.sha256 });
+        push(ctx, { level: 'HIGH', module: '§4', campaign: null, path: f.relPath, code: 's4.dpkg_vulnerable', params: { advisory: row.advisory ?? '', fixed: row.fixed, os: id, os_version: vid, package: pkg, url: row.url ?? '', version: ver }, ruleId: `s4-php2shell:dpkg:${pkg}:${ver}:vulnerable`, evidenceSha: f.sha256 });
       } else {
-        push(ctx, { level: 'INFO', module: '§4', campaign: null, path: f.relPath, detail: `${pkg} ${ver}（${id} ${vid}）は PHP2Shell のベンダー修正版 ${row.fixed}（${row.advisory ?? ''}）以上。${note}`, ruleId: `s4-php2shell:dpkg:${pkg}:${ver}:fixed`, evidenceSha: f.sha256 });
+        push(ctx, { level: 'INFO', module: '§4', campaign: null, path: f.relPath, code: 's4.dpkg_fixed', params: { advisory: row.advisory ?? '', fixed: row.fixed, os: id, os_version: vid, package: pkg, version: ver }, ruleId: `s4-php2shell:dpkg:${pkg}:${ver}:fixed`, evidenceSha: f.sha256 });
       }
     }
   }

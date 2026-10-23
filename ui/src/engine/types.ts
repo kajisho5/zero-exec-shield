@@ -1,4 +1,5 @@
 // 判定エンジンの型。ファイル内容（text）は FileInput にだけ存在し、出力の型には現れない（設計書 §6.3）。
+import type { MsgKey } from '../i18n';
 
 export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
 export type DisplaySeverity = Severity | 'SAFE';
@@ -90,7 +91,7 @@ export interface ExtensionView { path: string; name: string; dangerous: string[]
 export interface SkillPactDivergence { effect: Effect; why: 'none' | 'scope'; sensitive?: boolean; durable?: boolean; level: Severity }
 export interface DiffAnomaly { previousVersion: string; previousPath: string; widened: string[]; identity: 'same' | 'changed' | 'unsigned'; level: Severity }
 export type RuleStatus = 'hit' | 'clear' | 'n/a' | 'undetermined';
-export interface RuleResult { ruleNo: number; title: string; level: Severity; status: RuleStatus }
+export interface RuleResult { ruleNo: number; /** catalog key of the rule name (ui.sp.rule.*) */ title: MsgKey; level: Severity; status: RuleStatus }
 
 export interface SkillPactAnalysis {
   skillId: string;

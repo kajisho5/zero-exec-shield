@@ -47,6 +47,13 @@ export function translate(lang: Lang, key: MsgKey, params?: Params): string {
   return render(CATALOG[lang][key] ?? CATALOG.en[key] ?? key, params);
 }
 
+/** A finding's message in the given language: f.<code> with its params when the catalog has the code, otherwise detail
+ *  as is (findings imported from findings 1.0 / 1.1, or a code from a newer CLI). */
+export function findingText(lang: Lang, f: { code?: string; params?: Record<string, string>; detail: string }): string {
+  const key = f.code ? `f.${f.code}` : '';
+  return key && Object.hasOwn(CATALOG.en, key) ? translate(lang, key as MsgKey, f.params) : f.detail;
+}
+
 export const getLang = () => current;
 /** For code outside React's render (class components, event handlers). */
 export const t = (key: MsgKey, params?: Params) => translate(current, key, params);
@@ -75,10 +82,11 @@ export function useLang() {
   const lang = useSyncExternalStore((cb) => { listeners.add(cb); return () => listeners.delete(cb); }, () => current);
   const tr = useCallback((key: MsgKey, params?: Params) => translate(lang, key, params), [lang]);
   const fmt = useCallback((n: number) => formatNumber(n, lang), [lang]);
-  return { lang, t: tr, fmt, setLang: useCallback((l: Lang) => set(l), []) };
+  const ft = useCallback((f: Parameters<typeof findingText>[1]) => findingText(lang, f), [lang]);
+  return { lang, t: tr, ft, fmt, setLang: useCallback((l: Lang) => set(l), []) };
 }
 
-/** Text written in Japanese (detail strings from 1.0 / 1.1 imports and the engine until 0.5.0) gets lang="ja"
- *  so it uses the Japanese font in the English UI. */
+/** Text written in Japanese (detail strings from findings 1.0 / 1.1 imports) gets lang="ja" so it uses the Japanese
+ *  font in the English UI. */
 const CJK = /[\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]/;
 export const textLang = (s: string | null | undefined): 'ja' | undefined => (s && CJK.test(s) ? 'ja' : undefined);

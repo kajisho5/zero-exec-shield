@@ -130,7 +130,7 @@ function Scanner() {
       if (doc.dropped) toast({ tone: 'error', text: t('ui.toast.imported_dropped', { n: doc.dropped }) });
       else toast({ tone: 'ok', text: t('ui.toast.imported') });
     } catch (e) {
-      toast({ tone: 'error', text: e instanceof ImportError ? e.message : t('ui.toast.import_failed') });
+      toast({ tone: 'error', text: e instanceof ImportError ? t(e.key) : t('ui.toast.import_failed') });
     }
   };
 

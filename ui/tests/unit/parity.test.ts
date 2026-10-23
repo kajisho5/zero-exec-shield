@@ -18,7 +18,7 @@ describe('ロックファイル（CLI build_deps と同じ対象）', () => {
   it('pnpm-lock.yaml（/name@ver・peer 接尾辞・引用符付きスコープ）', async () => {
     const t = `lockfileVersion: '6.0'\r\n\r\npackages:\r\n\r\n  /flat-cache@6.1.24:\r\n    resolution: {integrity: x}\r\n  '@cacheable/utils@2.5.1(peer@1.0.0)':\r\n    resolution: {integrity: y}\r\n`;
     const r = await analyzeFiles([file('p/pnpm-lock.yaml', t)]);
-    expect(r.findings.filter((f) => f.module === '§15').map((f) => f.detail.split(' ')[1]).sort()).toEqual(['@cacheable/utils@2.5.1', 'flat-cache@6.1.24']);
+    expect(r.findings.filter((f) => f.module === '§15').map((f) => `${f.params?.['package']}@${f.params?.['version']}`).sort()).toEqual(['@cacheable/utils@2.5.1', 'flat-cache@6.1.24']);
   });
   it('package-lock v1 の入れ子 dependencies（BOM 付き）', async () => {
     const t = BOM + JSON.stringify({ lockfileVersion: 1, dependencies: { a: { version: '1.0.0', dependencies: { ecto: { version: '5.0.1' } } } } });
@@ -39,7 +39,7 @@ describe('ロックファイル（CLI build_deps と同じ対象）', () => {
   it('Pipfile.lock（default / develop、== を除去）', async () => {
     const t = BOM + JSON.stringify({ _meta: {}, default: { Py2Ops: { version: '==2.2' } }, develop: { telnyx: { version: '==4.87.1' } } });
     const r = await analyzeFiles([file('p/Pipfile.lock', t)]);
-    expect(r.findings.filter((f) => f.module === '§15').map((f) => f.detail.split(' ')[1]).sort()).toEqual(['py2ops@2.2', 'telnyx@4.87.1']);
+    expect(r.findings.filter((f) => f.module === '§15').map((f) => `${f.params?.['package']}@${f.params?.['version']}`).sort()).toEqual(['py2ops@2.2', 'telnyx@4.87.1']);
   });
 });
 

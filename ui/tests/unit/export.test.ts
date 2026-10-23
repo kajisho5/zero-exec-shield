@@ -42,6 +42,8 @@ describe('findings.json の取り込み（スキーマ検査）', () => {
   });
   it('文書として不正なら ImportError', () => {
     expect(() => parseFindingsDoc('{')).toThrow(ImportError);
+    expect(() => parseFindingsDoc('{')).toThrow('Cannot parse findings.json as JSON');
+    try { parseFindingsDoc('[]'); } catch (e) { expect((e as ImportError).key).toBe('ui.import.not_findings'); }
     expect(() => parseFindingsDoc(doc([], [], { status: 'weird' }))).toThrow(ImportError);
     expect(() => parseFindingsDoc(doc([], [], { incident_bundle: 'nope' }))).toThrow(ImportError);
     expect(() => parseFindingsDoc(doc([], [], { scan_started_at: 1 }))).toThrow(ImportError);

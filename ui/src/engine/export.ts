@@ -3,6 +3,7 @@
 // detail を英語に、id を v2 にしたもの。
 import type { Finding, FindingEvidence, FindingLocator, FindingRelated, FindingSubject, ScanError, Severity, SkillPactFindingField } from './types';
 import { SEVERITIES } from './types';
+import { translate, type MsgKey } from '../i18n';
 
 type DocFinding = {
   id: string; level: Severity; module: string; campaign: string | null; path: string | null;
@@ -70,7 +71,12 @@ export function toFindingsDoc(findings: Finding[], errors: ScanError[], bundle: 
   };
 }
 
-export class ImportError extends Error {}
+/** A findings.json that cannot be imported. key is the catalog message (ui.import.*); message is its English text. */
+export class ImportError extends Error {
+  constructor(readonly key: MsgKey) {
+    super(translate('en', key));
+  }
+}
 
 // ---- schemas/findings.schema.json の検査（取り込み時）。型・enum・pattern・required・additionalProperties:false を検査する ----
 type Obj = Record<string, unknown>;
@@ -160,11 +166,11 @@ export function parseFindingsDoc(text: string): ImportedDoc {
   try {
     doc = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
   } catch {
-    throw new ImportError('findings.json を JSON として解析できません');
+    throw new ImportError('ui.import.not_json');
   }
   const ver = isObj(doc) ? doc['schema_version'] : undefined;
   if (!isObj(doc) || (ver !== '1.0' && ver !== '1.1' && ver !== '1.2') || !Array.isArray(doc['findings']) || !Array.isArray(doc['errors'])) {
-    throw new ImportError('ZES findings.json（schema_version 1.0 / 1.1 / 1.2）ではありません');
+    throw new ImportError('ui.import.not_findings');
   }
   const d = doc;
   const version = ver as Version;
@@ -172,7 +178,7 @@ export function parseFindingsDoc(text: string): ImportedDoc {
     || ('scan_roots' in d && !(Array.isArray(d['scan_roots']) && d['scan_roots'].every(absPath))) || !isStr(d['incident_bundle']) || !BUNDLE.test(d['incident_bundle'])
     || !isStr(d['scan_started_at']) || !RFC3339.test(d['scan_started_at']) || !isStr(d['scan_finished_at']) || !RFC3339.test(d['scan_finished_at'])
     || !MODES.includes(d['scan_mode'] as string) || !STATUSES.includes(d['status'] as string)) {
-    throw new ImportError('findings.json がスキーマ（schemas/findings.schema.json）に適合しません');
+    throw new ImportError('ui.import.schema');
   }
   const rawF = d['findings'] as unknown[];
   const rawE = d['errors'] as unknown[];

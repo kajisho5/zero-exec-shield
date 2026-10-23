@@ -22,21 +22,23 @@ async function scan(page: Page, fixture: string, done = 'Scan complete') {
   await expect(page.getByTestId('scan-status')).toContainText(done);
 }
 
-/** Japanese characters outside the finding details (the engine's detail strings stay Japanese until 0.5.0 phase B). */
-async function japaneseChrome(page: Page) {
+/** Japanese text anywhere on the page (text, aria-label, placeholder, title). Since 0.5.0 phase B the engine's findings
+ *  are catalog messages too, so an English page after a scan has none; only the language menu's endonym 日本語 is
+ *  Japanese, and the menu is closed when this runs. */
+async function japaneseText(page: Page) {
   return page.evaluate(() => {
     const cjk = /[぀-ヿ㐀-鿿＀-￯]/;
     const out: string[] = [];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       const el = n.parentElement;
-      if (!el || el.closest('script,style') || !cjk.test(n.textContent ?? '') || el.closest('[lang="ja"]')) continue;
+      if (!el || el.closest('script,style') || !cjk.test(n.textContent ?? '')) continue;
       out.push((n.textContent ?? '').trim().slice(0, 40));
     }
     for (const el of document.querySelectorAll('[aria-label],[placeholder],[title]')) {
       for (const a of ['aria-label', 'placeholder', 'title']) {
         const v = el.getAttribute(a);
-        if (v && cjk.test(v) && !el.closest('[lang="ja"]')) out.push(`${a}=${v.slice(0, 40)}`);
+        if (v && cjk.test(v)) out.push(`${a}=${v.slice(0, 40)}`);
       }
     }
     return out;
@@ -49,15 +51,33 @@ test('English by default for a non-Japanese browser: html[lang], tabs, header, s
   await expect(page.getByRole('tab', { name: /^Overview/ })).toBeVisible();
   await expect(page.getByRole('banner').getByRole('button', { name: 'Open findings.json' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Drop a folder to scan' })).toBeVisible();
-  expect(await japaneseChrome(page)).toEqual([]);
+  expect(await japaneseText(page)).toEqual([]);
   await scan(page, 'chaindrop');
   const form = page.getByRole('region', { name: 'Sample record' });
   for (const label of ['Sample', 'Files', 'Scan time', 'Not scanned', 'Executed']) await expect(form).toContainText(label);
   await expect(page.getByTestId('card-SAFE')).toContainText('checks with no match');
-  // Details are still Japanese in phase A; they carry lang="ja" so they get the Japanese font
-  const detail = page.getByTestId('finding-row').first().locator('[lang="ja"]');
-  await expect(detail).toHaveCount(1);
-  expect(await japaneseChrome(page)).toEqual([]);
+  // UI-made findings show the catalog message (f.<code>) in the selected language: no Japanese, no lang="ja" details
+  const table = page.getByTestId('findings-table');
+  await expect(table).toContainText('ChainDrop preinstall hook (node setup.mjs)');
+  await expect(page.getByTestId('finding-row').locator('[lang="ja"]')).toHaveCount(0);
+  expect(await japaneseText(page)).toEqual([]);
+  // The same findings in Japanese (the CLI's Japanese wording), without scanning again
+  await page.getByTestId('lang').click();
+  await page.getByRole('menuitemradio', { name: '日本語' }).click();
+  await expect(table).toContainText('ChainDrop の preinstall フック（node setup.mjs）');
+  await page.getByTestId('lang').click();
+  await page.getByRole('menuitemradio', { name: 'English' }).click();
+  await expect(table).toContainText('ChainDrop preinstall hook (node setup.mjs)');
+  expect(errors).toEqual([]);
+});
+
+test('English SkillPact tab: rule names come from the catalog, no Japanese text', async ({ page }) => {
+  const errors = await open(page);
+  await scan(page, 'skillpact-signed-divergence');
+  await page.getByRole('tab', { name: /^SkillPact/ }).click();
+  await expect(page.getByTestId('skillpact-viewer')).toBeVisible();
+  await expect(page.getByTestId('rule-row').filter({ hasText: 'Undeclared network' })).toHaveAttribute('data-status', 'hit');
+  expect(await japaneseText(page)).toEqual([]);
   expect(errors).toEqual([]);
 });
 

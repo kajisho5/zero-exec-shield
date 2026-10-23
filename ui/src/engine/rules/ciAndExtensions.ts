@@ -201,6 +201,9 @@ export function usesRefs(yaml: string): string[] {
 export function actionsRules(ctx: RuleCtx): void {
   ctx.checks.add('s21-prtarget').add('s21-cache').add('s21-writeall').add('s22-pinning').add('s38-secrets');
   const compromised = ctx.ioc.github_actions.known_compromised;
+  // CLI check_s38: github_actions.secrets_ref_threshold (10 when missing)
+  const th = ctx.ioc.github_actions['secrets_ref_threshold'];
+  const threshold = typeof th === 'number' ? th : 10;
   for (const f of pathMatch(ctx, /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)action\.ya?ml$/)) {
     const y = f.text;
     const isWorkflow = /\.github\/workflows\//.test(f.relPath);
@@ -209,25 +212,25 @@ export function actionsRules(ctx: RuleCtx): void {
     if (isWorkflow && prTarget && /actions\/checkout@/i.test(y) && /\$\{\{([^}\n]*[^A-Za-z0-9_.\n])?secrets([\][.\s)]|$)/im.test(y)) {
       const refs = checkoutRefs(y);
       if (refs.includes('prhead')) {
-        push(ctx, { level: 'CRITICAL', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + PR head の checkout + secrets 参照（pwn request）', ruleId: 's21-prtarget:prhead', evidenceSha: f.sha256, kind: 'gha.pwn_request' });
+        push(ctx, { level: 'CRITICAL', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.pwn_request', ruleId: 's21-prtarget:prhead', evidenceSha: f.sha256, kind: 'gha.pwn_request' });
       }
       if (refs.includes('noref')) {
-        push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + actions/checkout(refなし) + secrets 参照', ruleId: 's21-prtarget:noref', evidenceSha: f.sha256, kind: 'gha.pwn_request' });
+        push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.prt_checkout_base', ruleId: 's21-prtarget:noref', evidenceSha: f.sha256, kind: 'gha.pwn_request' });
       }
       if (refs.includes('exprref')) {
-        push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + actions/checkout の ref が式（${{ … }}）+ secrets 参照（PR 由来の ref でないことを静的に確認できません）', ruleId: 's21-prtarget:exprref', evidenceSha: f.sha256, kind: 'gha.pwn_request' });
+        push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.prt_checkout_expr', ruleId: 's21-prtarget:exprref', evidenceSha: f.sha256, kind: 'gha.pwn_request' });
       }
     }
     if (/key:.*github\.event\.pull_request\.number/.test(y)) {
-      push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'actions/cache のキーに PR 番号（キャッシュポイズニング）', ruleId: 's21-cache', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.cache_pr_key', ruleId: 's21-cache', evidenceSha: f.sha256 });
     }
     if (/^\s*permissions:\s*write-all/m.test(y)) {
-      push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'permissions: write-all', ruleId: 's21-writeall', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.write_all', ruleId: 's21-writeall', evidenceSha: f.sha256 });
     }
     if (isWorkflow && yamlHasAlias(y)) ctx.errors.push({ module: '§21', reason: `yaml_alias_unresolved:${f.relPath}` });
     const n = new Set([...y.matchAll(/secrets\.([A-Za-z0-9_]+)/gi)].map((m) => m[1]!.toLowerCase())).size;
-    if (n > 10) push(ctx, { level: 'HIGH', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `ワークフローが ${n} 種類の secrets.* を参照（一括収集の疑い）`, ruleId: 's38-secrets', evidenceSha: f.sha256 });
-    if (/tojson\(\s*secrets\s*(\.\s*\*\s*)?\)/i.test(y)) push(ctx, { level: 'CRITICAL', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'toJSON(secrets) で全シークレットを展開', ruleId: 's38-tojson', evidenceSha: f.sha256 });
+    if (n > threshold) push(ctx, { level: 'HIGH', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's38.many_secrets', params: { n, threshold }, ruleId: 's38-secrets', evidenceSha: f.sha256 });
+    if (/tojson\(\s*secrets\s*(\.\s*\*\s*)?\)/i.test(y)) push(ctx, { level: 'CRITICAL', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's38.tojson_secrets', ruleId: 's38-tojson', evidenceSha: f.sha256 });
 
     const uses: UsesRef[] = [];
     // 正規化後の各行の uses:（フローマッピング・次行の値・ブロックスカラーを含む。run: の中の文字列は数えない）
@@ -236,7 +239,7 @@ export function actionsRules(ctx: RuleCtx): void {
       const at = ref.lastIndexOf('@');
       if (at < 0) {
         uses.push({ ref: clip(ref), kind: 'tag' });
-        push(ctx, { level: 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `uses: ${clip(ref, 80)} がバージョン未指定`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
+        push(ctx, { level: 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's22.no_version', params: { ref }, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
         continue;
       }
       const act = ref.slice(0, at).toLowerCase();
@@ -246,17 +249,17 @@ export function actionsRules(ctx: RuleCtx): void {
       const org = compromised.some((c) => c.action.endsWith('/*') && act.startsWith(c.action.slice(0, -1).toLowerCase()));
       if (known) {
         uses.push({ ref: clip(ref), kind: 'compromised' });
-        push(ctx, { level: 'CRITICAL', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `汚染されたタグ参照の可能性（${clip(ref, 80)}）。安全版タグまたは検証済み SHA に固定`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
+        push(ctx, { level: 'CRITICAL', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's22.poisoned_tag', params: { ref }, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
       } else if (/^[0-9a-f]{40}$/.test(ver)) {
         uses.push({ ref: clip(ref), kind: 'sha' });
-        if (org) push(ctx, { level: 'MEDIUM', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `侵害履歴のある発行元のアクション ${clip(act, 80)}（SHA 固定済み）`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256 });
+        if (org) push(ctx, { level: 'MEDIUM', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's22.risky_publisher_sha', params: { action: act }, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256 });
       } else {
         uses.push({ ref: clip(ref), kind: 'tag' });
-        push(ctx, { level: org ? 'CRITICAL' : 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: org ? `侵害履歴のある発行元のアクションをタグ参照（${clip(ref, 80)}）` : `SHA 固定されていないアクション参照（${clip(ref, 80)}）`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
+        push(ctx, { level: org ? 'CRITICAL' : 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, code: org ? 's22.risky_publisher_tag' : 's22.unpinned', params: { ref }, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
       }
     }
     if (/(trivy-version|version):\s*["']?v?0\.69\.4["']?\s*$/m.test(y) && /trivy/.test(y)) {
-      push(ctx, { level: 'CRITICAL', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'Trivy 本体の悪性版 v0.69.4 を指定（安全版は v0.69.3）', ruleId: 's22-trivy-binary', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's22.trivy_version', ruleId: 's22-trivy-binary', evidenceSha: f.sha256 });
     }
     if (isWorkflow) ctx.viewers.actions.push({ path: f.relPath, uses, prTarget });
   }
@@ -285,12 +288,12 @@ export function extensionRules(ctx: RuleCtx): void {
     const name = typeof m.name === 'string' ? m.name : '';
     ctx.viewers.extensions.push({ path: f.relPath, name: clip(name, 60), dangerous, allUrls, unofficialUpdate: unofficial });
     parsed.push({ path: f.relPath, perms: [...dangerous, ...(allUrls ? ['<all_urls>'] : [])] });
-    if (unofficial) push(ctx, { level: 'HIGH', module: '§24', campaign: null, path: f.relPath, detail: '拡張の update_url が公式ストア以外', ruleId: 's24-update-url', evidenceSha: f.sha256 });
-    if (dangerous.length && allUrls) push(ctx, { level: 'HIGH', module: '§24', campaign: null, path: f.relPath, detail: `危険パーミッション（${dangerous.join(' ')}）+ <all_urls>`, ruleId: 's24-permissions', evidenceSha: f.sha256 });
-    else if (dangerous.length) push(ctx, { level: 'MEDIUM', module: '§24', campaign: null, path: f.relPath, detail: `危険パーミッション（${dangerous.join(' ')}）`, ruleId: 's24-permissions', evidenceSha: f.sha256 });
-    else if (allUrls) push(ctx, { level: 'MEDIUM', module: '§24', campaign: null, path: f.relPath, detail: '全サイトへのアクセス（<all_urls>）', ruleId: 's24-permissions', evidenceSha: f.sha256 });
+    if (unofficial) push(ctx, { level: 'HIGH', module: '§24', campaign: null, path: f.relPath, code: 's24.update_url', ruleId: 's24-update-url', evidenceSha: f.sha256 });
+    if (dangerous.length && allUrls) push(ctx, { level: 'HIGH', module: '§24', campaign: null, path: f.relPath, code: 's24.perms_all_urls', params: { permissions: dangerous.join(' ') }, ruleId: 's24-permissions', evidenceSha: f.sha256 });
+    else if (dangerous.length) push(ctx, { level: 'MEDIUM', module: '§24', campaign: null, path: f.relPath, code: 's24.perms', params: { permissions: dangerous.join(' ') }, ruleId: 's24-permissions', evidenceSha: f.sha256 });
+    else if (allUrls) push(ctx, { level: 'MEDIUM', module: '§24', campaign: null, path: f.relPath, code: 's24.all_urls', ruleId: 's24-permissions', evidenceSha: f.sha256 });
     if (name && be.known_campaigns.some((k) => k.name.includes(name))) {
-      push(ctx, { level: 'HIGH', module: '§42', campaign: null, path: f.relPath, detail: '既知の悪性/侵害拡張と同名', ruleId: 's42-known', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§42', campaign: null, path: f.relPath, code: 's42.known_name', params: { name }, ruleId: 's42-known', evidenceSha: f.sha256 });
     }
   }
   // 同一拡張 ID の複数バージョン間で危険パーミッションが増えていないか（所有権移転型）
@@ -305,7 +308,7 @@ export function extensionRules(ctx: RuleCtx): void {
     list.sort((a, b) => a.ver.localeCompare(b.ver, 'en', { numeric: true }));
     for (let i = 1; i < list.length; i++) {
       const added = (list[i]?.perms ?? []).filter((x) => !(list[i - 1]?.perms ?? []).includes(x));
-      if (added.length) push(ctx, { level: 'HIGH', module: '§42', campaign: null, path: list[i]?.path ?? null, detail: `拡張の更新で危険パーミッションが追加（${added.join(' ')}）。所有権移転型の悪性アップデート疑い`, ruleId: 's42-escalation' });
+      if (added.length) push(ctx, { level: 'HIGH', module: '§42', campaign: null, path: list[i]?.path ?? null, code: 's42.perms_added', params: { permissions: added.join(' ') }, ruleId: 's42-escalation' });
     }
   }
 }

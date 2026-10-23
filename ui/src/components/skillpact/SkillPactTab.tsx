@@ -255,7 +255,7 @@ function Report({ a }: { a: SkillPactAnalysis }) {
                 className={cn('relative grid min-h-8 grid-cols-[22px_minmax(0,1fr)_auto_56px] items-center gap-x-2.5 rounded-sm px-2.5 py-1 text-[13px]', hit && SEV[r.level].tint)}>
                 {hit && <span aria-hidden="true" className={cn('absolute inset-y-0 left-0 w-[3px]', SEV[r.level].bar)} />}
                 <span className="text-right text-[12.5px] font-medium text-muted-foreground tabular-nums">{r.ruleNo}</span>
-                <span lang={textLang(r.title)} className="min-w-0 break-words">{r.title}</span>
+                <span className="min-w-0 break-words">{t(r.title)}</span>
                 <span className={cn('text-xs font-medium', hit ? SEV[r.level].fg : 'text-muted-foreground')}>{r.level}</span>
                 <span className={cn('text-right text-[12.5px]', hit ? cn('font-semibold', SEV[r.level].fg) : 'text-muted-foreground')}>{t(RESULT[r.status])}</span>
               </li>

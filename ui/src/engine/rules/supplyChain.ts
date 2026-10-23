@@ -11,33 +11,33 @@ export function filenameRules(ctx: RuleCtx): void {
   for (const f of ctx.files) {
     const n = f.name;
     if (n === 'cook.pth' || n === 'cook.py') {
-      push(ctx, { level: 'CRITICAL', module: '§2', campaign: camp[n] ?? null, path: f.relPath, detail: `悪性フックファイル（${n}）を検出`, ruleId: 's2-malicious-files', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§2', campaign: camp[n] ?? null, path: f.relPath, code: 's2.hook_file', params: { name: n }, ruleId: 's2-malicious-files', evidenceSha: f.sha256 });
     } else if (n === 'sitecustomize.py' || n === 'usercustomize.py') {
-      push(ctx, { level: 'HIGH', module: '§2', campaign: camp[n] ?? null, path: f.relPath, detail: `Python 起動時自動実行フック（${n}）`, ruleId: 's2-malicious-files', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§2', campaign: camp[n] ?? null, path: f.relPath, code: 's2.startup_hook', params: { name: n }, ruleId: 's2-malicious-files', evidenceSha: f.sha256 });
     } else if (ctx.ioc.malicious_files.includes(n) && /\.m?js$/.test(n)) {
       const known = hashes[n] ?? [];
       if (f.sha256 && known.includes(f.sha256)) {
-        push(ctx, { level: 'CRITICAL', module: '§15', campaign: camp[n] ?? null, path: f.relPath, detail: `既知の悪性ハッシュと一致（${n}）`, ruleId: 's15-worm-files', evidenceSha: f.sha256 });
+        push(ctx, { level: 'CRITICAL', module: '§15', campaign: camp[n] ?? null, path: f.relPath, code: 's15.worm_hash', params: { name: n }, ruleId: 's15-worm-files', evidenceSha: f.sha256 });
       } else if (n === 'setup.mjs') {
         const pj = ctx.byPath.get(`${dirname(f.relPath)}/package.json`);
         if (pj?.text && /setup\.mjs/.test(pj.text)) {
-          push(ctx, { level: 'HIGH', module: '§15', campaign: camp[n] ?? null, path: f.relPath, detail: 'package.json から参照される setup.mjs（ChainDrop 型ドロッパー疑い）', ruleId: 's15-worm-files', evidenceSha: f.sha256 });
+          push(ctx, { level: 'HIGH', module: '§15', campaign: camp[n] ?? null, path: f.relPath, code: 's15.worm_setup', ruleId: 's15-worm-files', evidenceSha: f.sha256 });
         }
       } else {
-        push(ctx, { level: 'HIGH', module: '§15', campaign: camp[n] ?? null, path: f.relPath, detail: `ワーム関連ファイル名（${n}）`, ruleId: 's15-worm-files', evidenceSha: f.sha256 });
+        push(ctx, { level: 'HIGH', module: '§15', campaign: camp[n] ?? null, path: f.relPath, code: 's15.worm_file', params: { name: n }, ruleId: 's15-worm-files', evidenceSha: f.sha256 });
       }
     }
     if (ctx.ioc.worm_iocs.post_shaihulud.binaries.includes(n)) {
-      push(ctx, { level: 'CRITICAL', module: '§25', campaign: 'post-shaihulud', path: f.relPath, detail: `後続ワームのバイナリ名（${n}）`, ruleId: 's25-binaries', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§25', campaign: 'post-shaihulud', path: f.relPath, code: 's25.worm_binary', params: { name: n }, ruleId: 's25-binaries', evidenceSha: f.sha256 });
     }
     if (n === 'cargo-install' || n === 'cargo-install.exe') {
-      push(ctx, { level: 'HIGH', module: '§25', campaign: 'post-shaihulud', path: f.relPath, detail: 'cargo-install を名乗るファイル（偽装）', ruleId: 's25-binaries', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§25', campaign: 'post-shaihulud', path: f.relPath, code: 's25.cargo_install_file', ruleId: 's25-binaries', evidenceSha: f.sha256 });
     }
     if (n === 'transformers.pyz') {
-      push(ctx, { level: 'CRITICAL', module: '§36', campaign: 'hf-supply-chain', path: f.relPath, detail: 'transformers.pyz（正規配布物ではない偽装アーカイブ）', ruleId: 's36-pyz', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§36', campaign: 'hf-supply-chain', path: f.relPath, code: 's36.transformers_pyz', ruleId: 's36-pyz', evidenceSha: f.sha256 });
     }
     if (n.toLowerCase() === 'git.exe' && atRoot(ctx, f)) {
-      push(ctx, { level: 'CRITICAL', module: '§41', campaign: null, path: f.relPath, detail: 'リポジトリルートの git.exe（IDE/エージェントが自動実行する未パッチ zero-day）', ruleId: 's41-gitexe', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§41', campaign: null, path: f.relPath, code: 's41.git_exe', ruleId: 's41-gitexe', evidenceSha: f.sha256 });
     }
   }
 }
@@ -59,7 +59,7 @@ export function pthRules(ctx: RuleCtx): void {
     const bad = imports.some((l) => PTH_DANGER.test(l));
     push(ctx, {
       level: bad ? 'HIGH' : 'MEDIUM', module: '§2', campaign: 'litellm-oct2026', path: f.relPath,
-      detail: bad ? '.pth ファイルに起動時実行コード（import + exec/eval/system/通信）' : '.pth ファイルに起動時に実行される import 行（標準の virtualenv / editable 形式以外。内容を確認）',
+      code: bad ? 's2.pth_exec' : 's2.pth_import',
       ruleId: bad ? 's2-pth:high' : 's2-pth:medium', evidenceSha: f.sha256,
     });
   }
@@ -300,7 +300,7 @@ export function packageRules(ctx: RuleCtx): void {
   for (const f of readable(ctx).filter((x) => x.name === 'package.json')) {
     // CLI check_s15 と同じく、package.json のどこか（任意の scripts を含む）に "node setup.mjs" があれば検出（JSON の妥当性に依らない）
     if (pre && f.text.includes(pre)) {
-      push(ctx, { level: 'CRITICAL', module: '§15', campaign: 'chaindrop-keyv', path: f.relPath, detail: `ChainDrop の preinstall フック（${pre}）`, ruleId: 's15-preinstall', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§15', campaign: 'chaindrop-keyv', path: f.relPath, code: 's15.preinstall', params: { hook: pre }, ruleId: 's15-preinstall', evidenceSha: f.sha256 });
     }
     // install 系と prepare 系（CLI PKG_HOOK_RE と同じ）。厳密な JSON として読めなければ JSONC（BOM・末尾カンマ）として、
     // それでも駄目なら該当キーの行をそのまま見る（CLI の grep フォールバックと同じ）
@@ -317,15 +317,15 @@ export function packageRules(ctx: RuleCtx): void {
     }
     if (hooks.length) {
       if (hooks.some((h) => /(curl|wget|bash|sh -c|base64|eval|node -e|\.mjs|https?:\/\/)/.test(h))) {
-        push(ctx, { level: 'HIGH', module: '§2', campaign: null, path: f.relPath, detail: 'install / prepare ライフサイクルスクリプトに不審なコマンド', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
+        push(ctx, { level: 'HIGH', module: '§2', campaign: null, path: f.relPath, code: 's2.lifecycle_suspicious', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
       } else if (!f.relPath.includes('node_modules/')) {
-        push(ctx, { level: 'MEDIUM', module: '§2', campaign: null, path: f.relPath, detail: 'install / prepare ライフサイクルスクリプトが定義されています（ignore-scripts 推奨）', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
+        push(ctx, { level: 'MEDIUM', module: '§2', campaign: null, path: f.relPath, code: 's2.lifecycle_defined', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
       }
     }
   }
   for (const f of readable(ctx).filter((x) => /^(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(x.name))) {
     if (f.text.includes('github:tanstack/router#79ac49ee')) {
-      push(ctx, { level: 'CRITICAL', module: '§15', campaign: 'teampcp-mini-shai-hulud', path: f.relPath, detail: 'TanStack の不正 Git 依存（github:tanstack/router#79ac49ee）', ruleId: 's15-tanstack-git', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§15', campaign: 'teampcp-mini-shai-hulud', path: f.relPath, code: 's15.tanstack_git', ruleId: 's15-tanstack-git', evidenceSha: f.sha256 });
     }
   }
   const deps = collectDeps(ctx);
@@ -363,14 +363,15 @@ function emitPackage(ctx: RuleCtx, p: IocPackage, d: Dep): void {
     : { kind: pkgKind(d.path), subject: { ecosystem: d.eco, package: d.name, version: d.version || null, safe_version: safe, fixed_versions: [] } };
   const related = pkgRelated(ctx, d.eco, d.name, d.path);
   const base = { ...x, ...(related ? { related } : {}), directory: /\.(dist-info|egg-info)$/.test(d.path) && !ctx.byPath.has(d.path) };
+  const pk = { ecosystem: d.eco, package: d.name, version: d.version || '?' };
   // 版が分からない依存（version なしの node_modules/*/package.json 等）は版指定の IoC に一致させない（CLI と同じ）
   const hit = match === 'any_version' || ((match === 'versions' || match === 'vulnerable_versions') && d.version !== '' && (p.bad_versions ?? []).some((s) => s !== '' && versionMatches(d.version, s)));
   if (hit && match === 'vulnerable_versions') {
-    push(ctx, { level: 'HIGH', module: '§15', campaign: p.campaign, path: d.path, detail: `脆弱なバージョン ${d.name}@${d.version || '?'}（${d.eco}、悪性ではなく CVE の影響範囲）${p.safe_version ? `。修正版: ${p.safe_version} 以上` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
+    push(ctx, { level: 'HIGH', module: '§15', campaign: p.campaign, path: d.path, ...(p.safe_version ? { code: 's15.pkg_vulnerable_fixed', params: { ...pk, fixed_version: p.safe_version } } : { code: 's15.pkg_vulnerable', params: pk }), ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
   } else if (hit) {
-    push(ctx, { level: 'CRITICAL', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害パッケージ ${d.name}@${d.version || '?'} を検出（${d.eco}）${p.safe_version ? `。安全版: ${p.safe_version}` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
+    push(ctx, { level: 'CRITICAL', module: '§15', campaign: p.campaign, path: d.path, ...(p.safe_version ? { code: 's15.pkg_compromised_safe', params: { ...pk, safe_version: p.safe_version } } : { code: 's15.pkg_compromised', params: pk }), ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
   } else if (match === 'unknown_versions') {
-    push(ctx, { level: 'MEDIUM', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害報告のあるパッケージ ${d.name}@${d.version || '?'}（侵害版の特定バージョン未定義のため要確認）`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
+    push(ctx, { level: 'MEDIUM', module: '§15', campaign: p.campaign, path: d.path, code: 's15.pkg_reported', params: { package: d.name, version: d.version || '?' }, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
   }
 }
 

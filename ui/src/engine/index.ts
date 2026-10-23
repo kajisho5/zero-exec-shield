@@ -91,7 +91,7 @@ export async function analyzePaste(text: string, ioc: IocDb = IOC): Promise<Find
   const hits = analyzePasteText(text, ioc);
   const out: Finding[] = [];
   for (const h of hits) {
-    out.push(await makeFinding({ level: h.level, module: '§18', campaign: h.campaign, path: null, detail: `貼り付けテキスト: ${h.title}（${h.count} 件）`, ruleId: h.ruleId }));
+    out.push(await makeFinding({ level: h.level, module: '§18', campaign: h.campaign, path: null, code: h.code, params: h.params, ruleId: h.ruleId }));
   }
   return sortFindings(out);
 }

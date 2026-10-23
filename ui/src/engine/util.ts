@@ -1,4 +1,9 @@
+import { translate, type MsgKey } from '../i18n';
 import type { Finding, FindingLocator, FindingRelated, FindingSubject, LocatorFormat, Severity, SkillPactFindingField } from './types';
+
+/** A finding message code: a catalog key f.<code> (i18n/en.json). Codes stay string literals in the rules so the
+ *  catalog tests can find them; the CLI uses the same code for the same check (same module, same meaning). */
+export type FCode = { [K in MsgKey]: K extends `f.${infer C}` ? C : never }[MsgKey];
 
 /** [.] / hxxp 形式で無害化された IoC を照合用に戻す（メモリ内のみ）。 */
 export function refang(s: string): string {
@@ -72,7 +77,10 @@ export interface FindingSpec {
   module: string;
   campaign: string | null;
   path: string | null;
-  detail: string;
+  /** detail = render(en["f." + code], params): always English, like the CLI's findings.json */
+  code: FCode;
+  /** values of the message's placeholders (never file contents) */
+  params?: Record<string, string | number>;
   ruleId: string;
   evidenceSha?: string | null;
   skillpact?: SkillPactFindingField;
@@ -115,12 +123,31 @@ export function defaultRelated(module: string, path: string | null): FindingRela
   return [];
 }
 
-/** id = SHA-256(module|campaign|path|ruleId)。同じ入力なら同じ ID（決定的）。 */
+/** English detail of a code (findings.json is always English). */
+export function findingDetail(code: FCode, params: Record<string, string>): string {
+  return translate('en', `f.${code}`, params);
+}
+
+/** Values in C-locale key order joined by U+001F as key=value (the canon of the CLI's id v2). */
+export function idCanon(params: Record<string, string>): string {
+  const keys = Object.keys(params).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return keys.map((k) => `${k}=${params[k]}`).join('\u001f');
+}
+
+/** id v2 (the CLI's emit): sha256("zes-id-v2|" module "|" campaign "|" path "|" code "|" canon). The UI path is relative
+ *  to the dropped folder, so a UI id differs from the CLI id of the same file. */
+export async function findingId(module: string, campaign: string | null, path: string | null, code: string, params: Record<string, string>): Promise<string> {
+  return 'sha256:' + (await sha256Hex(`zes-id-v2|${module}|${campaign ?? ''}|${path ?? ''}|${code}|${idCanon(params)}`));
+}
+
 export async function makeFinding(s: FindingSpec): Promise<Finding> {
-  const id = 'sha256:' + (await sha256Hex(`${s.module}|${s.campaign ?? ''}|${s.path ?? ''}|${s.ruleId}`));
-  const detailSha = await sha256Hex(s.detail);
+  const params: Record<string, string> = {};
+  for (const [k, v] of Object.entries(s.params ?? {})) params[k] = String(v);
+  const detail = findingDetail(s.code, params);
+  const id = await findingId(s.module, s.campaign, s.path, s.code, params);
+  const detailSha = await sha256Hex(detail);
   const ev = 'sha256:' + (s.evidenceSha ?? detailSha);
-  const f: Finding = { id, level: s.level, module: s.module, campaign: s.campaign, path: s.path, detail: s.detail, evidence_hash: ev, ruleId: s.ruleId, source: 'ui' };
+  const f: Finding = { id, level: s.level, module: s.module, campaign: s.campaign, path: s.path, detail, evidence_hash: ev, code: s.code, params, ruleId: s.ruleId, source: 'ui' };
   if (s.kind) f.kind = s.kind;
   if (s.subject) f.subject = { ...s.subject, fixed_versions: [...s.subject.fixed_versions] };
   if (s.locators?.length) {

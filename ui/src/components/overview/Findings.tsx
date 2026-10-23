@@ -55,7 +55,7 @@ export function FindingsTable({ findings, total, empty, query, onQuery, modules,
   findings: Finding[]; total: number; empty: string; query: string; onQuery(q: string): void; modules: string[]; module: string | null; onModule(m: string | null): void;
 }) {
   const copy = useCopy();
-  const { t } = useLang();
+  const { t, ft } = useLang();
   const v = useVirtual(findings.length, ROW, 600);
   return (
     <Card data-testid="findings-table" className="overflow-hidden">
@@ -88,7 +88,7 @@ export function FindingsTable({ findings, total, empty, query, onQuery, modules,
                     <span role="cell" className="pt-0.5"><SeverityMark level={f.level} /></span>
                     <span role="cell" className="min-w-0 pr-4">
                       {f.path ? <PathText path={f.path} className="text-sm leading-5" /> : <span className="block text-sm leading-5 text-muted-foreground">{t('ui.findings.pasted')}</span>}
-                      <span lang={textLang(f.detail)} className="mt-0.5 block truncate text-[12.5px] text-muted-foreground" title={visiblePath(f.detail)}>{visiblePath(f.detail)}</span>
+                      <span lang={textLang(ft(f))} className="mt-0.5 block truncate text-[12.5px] text-muted-foreground" title={visiblePath(ft(f))}>{visiblePath(ft(f))}</span>
                     </span>
                     <span role="cell" className={cn('min-w-0 truncate pr-3 text-[13px] leading-5', !f.campaign && 'text-muted-foreground')} title={visibleOpt(f.campaign) ?? undefined}>
                       {visibleOpt(f.campaign) ?? '—'}
@@ -119,7 +119,7 @@ export function FindingList({ findings, empty, query, onQuery, modules, module, 
   findings: Finding[]; empty: string; query: string; onQuery(q: string): void; modules: string[]; module: string | null; onModule(m: string | null): void;
 }) {
   const copy = useCopy();
-  const { t } = useLang();
+  const { t, ft } = useLang();
   const v = useVirtual(findings.length, CARD_ROW, CARD_ROW * 6);
   const [detail, setDetail] = useState<Finding | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -167,10 +167,10 @@ export function FindingList({ findings, empty, query, onQuery, modules, module, 
                       className="flex h-full w-full flex-col items-start justify-center gap-1 pr-14 pl-4 text-left outline-offset-[-3px] hover:bg-accent">
                       <span className="flex max-w-full min-w-0 items-center gap-2.5">
                         <SeverityMark level={f.level} />
-                        <span className="truncate text-xs text-muted-foreground">{f.module}{'　'}{visibleOpt(f.campaign) ?? '—'}</span>
+                        <span className="truncate text-xs text-muted-foreground">{f.module}<span aria-hidden="true" className="inline-block w-3" />{visibleOpt(f.campaign) ?? '—'}</span>
                       </span>
                       {f.path ? <PathText path={f.path} className="max-w-full text-[13.5px]" /> : <span className="text-[13.5px] text-muted-foreground">{t('ui.findings.pasted')}</span>}
-                      <span lang={textLang(f.detail)} className="block max-w-full truncate text-xs text-muted-foreground">{visiblePath(f.detail)}</span>
+                      <span lang={textLang(ft(f))} className="block max-w-full truncate text-xs text-muted-foreground">{visiblePath(ft(f))}</span>
                     </button>
                     {/* コピーは元の値のまま。読み上げ名だけ表示用 */}
                     {f.path && <Button variant="ghost" size="icon-touch" aria-label={t('ui.findings.copy_path_aria', { path: visiblePath(f.path) })} onClick={() => copy(f.path!)} className="absolute top-[18px] right-1"><Copy /></Button>}
@@ -189,7 +189,7 @@ export function FindingList({ findings, empty, query, onQuery, modules, module, 
 /** 詳細のシート（承認済み §16-5）。パスと詳細の全文、キャンペーン、モジュール、「パスをコピー」。 */
 function FindingSheet({ finding, onClose, returnFocus }: { finding: Finding | null; onClose(): void; returnFocus(): HTMLElement | null }) {
   const copy = useCopy();
-  const { t } = useLang();
+  const { t, ft } = useLang();
   // 閉じるアニメーションの間も内容を残す
   const last = useRef<Finding | null>(null);
   if (finding) last.current = finding;
@@ -206,7 +206,7 @@ function FindingSheet({ finding, onClose, returnFocus }: { finding: Finding | nu
           <span aria-hidden="true" className={cn('absolute top-5 left-0 h-9 w-1', SEV[f.level].bar)} />
           <div className="flex flex-col gap-4 overflow-y-auto px-4 pt-3">
             {f.path ? <PathText path={f.path} wrap className="text-[15px] leading-snug" /> : <span className="text-muted-foreground">{t('ui.findings.pasted')}</span>}
-            <p lang={textLang(f.detail)} className="text-sm leading-relaxed">{visiblePath(f.detail)}</p>
+            <p lang={textLang(ft(f))} className="text-sm leading-relaxed">{visiblePath(ft(f))}</p>
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 border-t border-border pt-3 text-[13px]">
               <dt className="text-muted-foreground">{t('ui.findings.campaign')}</dt><dd className="wrap-anywhere">{visibleOpt(f.campaign) ?? '—'}</dd>
               <dt className="text-muted-foreground">{t('ui.findings.module')}</dt><dd>{f.module}</dd>
