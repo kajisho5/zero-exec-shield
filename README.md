@@ -1,3 +1,5 @@
+English | [日本語](README.ja.md)
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="brand/logo/zes-logo-dark.svg">
@@ -7,232 +9,106 @@
 
 # Zero-Exec Shield (ZES)
 
-バージョン 0.1.0（ZES v5.2 Master Specification 準拠）
+ZES is a static scanner for software supply chain attacks, compromised developer machines and AI coding tool traps. It never executes the code it inspects: it reads files and package metadata and writes a `findings.json` report.
 
-**incident_bundle: `ZES-2026-OCT-EMERGENCY-V5.2`**
+It comes in two forms: a Bash CLI (`zes-scan.sh`) and a single-file browser UI (`index.html`). Both use the same IoC database (`rules/ioc.json`).
 
-サプライチェーン攻撃・認証局危殆化・インフラ RCE・AI 開発環境トラップ・AI エージェントのスキルの宣言と実態の乖離（SkillPact 契約、実験的）を、**対象ランタイムを一切起動せず（Zero-Execution）**、静的解析だけで一括検疫する CLI スキャナです。
+> Scanner messages (`detail` in findings.json, the terminal log) and the browser UI are in Japanese. Field names, levels and error codes are ASCII.
 
-> **ゼロ実行原則と内容非読取方針**
-> ZES は検査対象のコード・スクリプト・パッケージを実行しません（`npm install` / `pip install` / 悪性スクリプトの実行は行いません）。検出時もファイル内容は出力せず、**パスとメタ情報（サイズ・mtime・SHA-256）のみ**を示します。検査できなかったモジュールは `errors[]` に記録し、0 件（安全）とは扱いません（fail-closed）。
-> `tests/zero-exec.sh` が `strace` で全 `execve` を監視し、この原則を検証します。
->
-> **アンチフォレンジック検出時の注意**: `noatime` でマウントされた環境では atime が更新されないため、ハニーポット（§13）とアクセス痕跡の調査が機能しません。
+## Quick start
 
-## 構成
+### CLI
 
-| コンポーネント | 状態 |
-|---|---|
-| `zes-scan.sh` — Core CLI Scanner（§1〜§49） | 実装済み |
-| `rules/ioc.json` / `rules/campaigns/*.json` — IoC データベース | 実装済み（値は仕様書からの転記。照合結果は [docs/ioc-verification.md](docs/ioc-verification.md)） |
-| `SKILL.md` — 検知スキル / IoC 抽出モード | 実装済み |
-| `tests/` — フィクスチャ・期待値・`run-tests.sh`・`zero-exec.sh` | 実装済み |
-| `schemas/findings.schema.json` — findings.json の出力契約（JSON Schema 2020-12、strict） | 実装済み（ZET はこれで入力を検証） |
-| `docs/skill-contracts.md` — 判断層・修復層のスキル契約書 | 契約定義済み（ZET 0.1.0 / GER 0.1.0 実装済み。A-1〜A-6 反映） |
-| `index.html` — Web Scanner UI | 実装済み（ブラウザで開くだけで動く単一ファイル。ソースは `ui/`、[設計書](docs/design/ui-design.md) / SVG デザイン [総合](docs/design/ui-overview.svg) / [SkillPact](docs/design/ui-skillpact.svg) / [部品](docs/design/ui-components.svg) に準拠） |
-
-```
-[検知層] ZES（zes-scan.sh / index.html / rules）
-      ↓ findings.json
-[判断層] ZET（Zero-Exec Triage）（影響判定・例外承認・期限付与）
-      ↓ remediation-plan.json
-[修復層] GER（Gated-Exec Remediation）（明示承認後のみ実行）
-```
-
-## 動作要件
-
-- Bash 4 以上（macOS 標準の Bash 3.2 は不可。`brew install bash`）
-- `jq`（推奨。無い場合は grep フォールバック。§48 SBOM と §49 SkillPact は jq 必須。収集脅威インテリジェンス（`rules/ioc.json` の `intel`）を使う照合 — §1（ホスト検査時）/ §7 / §15 / §16 / §20 / §22 / §23 / §30 / §38 / §42 — と §15 の Pipfile.lock / composer.lock 解析も jq が必要です。いずれも jq が無い場合は `errors[]` に `jq_unavailable` を記録し、0 件扱いしません）
-- macOS / Linux。`readlink -f` が無い環境は `realpath` → `cd/pwd` にフォールバック
-
-## クイックスタート
+Requirements: Bash 4 or later (macOS ships Bash 3.2; use `brew install bash`), macOS or Linux, and `jq` (recommended; see [Limitations](#limitations)).
 
 ```bash
-chmod +x zes-scan.sh
-./zes-scan.sh --quick --root .
-./zes-scan.sh --skillpact --root /path/to/skills
+git clone https://github.com/kajisho5/zero-exec-shield
+cd zero-exec-shield
+./zes-scan.sh --quick --root /path/to/project --json > findings.json
 ```
 
-### 引数
-
-| 引数 | 内容 |
-|---|---|
-| `--root <dir>` | 検査ルート（既定 `.`） |
-| `--quick` | §1〜19（既定） |
-| `--standard` | §1〜35 |
-| `--full` | §1〜49 |
-| `--worm` | §15/18/25/45 のみ |
-| `--skillpact` | §49 のみ |
-| `--url <URL>` | §4 の非侵襲 URL チェック（`HEAD` でヘッダのみ取得し、405/501 のときだけ `GET`。リダイレクトは追わない。`Server` / `X-Powered-By` の `PHP/x.y.z` を PHP2Shell の修正版と照合し、該当すれば HIGH「ヘッダ申告版で潜在的に脆弱」。http/https のみ受理） |
-| `--json` | findings.json を標準出力へ（人間向けログは標準エラーへ） |
-| `--skillpact-cache <dir>` | §49 前版比較用の SkillPact 契約の置き場所（ローカルのみ） |
-
-### 環境変数
-
-| 変数 | 内容 |
-|---|---|
-| `ZES_IOC` | ioc.json のパス（既定 `rules/ioc.json`） |
-| `ZES_HOME` | ホーム配下を対象とする検査（§10〜§14 等）の基点（既定 `$HOME`） |
-| `ZES_HOST_CHECKS=0` | ホスト状態検査（ps / lsof / /proc / uname / docker --version / systemctl / mount 等）を無効化 |
-| `ZES_OFFLINE=1` | 外向き通信（§4 `--url`、§6 eMudhra 接続試験）を無効化（`errors[]` に `skipped_offline`） |
-| `ZES_SKILLPACT_CACHE` | `--skillpact-cache` と同じ |
-| `ZES_GIT_TIMEOUT` | §38/§46 の git 呼び出しの打ち切り秒数（既定 60。超過は `errors[]` に `git_timeout`） |
-
-### 出力の文字列（findings.json / 人間向けログ）
-
-- `path` / `detail` / `errors[].reason` は常に valid な UTF-8 JSON です。制御文字（U+0000〜U+001F・U+007F）と C1 制御文字（U+0080〜U+009F）は `\u00XX` でエスケープします（デコードすれば元の文字に戻ります）。
-- ファイル名に不正な UTF-8 バイトがある場合、そのバイトを 1 バイトずつ `\xHH`（4 文字のテキスト）に置き換えた値を `path` に出力し、`errors[]` に `core` / `non_utf8_path:<置換後のパス>` を記録します（実際のファイル名とは異なることを示すため）。
-- `findings[].id` は、出力した（JSON をデコードした）`module|campaign|path|detail` の SHA-256 です（`campaign` / `path` が null のときは空文字列）。
-- 人間向けログでは制御文字を `\xHH`、C1 制御文字を `\u00HH` と表示し、端末エスケープシーケンスをそのまま出力しません。
-- 検査ルート内の FIFO・ソケット・デバイスファイルは開かず、`errors[]` に `special_file:<パス>` を記録します。
-
-### 終了コード
-
-`0` = 完了（`status` が `ok` / `partial`）、`2` = `status: error`、`64` = 引数・環境エラー。重大度による非 0 終了はしません。CI で失敗させる場合は `jq -e '[.findings[] | select(.level=="CRITICAL")] | length == 0'` 等で判定してください。
-
-## Web Scanner UI（index.html）
-
-リポジトリ直下の `index.html` をブラウザで開く（`file://` のままで可）だけで使えます。インストールもサーバーも不要です。
-
-**Web 版:** https://kajisho5.github.io/zero-exec-shield/ （GitHub Pages。main の `index.html` をそのまま配信）
-
-- **通信:** Web 版でも、ページを読み込んだ後の通信はゼロです。CSP の `connect-src 'none'` により、選んだフォルダの内容がブラウザの外に送られることはありません。
-- **配信される版:** 開いた時点の main の版です。特定の版に固定して使う場合や、ネットワークにつながない環境では、`index.html` をダウンロードして `file://` で開いてください。
-
-- **外部通信ゼロ**: JS / CSS / `rules/ioc.json` をすべて 1 ファイルにインライン化しています。CSP は `default-src 'none'; connect-src 'none'`、スクリプトとスタイルはビルド時に計算した SHA-256 だけを許可します（`unsafe-inline` なし）
-- **ファイル内容は判定にのみ使用**: 画面・JSON 出力に出すのはパス・ルール・固定文言・ハッシュだけです。例外は設計書 §13-4 で承認した設定値（MCP の command / args、Actions の `uses:`、拡張のパーミッション名、120 文字まで）
-- **投入方法**: フォルダのドラッグ＆ドロップ、または「フォルダを選択…」（`webkitdirectory`）。テキスト貼り付け判定もできます（内容は再表示しません）
-- **18 タブ**: 総合（重大度サマリ・フィルタ・検索・Blast Radius）/ SkillPact（実験的。宣言と実態の差分を赤表示、署名は「署名あり（未検証）」と表記し安全色を使わない）/ MCP・GitHub Actions・ブラウザ拡張ビューア ほか
-- **JSON 出力**: `schemas/findings.schema.json` 互換の findings.json をダウンロードします（パスは投入フォルダからの相対パスに `/` を前置。`status: partial`、`errors[]` に `ui:host_checks_not_performed` を記録）。CLI の findings.json の読み込み表示もできます
-- **ブラウザで判定できないもの**: プロセス・ネットワーク接続・カーネル・eBPF・マウント・インストール済みツールのバージョンなどのホスト状態は、該当タブに CLI（`./zes-scan.sh --full --json`）の案内を出し、0 件 ＝ 安全とは表示しません
-- **HOME 前提の検査**: ホスト IoC の絶対パス（`/tmp/…`・`/etc/…`・`$TMPDIR/…`）はブラウザでは照合しません。`~/…` のパスと HOME の設定確認（§10 の LaunchAgents・§12 のワクチン 3 点）は、選んだフォルダの直下に `Library/`・`.config/`・`.local/`・`.cache/`・`.ssh/`・シェル履歴のどれかがあり HOME と見なせる場合だけ、そのフォルダを HOME として判定します（CLI の `ZES_HOME` 相当）
-- **動作確認したブラウザ**: CI で Chromium・Firefox・WebKit（Playwright 版）の e2e を実行しています。WebKit では、直下が隠しエントリだけのフォルダ（`.mcp.json` や `.github/` だけ）を読み込めず、該当 2 件の e2e は除外しています。隠しファイルを渡さない挙動が実際の Safari でも起きるかは未確認です。Safari では、隠しファイル（`.mcp.json`・`.github/`・`.claude/` など）が検査から漏れる可能性があります。その場合はドラッグ＆ドロップか CLI で確認してください。0 件の選択は「0 件でした」と通知します
-
-### ビルド（開発者向け）
+The human-readable log goes to stderr and `findings.json` to stdout. Other modes:
 
 ```bash
-cd ui && npm ci && npm run build     # 型チェック → vite build → ../index.html へインライン化 → 静的検査
-npm test                             # Vitest: 判定エンジンの単体テスト（tests/fixtures を CLI と共用）
-PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npm run test:e2e   # Playwright: file:// で起動・外部リクエストゼロ・主要操作
+./zes-scan.sh --full --root /path/to/project --json          # all modules §1-§49
+./zes-scan.sh --skillpact --root /path/to/skills --json      # §49 only (experimental)
+ZES_OFFLINE=1 ZES_HOST_CHECKS=0 ./zes-scan.sh --full --root . --json   # files only: no network, no host state
 ```
 
-- `ui/.npmrc` で `ignore-scripts=true`（依存のインストールスクリプトを実行しない）。依存はすべて `package-lock.json` で版固定
-- `rules/ioc.json` を更新したら `npm run build` で `index.html` を再生成してコミットしてください（UI は ioc.json をビルド時に取り込みます）
-- `scripts/verify-no-network.mjs` が成果物に通信 API・外部 URL・外部読み込みタグが無いこと、CSP がハッシュ方式であること、ソースに `eval` 等が無いことを検査し、違反があればビルドを失敗させます
-
-## 3つの使い方
-
-1. **プロジェクトを開く前**: `./zes-scan.sh --quick --root ./new-project`
-2. **マシン定期健康診断**: cron / launchd で週1 `./zes-scan.sh --full --json > findings.json`
-3. **インシデント発生時**: `--full --json` → Blast Radius（§14/§19）確認 → ローテーション
-
-## 永続防御の仕込み方
-
-- cron / launchd で週1実行
-- CI（GitHub Actions 等）で PR 時に `--quick`、リリース前に `--standard`
-- git hooks（pre-commit / pre-push）
-- `npm install` 前のラッパースクリプト
-- `rules/ioc.json` の月次更新（これがないと陳腐化する）
-
-## キャンペーン別緊急対応表
-
-| キャンペーン | 主な侵害 | 緊急アクション |
-|---|---|---|
-| LiteLLM 1.107.0 | cook.pth/sitecustomize.py | `pip show litellm`、削除、トークンローテーション |
-| TeamPCP / Mini Shai-Hulud | TanStack/Mistral AI/Guardrails AI | OIDCトークン無効化、npm/GitHubトークンローテーション、`/proc/<pid>/mem`監査 |
-| ChainDrop / Keyv | keyv/flat-cache/cacheable系 | `npm install`履歴、`setup.mjs`/`Math_Symbol.js`削除、Bun取得痕跡 |
-| PyPI Oct 2026 | lightning 2.6.2/2.6.3、telnyx 4.87.1/4.87.2 | `pip show`、`_runtime/`削除、`83.142.209.203`通信監査 |
-| Tensorlake 0.5.144 | Shai-Huludワーム | `package-lock.json`照合、削除、トークンローテーション |
-| GhostAction Oct 2026 | 500+アカウント、偽装フォント | ワークフロー新規追加監査、`secrets.*`数確認 |
-| MCP Poisoning/SymJack/Deadbugz/NeighborJack | `.mcp.json`改ざん | `command`/`args`目視、`readlink -f`検査、Claude Code v2.1.129+ |
-| Quasar Linux (QLNX)/LinkPro/VoidLink | eBPF/LD_PRELOADルートキット | `/etc/ld.so.preload`、`bpftool prog list`、PAM確認 |
-| Cursor RCE | CVE-2026-26268/50548、git.exe zero-day | v3.0+（26268 は 2.5、50548 は 3.0 で修正）、リポジトリルート`git.exe`確認 |
-| Hugging Face Jul 2026 | 悪性データセット→クラスタ認証情報 | `trust_remote_code`監査、`subprocess`/`eval`検査、pickle回避 |
-| Sigstore/SLSAバイパス | CVE-2026-22772/22703/39395 | cosign 3.1.3+（2.x は 2.6.5+）、`--certificate-identity`必須化 |
-| コンテナエスケープ | CVE-2026-80521/64564 | カーネル更新、seccompプロファイル、特権コンテナ監査 |
-| Djinn/OmniStealer | 開発者・AI認証情報窃取 | 認証情報ローテーション、不審プロセス監査 |
-| OVHcloud CLI 2026-10-19 | GlassWorm経由でGitHubキー窃取 | 再インストール、GitHubトークンローテーション |
-| GitLab CVE-2026-110264 | 未認証 RCE（CVSS 10.0、7.0 以降の全版） | 18.11.13 / 19.0.10 / 19.1.9 / 19.2.9 / 19.3.6 / 19.4.3 / 19.5.1 以上へ更新（18.10 以前は 18.11.13 以降へ移行） |
-| PHP2Shell | CVE-2026-109618/109619（認証不要 RCE、悪用試行あり） | 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12 以上。8.1 以前はサポート版へ移行 |
-| eMudhra 中間 CA 侵害 | 危殆化 CA を OS・ランタイム・pip/Go/Rust 等が信頼 | ca-certificates・certifi・Node.js・Java・Docker Desktop 等を修正版へ、`emSign ECC Root CA G3` の除去確認 |
-| 2026-06〜10 収集インテル | 悪性 npm/PyPI/crates/gems、侵害 Actions、インフォスティーラー、AI ツール/MCP/拡張 | 該当キャンペーンの一次情報に従う（docs/ioc-verification.md「5.2.2 で追加した収集インテル」） |
-| SkillPact 乖離（§49、実験的） | スキルのコードが契約（skill.contract.json）で宣言していない効果を持つ | スキルの利用停止、作者への確認、契約の修正 |
-| SkillPact 権限拡大（§49、実験的） | 前版から major を上げずに権限が拡大 | 前版との差分レビュー、作者への確認、必要ならスキル停止 |
-
-> 表と `rules/ioc.json` の値は、一次情報で確認できた相違を 5.2.1 で反映済みです（[docs/ioc-verification.md](docs/ioc-verification.md) の「5.2.1 での反映」）。確認できなかった値は注記付きで仕様書の値のままです。
-
-## Blast Radius 手順
-
-```
-検出（ZES）→ シークレット一覧提示 → ローテーション → 再構築
-```
-
-- 対象: `~/.ssh`, `~/.aws`, `~/.config/gcloud`, `~/.claude`, `~/.cursor`, `~/.config/gh`, `~/.docker/config.json`, `~/.npmrc`, `~/.pypirc`, `~/.kube/config`, `~/.vault-token`, `~/.git-credentials`, `~/.netrc`, `~/.config/heroku/`, `~/.terraform.d/credentials.tfrc.json`, `~/.config/op/`
-- 存在のみ列挙（`stat` でサイズ・mtime のみ、内容は読まない）。§14 が前半 9 件、§19 が後半 7 件を担当
-
-## §49 スキルの宣言と実態の照合（SkillPact 契約、**実験的**）
-
-AI エージェントのスキル（Claude Code・Cursor・Codex などが読み込む `SKILL.md` のフォルダ）が**宣言した権限と、そのコードが実際にしていることが一致するか**を、何も実行せずに確かめます。
-
-- 宣言は [SkillPact](https://github.com/kajisho5/skillpact) 形式の `skill.contract.json`（`SKILL.md` と同じフォルダ）から読みます。SkillPact は、スキルが起こしうる副作用を 6 種類 — `read`（ファイルを読む）/ `write`（書く・消す）/ `network`（他のホストと通信）/ `exec`（他のプログラムを実行）/ `spend`（お金がかかる）/ `send`（人にメール・投稿・メッセージを送る）— に分け、それぞれ `none` / `scoped`（範囲を限定）/ `any` で宣言する契約形式です。ZES は SkillPact 0.8（`contract_version` 0.1〜0.8）に対応します。
-- **SkillPact を使っていないスキルは対象外です。** 契約がないことを問題として扱いません（影響の大きい効果 — exec / network / spend / send — がコードに見える場合だけ、参考として INFO を 1 件出します）。契約付きスキルの中にある別の `SKILL.md`（例: `.claude/skills/*`）も報告しません。
-- 実験的な機能です。検出ルール・出力は今後変わる可能性があります。
-
-### ZES がすること・しないこと
-
-| する | しない |
+| Option | Meaning |
 |---|---|
-| 契約を JSON として読み、SkillPact 仕様の一部（I-JSON、構造、整合性、`integrity.files` のハッシュと網羅性）を検査 | スキル・テストの実行（L2 の確認） |
-| コードを静的に読み、6 効果のどれが見えるかを推定し、契約の宣言と比べる | 署名の検証（`signed: true` は「署名欄あり・**未検証**」） |
-| 同じスキルの前版の契約と比べ、major を上げない権限拡大を検出 | ポリシーの allow / ask / deny の評価（TODO。構造の検査のみ） |
+| `--root <dir>` | Directory to scan (default `.`) |
+| `--quick` | §1-§19 (default) |
+| `--standard` | §1-§35 |
+| `--full` | §1-§49 |
+| `--worm` | §15, §18, §25, §45 only |
+| `--skillpact` | §49 only |
+| `--url <URL>` | §4 header check of one http/https URL: `HEAD` (and `GET` only on 405/501), no redirects followed. A `PHP/x.y.z` in `Server` / `X-Powered-By` is compared with the PHP2Shell fixed versions |
+| `--json` | Write findings.json to stdout |
+| `--skillpact-cache <dir>` | Local directory of earlier SkillPact contracts for the §49 version comparison |
 
-- `level` は契約の自己申告を使いません。ZES の部分検査に合格した契約だけを **「L1 相当」** とし、L2 / L3 は判定しません。**L3 であっても「安全」を意味しません**（SkillPact 仕様 §16.1）。署名の有無で重大度を上げ下げしません。
-- 正式な判定は SkillPact の参照実装（`skillpact validate` / `skillpact conformance`）で行ってください。ZES の結果は「まず見るべき乖離」を示すものです。
+| Environment variable | Meaning |
+|---|---|
+| `ZES_IOC` | Path to the IoC database (default `rules/ioc.json` next to the script) |
+| `ZES_HOME` | Home directory used by home-based checks such as §10-§14 (default `$HOME`) |
+| `ZES_HOST_CHECKS=0` | Skip host state checks (processes, open connections, `/proc`, kernel, version probes of installed tools) |
+| `ZES_OFFLINE=1` | Skip all outbound connections (§4 `--url`, §6 eMudhra probe); recorded as `skipped_offline` |
+| `ZES_SKILLPACT_CACHE` | Same as `--skillpact-cache` |
+| `ZES_GIT_TIMEOUT` | Timeout in seconds for git calls in §38/§46 (default 60); recorded as `git_timeout` |
 
-### 検出ルール
+### Browser UI
 
-| 検出条件 | レベル | campaign |
+Open `index.html` in a browser. It works from `file://`; there is nothing to install and no server.
+
+- Hosted copy: https://kajisho5.github.io/zero-exec-shield/ (GitHub Pages, serves `index.html` from `main`)
+- To pin a version or to work without a network, download `index.html` and open it locally.
+
+Drop a folder on the page (or use the folder picker). The scan runs in the browser and the page makes no network requests after it has loaded. You can also paste text for a check, export a findings.json, and load a findings.json produced by the CLI.
+
+The UI has 18 tabs: an overview with severity summary, filters and search, a SkillPact tab, MCP / GitHub Actions / browser extension viewers, and tabs per campaign or topic. Checks that need the host (processes, connections, kernel, mounts, installed tool versions) cannot run in a browser; those tabs point to the CLI instead of showing "0 findings".
+
+## What it checks
+
+ZES has 49 modules (§1-§49). Each finding has a level: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW` or `INFO`.
+
+| Group | Modules | Examples |
 |---|---|---|
-| 契約のないスキルで exec / network / spend / send がコードに見える（参考） | INFO | skillpact-undeclared |
-| 契約が I-JSON として不正（重複キー・±(2^53−1) 外の数値・深さ 64 超・孤立サロゲート・不正 UTF-8）。`errors[]` にも記録 | MEDIUM | skillpact-invalid |
-| 未対応の `contract_version`（0.1〜0.8 以外。0.x の未知の minor も含む、仕様 §17） | MEDIUM | skillpact-invalid |
-| ZES の部分検査で不合格（`SCHEMA` / `DUP_CAPABILITY` / `UNDECLARED_EFFECT` / `SCOPE_EMPTY` / `SCOPE_TRAVERSAL` / `SCOPE_WIDENED` / `UNKNOWN_REQUIREMENT` / `UNKNOWN_FEATURE_KIND` / `ENTRY_MISSING` / `NAME_MISMATCH` / `TEST_UNKNOWN_CAPABILITY` / `TEST_UNDECLARED_NETWORK` / `UNCONFIRMED_DRAFT` / `INTEGRITY_*` / `DUP_SIGNATURE`） | MEDIUM | skillpact-invalid |
-| コードに exec / network / spend / send が見えるが、契約の該当 `permissions.<効果>.level` が `none` | HIGH | skillpact-divergence |
-| コードが機密ファイル（`~/.ssh`・`.env`・認証情報など）を読む兆候があるが、契約の read がその範囲を含まない | MEDIUM | skillpact-divergence |
-| コードに作業領域外への永続的な書き込み（crontab・.bashrc・authorized_keys など）が見えるが、契約の write が `$WORKDIR` / `$OUTPUT` / `$TMPDIR` 内に限られる（または write が `none`）／ファイル書き込みが見えるが write が `none` | MEDIUM | skillpact-divergence |
-| 同じスキル名の前版から権限が広がったのに `skill.version` の major が上がっていない（仕様 §17。0.x は minor を major 扱い）。exec / network / spend / send の拡大は HIGH、それ以外は MEDIUM。作者署名鍵が前版と同じかどうかを併記（未検証） | HIGH / MEDIUM | skillpact-account-compromise |
-| SkillPact ポリシー（`policy_version` と `defaults` を持つ JSON、ファイル名は問わない）が policy-v0.8-r2 の構造に合わない | MEDIUM | skillpact-invalid |
+| Package supply chain | §2, §9, §15, §25, §44, §45 | Known malicious or vulnerable versions in npm / yarn / pnpm / pip / Poetry / uv / PDM / Pipfile / Cargo / Go / Gemfile / composer lockfiles and installed `node_modules`, `dist-info`; `.pth` and `sitecustomize.py` startup hooks; suspicious install scripts; typosquats of payment SDKs; infostealer traces |
+| Infrastructure and runtime CVEs | §3, §4, §5, §6, §16, §23 | GitLab, PHP (PHP2Shell), Python, the eMudhra intermediate CA (OS trust store, runtimes, pinned versions), CI/CD servers by image tag, container runtimes and kernel |
+| AI coding tools and MCP | §7, §17, §20, §32, §36, §37, §41 | Invisible / BiDi characters in AI and editor config, `runOn: folderOpen`, dangerous MCP `command`/`args`, SymJack symlinks, agent hooks, Hugging Face `trust_remote_code`, pickle model files |
+| CI/CD and git | §21, §22, §38, §46 | `pull_request_target` pwn requests, actions not pinned to a SHA, mass-planted workflows, git history provenance |
+| Containers, cloud and signing | §8, §28, §29, §39, §43, §48 | `.env` and private keys, `docker.sock` mounts, unpinned base images, Kubernetes `hostPath`, metadata service / IMDSv1, cosign versions and `cosign verify` / `slsa-verifier` flags, SBOM vs lockfile mismatch |
+| Host persistence and anti-forensics | §1, §10, §11, §12, §13, §30, §31, §33, §35, §40 | Compromise markers and process signatures, LaunchAgents / systemd / cron, `LD_PRELOAD` and eBPF, SSH key permissions, `ignore-scripts` and pip hardening, `noatime`, history tampering |
+| Network, tooling and extensions | §18, §24, §26, §27, §34, §42 | C2 domains and IPs, browser extension permissions and ownership changes, git `core.fsmonitor`, build hooks (`build.rs`, `go:generate`, `cmdclass`), proxy and hosts settings |
+| Credentials (Blast Radius) | §14, §19, §47 | Lists which credential files exist (`~/.ssh`, `~/.aws`, `~/.npmrc`, ...) by `stat` only, plaintext tokens in history and CI files |
+| AI agent skills (experimental) | §49 | Compares a skill's [SkillPact](https://github.com/kajisho5/skillpact) contract with what its code appears to do |
 
-`scoped` の宣言は「宣言あり」として扱います（範囲の細かな照合は read の機密ファイルと write の作業領域外のみ）。§49 は CRITICAL を出しません。
+The IoC values come from the ZES v5.2 Master Specification. Their check against primary sources is recorded in [docs/ioc-verification.md](docs/ioc-verification.md).
 
-#### 実態の推定と効果の対応
+### §49 SkillPact contracts (experimental)
 
-| ZES の検出 | SkillPact の効果 | 根拠 |
-|---|---|---|
-| `subprocess` / `child_process` / `Command::new` 等、シェルのコードブロック、スクリプトファイル、`allowed-tools: Bash` | exec | 仕様 §6「run other programs」 |
-| `curl` / `requests` / `fetch(` 等、`WebFetch` / `WebSearch` | network | §6「talk to other hosts」 |
-| ファイル書き込み API・リダイレクト・`Write` / `Edit` | write | §6「create, change, delete」 |
-| 永続化（crontab・launchctl・.bashrc・authorized_keys 等） | write（作業領域外） | §13.3 の persistence（`$WORKDIR`/`$OUTPUT`/`$TMPDIR` 外への write） |
-| 機密ファイル（`~/.ssh`・`.aws/credentials`・`.netrc`・`.env`・keychain 等） | read（機密範囲） | §13.3 の exfiltration（sensitive scope の read）。範囲の判定は参照実装の SENSITIVE パターン |
-| 課金 API（stripe 等） / メール・Slack・Discord・Twilio 等への送信 | spend / send | §6 |
+§49 reads a skill's `skill.contract.json` in the SkillPact 0.8 format (`contract_version` 0.1-0.8) and compares the declared `permissions` (`read`, `write`, `network`, `exec`, `spend`, `send`) with effects inferred from the code by static patterns.
 
-環境変数（`API_KEY`、`os.environ` 等）の参照は効果として扱いません（SkillPact では `requirements.env[]` で宣言する要件で、副作用ではないため）。「長時間実行」は SkillPact に対応する効果がないため扱いません。
+- Undeclared `exec`, `network`, `spend` or `send` is HIGH. A read of sensitive files or a write outside the workspace that the contract does not cover is MEDIUM. Permissions widened from an earlier version without a major version bump (SkillPact spec §17) are HIGH or MEDIUM.
+- ZES performs a partial check of the contract (I-JSON, structure, consistency, `integrity.files` hashes and coverage). Failures are MEDIUM `skillpact-invalid`. §49 never reports CRITICAL.
+- ZES does not verify signatures, does not run tests, and does not evaluate allow/ask/deny policies. `signed: true` means a signature field is present, not verified. The `level` field is `"L1"` only when ZES's partial check passes; it is not a SkillPact conformance result. Use the SkillPact reference tools (`skillpact validate`, `skillpact conformance`) for that.
+- Skills without a contract are not compared. If such a skill shows `exec`, `network`, `spend` or `send`, ZES adds one INFO finding.
 
-### 前版との比較
+Rules and output of §49 may change.
 
-- 前版は ROOT 内の `skill.contract.json` と `--skillpact-cache <dir>`（`ZES_SKILLPACT_CACHE`）内の契約から、同じ `skill.name` で `skill.version` が小さい最大のものを使います。レジストリからの取得は行いません（通信しない）。
-- 作者の同一性は作者署名（`role: author`）の鍵（`ed25519:…` / `sigstore:<issuer>|<identity>`）で比べます。署名は検証していないため、参考情報です。
+## Safety model
 
-### TODO
+- **Zero execution.** ZES does not run files from the scanned tree and does not start their runtimes (`npm install`, `pip install`, `node`, `python` on target code). Package versions come from lockfiles and metadata, Go's version from `GOROOT/VERSION`, npm proxy settings from `.npmrc`.
+- **Fixed probes only.** With host checks on, ZES starts a fixed list of installed tools with version arguments only (for example `python3 -I -S -V`, `php -n -v`, `docker --version`, `git --version`). Probes run under `env -i` with an empty temporary `HOME`, and binaries inside the scan root or in `/tmp`, `/var/tmp`, `/dev/shm` are never started. git runs against a ZES-owned shadow `GIT_DIR`, so the scanned repository's `.git/config` is never read by git, and every call has a timeout.
+- **Verified by test.** [`tests/zero-exec.sh`](tests/zero-exec.sh) runs a full scan under `strace` and fails on any `execve` of a fixture file, any target runtime, or any probe outside the allowed arguments. Two fixtures are canaries that would create `/tmp/zes-canary-*` if executed.
+- **No file contents in output.** Findings carry a path, a rule message and a SHA-256 (`evidence_hash`). Some messages include a short extracted value such as a version, image tag or HTTP header. Secrets are never printed.
+- **Fail closed.** A module that could not be checked (missing `jq`, unparsable lockfile, timeout, offline) is recorded in `errors[]` and the scan `status` becomes `partial`. An empty `findings[]` with a non-empty `errors[]` does not mean "clean".
+- **Network.** The CLI connects out only for `--url` and for the §6 eMudhra probe (HTTPS requests to the test hosts listed in `rules/ioc.json`). `ZES_OFFLINE=1` turns both off.
+- **Browser UI.** JavaScript, CSS and `rules/ioc.json` are inlined into one file. The Content Security Policy is `default-src 'none'; connect-src 'none'`, with scripts and styles allowed only by SHA-256 hashes computed at build time (no `unsafe-inline`). The build fails if [`ui/scripts/verify-no-network.mjs`](ui/scripts/verify-no-network.mjs) finds network APIs, external URLs or external loads in the output. File contents are used only for matching; the page shows paths, rules, fixed text and hashes, plus a few configuration values capped at 120 characters (MCP `command`/`args`, Actions `uses:`, extension permission names).
 
-- ポリシーの allow / ask / deny 評価（仕様 §13: ルールの範囲照合、`never_auto_allow_any`、`min_contract_version`、`require_signature`）は未実装です。現在は構造の検査のみで、`skillpact.policy_decision` は常に `null`、`l2_tested` は常に `false` です。判定には `skillpact policy-check` を使ってください。
-- 署名の検証、`FM_NAME_DIR`（ディレクトリ名との一致。チェックアウト先の名前で誤検知するため対象外）、`BAD_SUBSCHEMA`、`SIGNATURE_*` は扱いません。
+## Output format
 
-### 出典・ライセンス
-
-SkillPact © SEVENTHWELL (shogo kajiyama), https://github.com/kajisho5/skillpact — 仕様の文章は CC BY 4.0、スキーマと実装は Apache-2.0。ZES は SkillPact の形式を読む独立した実装で、SEVENTHWELL による確認・承認を受けたものではありません。`tests/fixtures/skillpact-*` の一部は同リポジトリの conformance ケースと例を複製したものです（[tests/fixtures/skillpact-README.md](tests/fixtures/skillpact-README.md)）。
-
-## 出力スキーマ（findings.json）
+`findings.json` follows [`schemas/findings.schema.json`](schemas/findings.schema.json) (JSON Schema 2020-12, no additional properties).
 
 ```json
 {
@@ -244,71 +120,90 @@ SkillPact © SEVENTHWELL (shogo kajiyama), https://github.com/kajisho5/skillpact
   "status": "ok|partial|error",
   "findings": [
     {
-      "id": "sha256:<module|campaign|path|detail の SHA-256>",
+      "id": "sha256:<SHA-256 of module|campaign|path|detail>",
       "level": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
       "module": "§49",
       "campaign": "skillpact-divergence",
       "path": "/abs/path",
-      "detail": "…",
-      "evidence_hash": "sha256:<通常ファイルはその SHA-256、それ以外は detail の SHA-256>",
-      "skillpact": { "…": "§49 の finding のみ" }
+      "detail": "...",
+      "evidence_hash": "sha256:<SHA-256 of the file (over 100 MB: of path, size and mtime), or of detail when there is no regular file>",
+      "skillpact": { "...": "§49 findings only" }
     }
   ],
   "errors": [{ "module": "§6", "reason": "skipped_offline" }]
 }
 ```
 
-- `findings[].id` は内容から決定的に生成（再スキャンで同一なら同一 ID）。同一 ID は 1 回だけ出力
-- `campaign` はキャンペーンに紐づかない一般検査では `null`
-- `errors[]` の `reason`: `skipped_offline` / `network_timeout` / `jq_unavailable` / `module_failed`（モジュール異常終了）/ `git_log_failed` / `lockfile_parse_failed:<path>` / `policy_parse_failed:<path>` / `unscannable_path_newline`（改行を含むパス名）/ `incident_bundle_mismatch:<値>` 等
-- 判断層は findings の `id` / `level` / `module` を改変しないこと（[docs/skill-contracts.md](docs/skill-contracts.md)）
+- `id` is deterministic: the same finding gets the same id on every scan, and each id appears once.
+- `campaign` is `null` for general checks. `path` is an absolute path or `null` (host findings without a file).
+- `errors[].reason` examples: `skipped_offline`, `network_timeout`, `jq_unavailable`, `module_failed`, `lockfile_parse_failed:<path>`, `git_timeout`, `special_file:<path>`, `non_utf8_path:<path>`, `incident_bundle_mismatch:<value>`.
+- All strings are valid UTF-8. Control characters are escaped as `\u00XX`. Invalid UTF-8 bytes in a file name are written as the text `\xHH` and the path is also recorded in `errors[]` as `non_utf8_path`. FIFOs, sockets and device files are not opened and are recorded as `special_file`.
+- Findings exported by the browser UI use paths relative to the dropped folder with a leading `/`, always have `status: partial`, and record `ui:host_checks_not_performed` in `errors[]`.
 
-## 実装メモ（仕様からの補足・解釈）
+The guarantees that downstream tools may rely on are listed in section 9 of [docs/skill-contracts.md](docs/skill-contracts.md).
 
-仕様に明記がなく実装で決めた点です。変更が必要ならご指示ください。
+## Exit codes
 
-- **オフライン実行と ZET（判断済み）**: `--offline`（`ZES_OFFLINE=1`）では §6 の eMudhra 接続テストを行わず、`errors[]` に `skipped_offline` を記録します。そのため、ZET の不変条件 I-10 によって、§6 の検出は静的に確定したもの（OS の ca-certificates、Node.js / Java の版固定など）も含めて held になり、修復計画には進みません。安全側に倒すため、この動作は意図どおりとしています（2026-10-22 決定）。修復まで進める場合は、オンラインで再スキャンしてください
-- **モジュール間の重複**: 仕様は複数の § で同じ対象を挙げています。同じ指標を二重に報告しないよう、次のように担当を分けました。
-  - `runOn: folderOpen` → §7 / エージェントフック（`.claude/settings.json` の hooks）→ §17
-  - `/etc/ld.so.preload`・シェル設定の `LD_PRELOAD` → §31 / ロード系スクリプト・eBPF・カーネル taint → §40
-  - `noatime` → §13（§35 は参照のみ）
-  - `docker cp` の使用・TeamCity・Artifactory → §16 / `docker --version`・`uname -r`・特権コンテナ → §23
-  - `trust_remote_code=True` → §36 / pickle 系拡張子・`weights_only=False`・`--extra-index-url` → §32
-  - ブラウザ拡張の権限・`update_url` → §24 / 既知名・バージョン間の権限昇格（所有権移転）→ §42
-  - Bun 取得: `package.json` 等 → §15 / JS・Python コード → §45
-  - 既知タイポスクワット名 → §15 `check_lockfile_versions` / 非公式レジストリ・Git ソース → §9
-- **ゼロ実行のための置き換え**: `npm config get proxy`（§34）は npm（node）を起動するため、`.npmrc` を静的に読む方式にしました。`go version`（§6）は telemetry 子プロセスを起動するため、`GOROOT/VERSION` を読みます。`python3` は `-I -S -V`、`php` は `-n -v` のみ起動します。検査ルート内・一時領域にあるバイナリは起動しません。
-- **git の呼び出し**（§38/§46）: 検査対象リポジトリの設定（`core.fsmonitor` / `gpg.program` / `core.sshCommand` 等）経由でコマンドが起動されないよう、危険な設定を無効化して実行します。
-- **ZES 自身の除外**: `rules/` や `tests/` は IoC 文字列を含むため、検査ルートが ZES の外側にある場合は ZES ディレクトリを走査対象から除外します。
-- **ネットワーク IoC の無害化**: §13 の運用ルールに合わせ、ioc.json のドメイン・IP・URL はすべて `[.]` / `hxxp` 形式で格納し、照合時に戻します（仕様書の表記は一部が未無害化でした）。
-- **GitHub Actions（§21）**: PR の head を checkout する pwn request（`ref: ${{ github.event.pull_request.head.sha }}` 等）を CRITICAL、`pull_request_target + actions/checkout(refなし) + secrets` を HIGH にしています（5.2.1 で CRITICAL から変更。ref なし checkout はベースブランチを取得するため、危険度は後続ステップ次第）。
-- **既定の重大度**: npx/uvx の MCP command は普及しているため MEDIUM、curl/wget/bash -c/powershell -enc/node -e は HIGH にしています。
-- **悪用された正規インフラ**（§18）: `seed1/seed2.getsession.org`（Session）と Ethereum RPC（nodereal / getblock / llamarpc）は、名前の出現だけでは侵害と断定できないため MEDIUM で報告します（`rules/ioc.json` の `legit_infra`）。
-- **カーネル**（§23）: upstream の修正版と `uname -r` を比べます。ディストリビューションのバックポートは判定できないため、HIGH の結果は各ディストリのアドバイザリで確認してください。
+| Code | Meaning |
+|---|---|
+| `0` | Scan finished, `status` is `ok` or `partial` (also `--help`) |
+| `2` | `status` is `error` |
+| `64` | Invalid arguments or environment (unknown option, `--root` not a directory, Bash older than 4, unreadable `rules/ioc.json`) |
 
-## テスト
+ZES does not exit non-zero because of findings. To fail a CI job on CRITICAL findings:
 
 ```bash
-tests/run-tests.sh            # IoC DB 検証・campaign 同期・32 フィクスチャ照合・横断チェック
-tests/run-tests.sh --update   # 期待値の再生成（差分は必ず目視レビュー）
-tests/run-tests.sh --sync-campaigns   # rules/campaigns/*.json を ioc.json から再生成
-tests/zero-exec.sh            # strace で execve を監視し、フィクスチャ・対象ランタイムの実行ゼロを確認（Linux）
+./zes-scan.sh --quick --root . --json > findings.json
+jq -e '[.findings[] | select(.level == "CRITICAL")] | length == 0' findings.json
 ```
 
-- 期待値（`tests/expected/*.json`）は level / module / campaign / フィクスチャ相対パスで照合します
-- フィクスチャは無害なダミーです。`chaindrop/setup.mjs` と `litellm/site-packages/cook.pth` は、万一実行された場合に `/tmp/zes-canary-*` を作るカナリアで、`zero-exec.sh` がその不在を確認します
+To also fail on an incomplete scan, check `jq -e '.status == "ok"'`.
 
-## IoC 更新フロー
+## Limitations
 
-1. 検知（ブログ / CVE / X / GitHub Advisory）
-2. 抽出（`SKILL.md` 抽出モード）
-3. 検証（`tests/fixtures/` に再現フィクスチャ追加、一次情報との照合）
-4. 投入（`rules/ioc.json` 追記 → `tests/run-tests.sh --sync-campaigns`、`incident_bundle` 更新）
-5. 回帰（`tests/run-tests.sh` / `tests/zero-exec.sh`）
-6. リリース（`CHANGELOG.md`、`incident_bundle` バンプ）
+- **Static heuristics.** Detection is pattern and version matching. Expect false positives and missed cases. A clean result is not proof that a machine or project is safe.
+- **IoC data ages.** `rules/ioc.json` is a snapshot (incident bundle `ZES-2026-OCT-EMERGENCY-V5.2`). It needs regular updates; values that could not be confirmed against primary sources are marked in [docs/ioc-verification.md](docs/ioc-verification.md).
+- **Distribution backports.** Kernel, tool and PHP versions are compared with upstream fixed versions. Distribution packages often carry backported fixes, so these results are capped at HIGH and need checking against the vendor advisory. PHP from dpkg is compared with vendor fixed versions; on RHEL-like systems the rpm database cannot be read statically, so ZES only prints a notice.
+- **`jq` is needed for full coverage.** Without it ZES falls back to grep for some checks; §48, §49, the collected-intel matches and some lockfile formats are then recorded as `jq_unavailable`.
+- **Host checks read the live system.** They use `ps`, `lsof`, `/proc` and the version probes above. Set `ZES_HOST_CHECKS=0` when scanning only a directory.
+- **`noatime`.** On filesystems mounted with `noatime`, the access-time checks of §13 (honeypot) and access traces do not work.
+- **Browser UI.** It cannot see host state. A symlink arrives in the browser as a 0-byte file, so the SymJack check differs from the CLI (HIGH instead of CRITICAL). In WebKit, folders whose top level holds only hidden entries (`.mcp.json`, `.github/`) cannot be read; Safari may drop hidden files. Use drag and drop or the CLI in that case.
+- **§49 is experimental and partial**, as described above.
 
-運用ルール: `campaign` 必須（孤立 IoC 禁止）、`bad_versions` / `safe_version` 両方記載、ネットワーク IoC は `[.]` 形式、ハッシュは SHA-256 のみ、`packages[]` は 1 エントリ 1 行。
+## Related tools
 
-## ライセンス
+ZES is the detection layer of three tools. The interface between them is defined in [docs/skill-contracts.md](docs/skill-contracts.md).
 
-[Apache License 2.0](LICENSE)。脆弱性の報告は [SECURITY.md](SECURITY.md) を参照してください。
+| Layer | Tool | Input / output |
+|---|---|---|
+| Detection | ZES (this repository) | Writes `findings.json`; read-only |
+| Triage | ZET, Zero-Exec Triage: [kajisho5/zero-exec-triage](https://github.com/kajisho5/zero-exec-triage) | Reads `findings.json`, decides remediate / exception / defer, writes `remediation-plan.json` |
+| Remediation | GER, Gated-Exec Remediation: [kajisho5/gated-exec-remediation](https://github.com/kajisho5/gated-exec-remediation) | Reads an approved `remediation-plan.json`, dry-run first, applies only allow-listed actions |
+
+[`SKILL.md`](SKILL.md) lets an AI agent run ZES as a read-only detection skill. It also describes how to extract IoCs from new threat reports into `rules/ioc.json`.
+
+## Development
+
+```bash
+tests/run-tests.sh                   # IoC database checks, campaign sync, fixture expectations
+tests/run-tests.sh --sync-campaigns  # regenerate rules/campaigns/*.json from rules/ioc.json
+tests/zero-exec.sh                   # strace execve check (Linux, needs strace)
+
+cd ui && npm ci && npm run build     # type check, build, inline into ../index.html, static network check
+npm test                             # Vitest, shares tests/fixtures with the CLI
+npm run test:e2e                     # Playwright, from file://
+```
+
+- Fixtures are harmless stand-ins. Expected results live in `tests/expected/`.
+- `ui/.npmrc` sets `ignore-scripts=true`, and dependencies are pinned in `package-lock.json`.
+- After changing `rules/ioc.json`, rebuild `index.html`; CI fails if the committed file differs from a fresh build.
+- The original UI design draft (in Japanese, written before implementation; its §49 parts predate the SkillPact 0.8 rework): [docs/design/ui-design.md](docs/design/ui-design.md).
+- Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## License and credits
+
+ZES is licensed under the [Apache License 2.0](LICENSE). To report a vulnerability in ZES, see [SECURITY.md](SECURITY.md).
+
+- **SkillPact.** §49 reads the SkillPact 0.8 contract format, https://github.com/kajisho5/skillpact. SkillPact © SEVENTHWELL (shogo kajiyama); the specification text is licensed under CC BY 4.0, the schemas and code under Apache-2.0. ZES implements a partial check of the unmodified format and is not a SkillPact conformance tool; its results are not a SkillPact level and are not an endorsement by SEVENTHWELL. Some `tests/fixtures/skillpact-*` files are copies of SkillPact conformance cases and examples ([tests/fixtures/skillpact-README.md](tests/fixtures/skillpact-README.md)).
+- **PHP2Shell data.** The PHP2Shell fixed versions and the Debian / Ubuntu / RHEL package data in `rules/ioc.json` (`php2shell_distro`), and the version judgement in §4, are derived from [openai/php2shell-checker](https://github.com/openai/php2shell-checker) (Apache-2.0) and the vendor advisories listed there.
+- **Review process.** Our bug-hunting rounds referred to the methodology of [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill) (MIT), such as independent verification of each finding. No code from it is included.
