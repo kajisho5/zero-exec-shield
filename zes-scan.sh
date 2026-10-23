@@ -3588,6 +3588,17 @@ emit_json() {
   printf ']}\n'
 }
 
+# findings の id を一意にする（ZET は id の重複した入力をまとめて拒否する）。
+# emit() の SEEN_IDS はモジュールごとのサブシェルの中でしか効かず、正規形（zes_enc）は単射ではない（"\xHH" という
+# 文字列のパスと不正なバイト 0xHH のパスが同じ値になる）ため、ここで最初の 1 件だけを残し、落とした分を errors[] に記録する
+dedup_findings() {
+  local tmp="$TMP_DIR/findings.dedup" dup="$TMP_DIR/findings.dupids" id
+  LC_ALL=C awk -v dup="$dup" '{ id = substr($0, 8, 71) } seen[id]++ { print id > dup; next } { print }' "$FINDINGS_FILE" >"$tmp" || return 0
+  mv -f "$tmp" "$FINDINGS_FILE"
+  [ -s "$dup" ] || return 0
+  while IFS= read -r id; do record_error "core" "duplicate_finding_id:$id"; done <"$dup"
+}
+
 main() {
   local ib; ib="$(read_ioc '.incident_bundle')"
   if [ "$ib" != "$INCIDENT_BUNDLE" ]; then
@@ -3601,6 +3612,7 @@ main() {
     # モジュールはサブシェルで実行し、異常終了（set -u 等）を module_failed として記録する（fail-closed）
     ( "check_s$n" ) || record_error "§$n" "module_failed"
   done
+  dedup_findings
   local status="ok"
   [ -s "$ERRORS_FILE" ] && status="partial"
   [ "$FATAL" -eq 1 ] && status="error"

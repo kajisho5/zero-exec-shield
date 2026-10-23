@@ -116,6 +116,7 @@ for e in "$EXP"/*.json; do
       (.findings[] | (keys - ["skillpact"]) as $k | select($k != $fk) | "finding keys: \($k)"),
       (.findings[] | select(has("skillpact")) | .skillpact | keys | select(. != $sk) | "skillpact keys: \(.)"),
       (.findings[] | select((.id | test("^sha256:[0-9a-f]{64}$")) | not) | "bad id: \(.id)"),
+      ([.findings[].id] | group_by(.) | map(select(length > 1) | "duplicate id: \(.[0]) x\(length)") | .[]),
       (.findings[] | select(.level as $l | ["CRITICAL","HIGH","MEDIUM","LOW","INFO"] | index($l) | not) | "bad level: \(.level)"),
       (.findings[] | select(.path != null and (.path | startswith("/") | not)) | "relative path: \(.path)"),
       (if (.status as $s | ["ok","partial","error"] | index($s)) then empty else "bad status" end) ] | .[]' "$TMP/out.json")"
@@ -265,6 +266,15 @@ PY
 else
   printf '  SKIP 不正 UTF-8 パスの JSON 検証（python3 が無い）\n'
 fi
+# 正規形の衝突: "\xfe" という 4 文字の名前と不正なバイト 0xFE の名前は同じ path・id になる。id は一意に保ち、
+# 落とした重複は errors[] に duplicate_finding_id として記録する（ZET は id の重複した入力を拒否する）
+mkdir -p "$TMP/collide/a"$'\xfe' "$TMP/collide/a\xfe"
+for d in "$TMP/collide/a"$'\xfe' "$TMP/collide/a\xfe"; do cp "$FIX/mcp/.mcp.json" "$d/"; done
+run_scan "$TMP/collide" quick "$FIX/_home" | jq -e '([.findings[].id] | length) == ([.findings[].id] | unique | length)
+  and ([.errors[] | select(.module == "core" and (.reason | test("^duplicate_finding_id:sha256:[0-9a-f]{64}$")))] | length >= 1)
+  and .status == "partial"' >/dev/null \
+  && ok "正規形が衝突するパスでも id は一意、落とした重複は errors[] に duplicate_finding_id" \
+  || ng "正規形が衝突するパスで id が重複、または errors[] に記録されていません"
 if grep -q $'\033' "$TMP/names.log"; then ng "人間向けログに ESC（端末エスケープ）がそのまま出力されています"
 else ok "人間向けログの制御文字を \\xHH で表示（端末エスケープ注入なし）"; fi
 # ZES_HOME は実パスへ正規化（相対パス・末尾スラッシュ・存在しないディレクトリ）
