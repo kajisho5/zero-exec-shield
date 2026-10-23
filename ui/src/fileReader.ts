@@ -41,11 +41,13 @@ function looksBinary(bytes: Uint8Array): boolean {
   return false;
 }
 
-/** 50 件ごとに UI へ制御を返しながら読み取る（N-06）。2 MiB 超は未判定として数える（N-07）。 */
-export async function readFiles(picked: PickedFile[], onProgress: (n: number) => void): Promise<FileInput[]> {
+/** 50 件ごとに UI へ制御を返しながら読み取る（N-06）。2 MiB 超は未判定として数える（N-07）。
+ *  signal が中断されたら（クリア・次のスキャン開始）、次のファイルを読む前に AbortError で止める。 */
+export async function readFiles(picked: PickedFile[], onProgress: (n: number) => void, signal?: AbortSignal): Promise<FileInput[]> {
   const out: FileInput[] = [];
   const dec = new TextDecoder('utf-8', { fatal: false });
   for (let i = 0; i < picked.length; i++) {
+    signal?.throwIfAborted();
     const { file, relPath } = picked[i]!;
     const base: Omit<FileInput, 'text' | 'sha256' | 'readState'> = { relPath, name: file.name, size: file.size, lastModified: file.lastModified };
     if (file.size > MAX_READ_BYTES) {
@@ -65,6 +67,7 @@ export async function readFiles(picked: PickedFile[], onProgress: (n: number) =>
       await yieldToUi();
     }
   }
+  signal?.throwIfAborted();
   onProgress(picked.length);
   return out;
 }

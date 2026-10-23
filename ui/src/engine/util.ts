@@ -121,3 +121,39 @@ export function ere(pattern: string, flags = ''): RegExp | null {
     return null;
   }
 }
+
+/** JSONC（コメント・末尾カンマ付き JSON。VS Code の mcp.json 等）を解析する。文字列の内側は変更しない。不正なら例外。 */
+export function parseJsonc(text: string): unknown {
+  const s = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]!;
+    if (c === '"') {
+      let j = i + 1;
+      while (j < s.length && s[j] !== '"') j += s[j] === '\\' ? 2 : 1;
+      out += s.slice(i, j + 1);
+      i = j;
+    } else if (c === '/' && s[i + 1] === '/') {
+      while (i < s.length && s[i] !== '\n') i++;
+      out += '\n';
+    } else if (c === '/' && s[i + 1] === '*') {
+      const end = s.indexOf('*/', i + 2);
+      if (end < 0) throw new SyntaxError('unterminated comment');
+      out += ' ';
+      i = end + 1;
+    } else if (c === ',') {
+      // 直後（空白とコメントを除く）が } / ] なら末尾カンマとして落とす
+      let j = i + 1;
+      for (;;) {
+        while (j < s.length && /\s/.test(s[j]!)) j++;
+        if (s[j] === '/' && s[j + 1] === '/') { while (j < s.length && s[j] !== '\n') j++; continue; }
+        if (s[j] === '/' && s[j + 1] === '*') { const e = s.indexOf('*/', j + 2); if (e < 0) break; j = e + 2; continue; }
+        break;
+      }
+      if (s[j] !== '}' && s[j] !== ']') out += c;
+    } else {
+      out += c;
+    }
+  }
+  return JSON.parse(out);
+}

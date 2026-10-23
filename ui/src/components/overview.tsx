@@ -24,7 +24,7 @@ export function InputArea({ busy, onDrop, onPick, onPaste, onImport }: {
   }, []);
   const drop = (e: DragEvent) => { e.preventDefault(); setOver(false); if (!busy) onDrop(e.dataTransfer); };
   return (
-    <Card className="grid grid-cols-[1.1fr_1fr] gap-4 p-4">
+    <Card className="grid grid-cols-1 gap-4 p-4 md:grid-cols-[1.1fr_1fr]">
       <div
         onDragOver={(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave={() => setOver(false)}
@@ -91,7 +91,7 @@ export function SummaryCards({ findings, active, safe, onToggle }: { findings: F
     );
   };
   return (
-    <div className="grid grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
       {card('CRITICAL')}{card('HIGH')}{card('MEDIUM')}
       <div className="relative overflow-hidden rounded-xl border border-border bg-surface p-4" data-testid="card-SAFE">
         <span className="absolute inset-y-0 left-0 w-1 bg-safe" aria-hidden="true" />
@@ -142,32 +142,37 @@ export function FindingsTable({ findings, empty }: { findings: Finding[]; empty:
   const end = Math.min(findings.length, Math.ceil((top + height) / ROW) + 5);
   return (
     <Card className="overflow-hidden" data-testid="findings-table">
-      <div role="row" className="grid grid-cols-[120px_80px_180px_1fr_56px] items-center gap-3 border-b border-border bg-surface-2 px-4 py-2 text-xs text-muted">
-        <span role="columnheader">重大度</span><span role="columnheader">モジュール</span><span role="columnheader">キャンペーン</span><span role="columnheader">パス ／ 詳細</span><span role="columnheader" className="text-right">コピー</span>
-      </div>
-      {findings.length === 0 ? (
-        <div className="px-4 py-10 text-center text-sm text-subtle">{empty}</div>
-      ) : (
-        <div role="table" aria-rowcount={findings.length} className="relative overflow-y-auto" style={{ height }} onScroll={(e) => setTop(e.currentTarget.scrollTop)}>
-          <div style={{ height: findings.length * ROW }}>
-            {findings.slice(start, end).map((f, i) => (
-              <div key={f.id} role="row" data-testid="finding-row" data-level={f.level} style={{ position: 'absolute', top: (start + i) * ROW, left: 0, right: 0, height: ROW }}
-                className="grid grid-cols-[120px_80px_180px_1fr_56px] items-center gap-3 border-b border-border px-4 hover:bg-surface-2">
-                <span role="cell"><SeverityBadge level={f.level} /></span>
-                <span role="cell" className="text-sm">{f.module}</span>
-                <span role="cell" className="truncate text-sm" title={f.campaign ?? undefined}>{f.campaign ?? '—'}</span>
-                <span role="cell" className="min-w-0">
-                  <span className="block truncate font-mono text-[13px]" title={f.path ?? undefined}>{f.path ?? '（貼り付けテキスト）'}</span>
-                  <span className="block truncate text-xs text-subtle">{f.detail}</span>
-                </span>
-                <span role="cell" className="text-right">
-                  {f.path && <Button variant="icon" aria-label={`パスをコピー: ${f.path}`} title="パスをコピー" onClick={() => copy(f.path!)}><Icon name="copy" /></Button>}
-                </span>
-              </div>
-            ))}
+      {/* 狭い画面では表の中だけを横スクロールする（ページ全体を横に広げない） */}
+      <div className="overflow-x-auto">
+        <div className="min-w-[600px]">
+          <div role="row" className="grid grid-cols-[120px_80px_180px_1fr_56px] items-center gap-3 border-b border-border bg-surface-2 px-4 py-2 text-xs text-muted">
+            <span role="columnheader">重大度</span><span role="columnheader">モジュール</span><span role="columnheader">キャンペーン</span><span role="columnheader">パス ／ 詳細</span><span role="columnheader" className="text-right">コピー</span>
           </div>
+          {findings.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-subtle">{empty}</div>
+          ) : (
+            <div role="table" aria-rowcount={findings.length} className="relative overflow-y-auto" style={{ height }} onScroll={(e) => setTop(e.currentTarget.scrollTop)}>
+              <div style={{ height: findings.length * ROW }}>
+                {findings.slice(start, end).map((f, i) => (
+                  <div key={f.id} role="row" data-testid="finding-row" data-level={f.level} style={{ position: 'absolute', top: (start + i) * ROW, left: 0, right: 0, height: ROW }}
+                    className="grid grid-cols-[120px_80px_180px_1fr_56px] items-center gap-3 border-b border-border px-4 hover:bg-surface-2">
+                    <span role="cell"><SeverityBadge level={f.level} /></span>
+                    <span role="cell" className="text-sm">{f.module}</span>
+                    <span role="cell" className="truncate text-sm" title={f.campaign ?? undefined}>{f.campaign ?? '—'}</span>
+                    <span role="cell" className="min-w-0">
+                      <span className="block truncate font-mono text-[13px]" title={f.path ?? undefined}>{f.path ?? '（貼り付けテキスト）'}</span>
+                      <span className="block truncate text-xs text-subtle">{f.detail}</span>
+                    </span>
+                    <span role="cell" className="text-right">
+                      {f.path && <Button variant="icon" aria-label={`パスをコピー: ${f.path}`} title="パスをコピー" onClick={() => copy(f.path!)}><Icon name="copy" /></Button>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </Card>
   );
 }

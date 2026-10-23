@@ -1,9 +1,9 @@
 // §7 / §17 / §20 / §37: MCP・エージェント設定、SymJack、IDE フック、ツール定義の注入語
 import { push, readable, type RuleCtx } from '../context';
 import type { McpServerView } from '../types';
-import { clip } from '../util';
+import { clip, parseJsonc } from '../util';
 
-const MCP_CONFIG = /(^|\/)(\.mcp\.json|mcp\.json|\.cursor\/mcp\.json|\.vscode\/mcp\.json|\.claude\/settings(\.local)?\.json|\.gemini\/settings\.json|claude_desktop_config\.json|\.codex\/config\.toml)$/;
+const MCP_CONFIG = /(^|\/)(\.mcp\.json|mcp\.json|\.cursor\/mcp\.json|\.vscode\/mcp\.json|\.claude\/settings(\.local)?\.json|\.gemini\/settings\.json|claude_desktop_config\.json|\.claude\.json|\.codeium\/windsurf\/mcp_config\.json|\.codex\/config\.toml)$/;
 const HIGH_CMD = /(^|[\s"/])(curl|wget)([\s"]|$)|bash -c|sh -c|powershell(\.exe)? .*-(e|enc|encodedcommand)\s|node -e|python[0-9.]* -c|base64/;
 const MED_CMD = /(^|[\s"/])(npx|uvx|bunx|pnpm dlx)([\s"]|$)/;
 
@@ -40,13 +40,19 @@ function collectServers(obj: unknown, out: { name: string; command: string; args
 }
 
 export function mcpRules(ctx: RuleCtx): void {
-  ctx.checks.add('s17-mcp-command').add('s17-symjack').add('s7-folderopen').add('s20-injection').add('s20-runtime-gate').add('s37-host-docker');
+  ctx.checks.add('s17-mcp-command').add('s17-symjack').add('s17-setup-mjs').add('s7-folderopen').add('s20-injection').add('s20-runtime-gate').add('s37-host-docker');
   for (const f of readable(ctx).filter((x) => MCP_CONFIG.test(x.relPath))) {
     let servers: { name: string; command: string; args: string[] }[] = [];
     let parseError = false;
     if (f.relPath.endsWith('.toml')) servers = parseCodexToml(f.text);
     else {
-      try { collectServers(JSON.parse(f.text), servers); } catch { parseError = true; }
+      // VS Code 等はコメント・末尾カンマを許すため JSONC として読む
+      try { collectServers(parseJsonc(f.text), servers); } catch { parseError = true; }
+    }
+    if (parseError) {
+      // 解析できない設定を「検出なし」にしない（fail closed）
+      ctx.errors.push({ module: '§17', reason: `mcp_config_parse_failed:${f.relPath}` });
+      push(ctx, { level: 'MEDIUM', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'MCP/エージェント設定を解析できません（未判定。command/args を手動または CLI で確認）', ruleId: 's17-mcp-command:parse-error', evidenceSha: f.sha256 });
     }
     const views: McpServerView[] = servers.map((s) => {
       const line = `${s.command} ${s.args.join(' ')}`;
@@ -75,6 +81,12 @@ export function mcpRules(ctx: RuleCtx): void {
     const decoy = decoys.some((d) => (d.endsWith('/') ? rel.startsWith(d) : f.name.toLowerCase().startsWith(d)));
     if (decoy && f.size === 0) {
       push(ctx, { level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'デコイ名かつ 0 バイト：SymJack 疑い（要手動確認。CLI で readlink -f）', ruleId: 's17-symjack' });
+    }
+  }
+  // ChainDrop: setup.mjs がエージェント/IDE 設定ディレクトリを参照（MCP 設定改ざん。CLI check_s17 と同じ）
+  for (const f of readable(ctx).filter((x) => x.name === 'setup.mjs')) {
+    if (/\.(claude|vscode|cursor)(\/|\b)/.test(f.text)) {
+      push(ctx, { level: 'CRITICAL', module: '§17', campaign: 'chaindrop-keyv', path: f.relPath, detail: 'setup.mjs がエージェント/IDE 設定ディレクトリを参照（MCP 設定改ざん）', ruleId: 's17-setup-mjs', evidenceSha: f.sha256 });
     }
   }
   for (const f of readable(ctx).filter((x) => /(^|\/)\.(vscode|claude|cursor)\/tasks\.json$/.test(x.relPath))) {
