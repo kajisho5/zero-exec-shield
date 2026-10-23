@@ -16,6 +16,12 @@ const icon = readFileSync(here('../../brand/web/favicon-64.png')).toString('base
 if (/<\/script/i.test(js)) throw new Error('app.js に </script が含まれるためインライン化できません');
 if (/<\/style/i.test(css)) throw new Error('app.css に </style が含まれるためインライン化できません');
 
+// 実行時に <style> を差し込むライブラリが紛れ込んでいないこと（ハッシュ方式の CSP でブロックされる。設計書 §4.2、R-1）。
+// react-remove-scroll は vite.config.ts の alias で CSSOM 版に差し替えている。差し替えが外れると次の文字列が入る。
+for (const marker of ['block-interactivity-', 'with-scroll-bars-hidden', 'data-sonner-toaster', 'data-radix-scroll-area-viewport', 'data-radix-select-viewport']) {
+  if (js.includes(marker)) throw new Error(`app.js に実行時に <style> を差し込むライブラリの痕跡があります: ${marker}`);
+}
+
 const scriptTag = /<script type="module" crossorigin src="\.\/app\.js"><\/script>/;
 const styleTag = /<link rel="stylesheet" crossorigin href="\.\/app\.css">/;
 if (!scriptTag.test(html) || !styleTag.test(html)) throw new Error('dist/index.html の script / link タグが想定と異なります');
@@ -41,6 +47,9 @@ html = html
   .replace('<!--ZES-CSP-->', () => `<meta http-equiv="Content-Security-Policy" content="${csp}" />`)
   .replace('<!--ZES-ICON-->', () => `<link rel="icon" type="image/png" sizes="64x64" href="data:image/png;base64,${icon}" />`)
   .replace('</body>', () => `<script type="module">${js}</script>\n  </body>`);
+
+// 成果物の <style> はビルド時の CSS の 1 つだけ（CSP の style-src はそのハッシュ 1 つだけを許可する）
+if ((html.match(/<style[\s>]/g) ?? []).length !== 1) throw new Error('成果物の <style> が 1 つではありません');
 
 const banner = '<!-- Zero-Exec Shield v5.2 Web Scanner UI。ui/ から生成（cd ui && npm ci && npm run build）。直接編集しないこと。 -->\n';
 writeFileSync(here('../../index.html'), banner + html);
