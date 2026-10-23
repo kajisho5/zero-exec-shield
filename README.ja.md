@@ -65,7 +65,7 @@ ZES_OFFLINE=1 ZES_HOST_CHECKS=0 ./zes-scan.sh --full --root . --json   # ファ�
 
 フォルダをページにドロップする（またはフォルダ選択）と、ブラウザ内で検査します。ページを読み込んだ後の通信はありません。テキスト貼り付け判定、findings.json の書き出し、CLI の findings.json の読み込み表示もできます。
 
-18 タブ構成です。総合（重大度サマリ・フィルタ・検索）、SkillPact、MCP / GitHub Actions / ブラウザ拡張ビューア、キャンペーン・分野別のタブがあります。ホスト側の情報（プロセス・接続・カーネル・マウント・インストール済みツールの版）はブラウザでは検査できないため、該当タブには「0 件」ではなく CLI の案内を表示します。
+18 タブ構成です。総合（重大度サマリ・フィルタ・検索）、SkillPact、MCP / GitHub Actions / ブラウザ拡張ビューア、キャンペーン・分野別のタブがあります。「すべてのタブ」はタブ検索です（タブ名や § 番号で絞り込み）。ライトとダークのテーマがあり、選ぶまでは OS の設定に従います。640px 未満では検出一覧がカード型になり、押すと詳細が下からのシートで開きます。ホスト側の情報（プロセス・接続・カーネル・マウント・インストール済みツールの版）はブラウザでは検査できないため、該当タブには「0 件」ではなく CLI の案内を表示します。
 
 ## 検査する内容
 
@@ -138,7 +138,8 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
 - `campaign` はキャンペーンに紐づかない一般検査では `null`。`path` は絶対パスか `null`（ファイルのないホスト検査の結果）です。
 - `errors[].reason` の例: `skipped_offline` / `network_timeout` / `jq_unavailable` / `module_failed` / `lockfile_parse_failed:<path>` / `git_timeout` / `special_file:<path>` / `non_utf8_path:<path>` / `incident_bundle_mismatch:<値>`。
 - 文字列はすべて valid な UTF-8 です。制御文字は `\u00XX` でエスケープします。ファイル名の不正な UTF-8 バイトは `\xHH` というテキストに置き換え、そのパスを `errors[]` に `non_utf8_path` として記録します。FIFO・ソケット・デバイスファイルは開かず、`special_file` として記録します。
-- ブラウザ UI が書き出す findings.json のパスは、投入フォルダからの相対パスに `/` を前置したものです。`status` は常に `partial` で、`errors[]` に `ui:host_checks_not_performed` を記録します。
+- ブラウザ UI が書き出す findings.json のパスは、投入フォルダからの相対パスに `/` を前置したものです。`errors[]` に `ui:host_checks_not_performed` を記録します。`status` は `partial` で、取り込んだ CLI の findings.json が `status: error` だった場合は `error` です。
+- ブラウザ UI が生成する `id` は、上の CLI の式とは別の作り方です（`module|campaign|path|規則 ID` から生成し、`path` は相対パス）。UI の中でだけ安定し（同じフォルダを投入し直せば同じ `id`）、同じファイルの CLI の `id` とは一致しません。揃えると既存の `id` が変わるため、このままにしています。CLI の findings.json から取り込んだ finding の `id` はそのまま保ちます。
 
 後段のツールが依存してよい性質は、[docs/skill-contracts.md](docs/skill-contracts.md) の §9 にまとめています。
 
@@ -197,7 +198,7 @@ npm run test:e2e                     # Playwright（file:// で起動）
 - フィクスチャは無害なダミーです。期待値は `tests/expected/` にあります。
 - `ui/.npmrc` で `ignore-scripts=true` を指定し、依存は `package-lock.json` で版を固定しています。
 - `rules/ioc.json` を変更したら `index.html` を再ビルドしてください。コミット済みの `index.html` がビルド結果と異なると CI が失敗します。
-- UI の設計書（実装前のドラフト。§49 の部分は SkillPact 0.8 対応前の内容）: [docs/design/ui-design.md](docs/design/ui-design.md)
+- UI の設計書: 現行の 0.3「検疫台」は [docs/design/ui-design-0.3.md](docs/design/ui-design-0.3.md)。実装前のドラフト（画面は 0.3.0 より前、§49 の部分は SkillPact 0.8 対応前の内容）は [docs/design/ui-design.md](docs/design/ui-design.md)
 - 変更履歴: [CHANGELOG.md](CHANGELOG.md)
 
 ## ライセンスとクレジット
