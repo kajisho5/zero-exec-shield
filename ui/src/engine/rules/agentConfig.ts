@@ -3,7 +3,7 @@ import { push, readable, type RuleCtx } from '../context';
 import type { McpServerView } from '../types';
 import { clip } from '../util';
 
-const MCP_CONFIG = /(^|\/)(\.mcp\.json|mcp\.json|\.cursor\/mcp\.json|\.vscode\/mcp\.json|\.claude\/settings(\.local)?\.json|\.gemini\/settings\.json|claude_desktop_config\.json|\.codex\/config\.toml)$/;
+const MCP_CONFIG = /(^|\/)(\.mcp\.json|mcp\.json|\.cursor\/mcp\.json|\.vscode\/mcp\.json|\.claude\/settings(\.local)?\.json|\.gemini\/settings\.json|claude_desktop_config\.json|\.claude\.json|\.codeium\/windsurf\/mcp_config\.json|\.codex\/config\.toml)$/;
 const HIGH_CMD = /(^|[\s"/])(curl|wget)([\s"]|$)|bash -c|sh -c|powershell(\.exe)? .*-(e|enc|encodedcommand)\s|node -e|python[0-9.]* -c|base64/;
 const MED_CMD = /(^|[\s"/])(npx|uvx|bunx|pnpm dlx)([\s"]|$)/;
 
