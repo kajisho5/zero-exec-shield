@@ -1,0 +1,7 @@
+# ZES test fixture: YAML フローマッピングで書いた uses も検出する
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - {name: scan, uses: aquasecurity/trivy-action@0.28.0}

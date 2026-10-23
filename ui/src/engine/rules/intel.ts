@@ -148,7 +148,7 @@ export function intelRules(ctx: RuleCtx): void {
   // §22 侵害されたアクション（bad_refs は CRITICAL、safe_refs 以外のタグ参照は severity）
   const wfFiles = readable(ctx).filter((f) => wf.test(f.relPath));
   for (const a of intel.actions ?? []) {
-    const re = new RegExp(`uses:\\s*["']?${escapeRe(a.action)}@([^"'\\s#]+)`, 'g');
+    const re = new RegExp(`uses:\\s*["']?${escapeRe(a.action)}@([^"'\\s#,}]+)`, 'gi');
     for (const f of wfFiles) {
       for (const ref of new Set([...f.text.matchAll(re)].map((m) => m[1] ?? ''))) {
         if ((a.bad_refs ?? []).includes(ref)) {

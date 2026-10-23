@@ -50,17 +50,18 @@ export function actionsRules(ctx: RuleCtx): void {
 
     const uses: UsesRef[] = [];
     const seen = new Set<string>();
-    for (const m of y.matchAll(/^[\s-]*uses:\s*["']?([^"'\s#]+)/gm)) {
+    // YAML フローマッピング（- {uses: ...}）も対象。所有者/リポジトリ名は大文字小文字を区別しない
+    for (const m of y.matchAll(/^[\s-]*(?:\{(?:[^}#\n]*,)?\s*)?uses:\s*["']?([^"'\s#,}]+)/gm)) {
       const ref = m[1] ?? '';
       if (seen.has(ref)) continue;
       seen.add(ref);
       if (ref.startsWith('./') || ref.startsWith('docker://')) { uses.push({ ref: clip(ref), kind: 'local' }); continue; }
       const at = ref.lastIndexOf('@');
-      const act = at < 0 ? ref : ref.slice(0, at);
+      const act = (at < 0 ? ref : ref.slice(0, at)).toLowerCase();
       const ver = at < 0 ? '' : ref.slice(at + 1);
       // versions に一致、または safe_tags があり「安全版タグでも SHA でもない」参照は汚染の可能性（trivy-action）
-      const known = compromised.find((c) => c.action === act && (c.versions.includes(ver) || (!!c.safe_tags && !/^[0-9a-f]{40}$/.test(ver) && !c.safe_tags.includes(ver))));
-      const org = compromised.some((c) => c.action.endsWith('/*') && act.startsWith(c.action.slice(0, -1)));
+      const known = compromised.find((c) => c.action.toLowerCase() === act && (c.versions.includes(ver) || (!!c.safe_tags && !/^[0-9a-f]{40}$/.test(ver) && !c.safe_tags.includes(ver))));
+      const org = compromised.some((c) => c.action.endsWith('/*') && act.startsWith(c.action.slice(0, -1).toLowerCase()));
       if (known) {
         uses.push({ ref: clip(ref), kind: 'compromised' });
         push(ctx, { level: 'CRITICAL', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `汚染されたタグ参照の可能性（${clip(ref, 80)}）。安全版タグまたは検証済み SHA に固定`, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256 });

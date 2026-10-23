@@ -1,0 +1,2 @@
+# ZES test fixture (inert): PEP 503 正規化（区切り文字の連続は 1 つの "-" と同じ名前）
+Guardrails__AI==0.10.1

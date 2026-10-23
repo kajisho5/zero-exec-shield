@@ -22,6 +22,18 @@
       "campaign": "ghostaction-oct2026",
       "level": "CRITICAL",
       "module": "§22",
+      "path": ".github/workflows/case-variant.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§22",
+      "path": ".github/workflows/flow-mapping.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§22",
       "path": ".github/workflows/tag-ref.yml"
     },
     {

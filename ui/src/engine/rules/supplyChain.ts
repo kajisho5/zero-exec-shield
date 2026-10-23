@@ -44,7 +44,7 @@ export function filenameRules(ctx: RuleCtx): void {
 type Dep = { eco: 'npm' | 'pypi' | 'cargo' | 'packagist' | 'gem' | 'go'; name: string; version: string; path: string; sha: string | null };
 
 function normPypi(n: string): string {
-  return n.toLowerCase().replace(/[_.]/g, '-');
+  return n.toLowerCase().replace(/[-_.]+/g, '-'); // PEP 503
 }
 
 function collectDeps(ctx: RuleCtx): Dep[] {

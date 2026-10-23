@@ -58,7 +58,10 @@ describe('Layer 1 fixtures（CLI と同じ検出）', () => {
     const k = keys(r);
     expect(k).toContain('HIGH §21 github-actions/.github/workflows/pr-target.yml');
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/tag-ref.yml');
-    expect(r.viewers.actions.flatMap((w) => w.uses.map((u) => u.kind)).sort()).toEqual(['compromised', 'sha', 'sha', 'sha', 'tag']);
+    // 所有者名の大文字小文字違い・YAML フローマッピングでも検出する
+    expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/case-variant.yml');
+    expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/flow-mapping.yml');
+    expect(r.viewers.actions.flatMap((w) => w.uses.map((u) => u.kind)).sort()).toEqual(['compromised', 'compromised', 'sha', 'sha', 'sha', 'tag', 'tag']);
   });
   it('browser extensions（権限昇格）', async () => {
     const r = await analyzeFiles(loadFixture('browser-ext'));
@@ -180,6 +183,10 @@ describe('ZES 5.2.2 / 5.2.3 の検知データ（CLI と同じフィクスチャ
     expect(r.findings.some((f) => f.module === '§18' && f.campaign === 'macsync-icloud-calendar-finder-backdoor')).toBe(true);
     const vuln = r.findings.find((f) => f.detail.startsWith('脆弱なバージョン @modelcontextprotocol/sdk@1.31.0'));
     expect(vuln?.level).toBe('HIGH');
+  });
+  it('PyPI 名は PEP 503 で正規化（区切り文字の連続も 1 つの "-"）', async () => {
+    const r = await analyzeFiles(loadFixture('ioc-corrections'));
+    expect(keys(r)).toContain('CRITICAL §15 ioc-corrections/py-normalized/requirements.txt');
   });
   it('intel-2026q3-safe: 修正版は検出しない', async () => {
     const r = await analyzeFiles(loadFixture('intel-2026q3-safe'));
