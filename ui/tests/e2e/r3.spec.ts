@@ -195,7 +195,9 @@ test.describe('375px: シートを閉じるとフォーカスを開いたボタ�
   });
   test('モジュールの絞り込みシート（Escape・選んで閉じる）', async ({ page }) => {
     await open(page);
-    await scan(page, FIX + 'chaindrop');
+    // フォルダの setInputFiles は Firefox でまれに返らないことがあるため、ここでは findings.json の取り込みで一覧を作る
+    await importDoc(page, doc(6, (i) => ({ module: i < 3 ? '§15' : '§17' })));
+    await expect(page.getByTestId('finding-row')).toHaveCount(6);
     const btn = page.getByRole('button', { name: /^モジュールで絞り込み/ });
     await btn.focus();
     await page.keyboard.press('Enter');
