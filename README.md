@@ -13,7 +13,7 @@ ZES is a static scanner for software supply chain attacks, compromised developer
 
 It comes in two forms: a Bash CLI (`zes-scan.sh`) and a single-file browser UI (`index.html`). Both use the same IoC database (`rules/ioc.json`).
 
-> Scanner messages (`detail` in findings.json, the terminal log) and the browser UI are in Japanese. Field names, levels and error codes are ASCII.
+> The CLI and the browser UI are in English by default; Japanese is available (`--lang ja` or a Japanese locale for the CLI, the language menu in the UI). `findings.json` is always in English, whatever the language: the same scan gives the same file.
 
 ## Quick start
 
@@ -46,6 +46,7 @@ ZES_OFFLINE=1 ZES_HOST_CHECKS=0 ./zes-scan.sh --full --root . --json   # files o
 | `--url <URL>` | §4 header check of one http/https URL: `HEAD` (and `GET` only on 405/501), no redirects followed. A `PHP/x.y.z` in `Server` / `X-Powered-By` is compared with the PHP2Shell fixed versions |
 | `--json` | Write findings.json to stdout |
 | `--skillpact-cache <dir>` | Local directory of earlier SkillPact contracts for the §49 version comparison |
+| `--lang en\|ja` | Language of the terminal log, help and errors (default: `ZES_LANG`, then `LC_ALL` / `LC_MESSAGES` / `LANG`; a UTF-8 Japanese locale gives Japanese, anything else English). findings.json is always English |
 
 | Environment variable | Meaning |
 |---|---|
@@ -55,6 +56,7 @@ ZES_OFFLINE=1 ZES_HOST_CHECKS=0 ./zes-scan.sh --full --root . --json   # files o
 | `ZES_OFFLINE=1` | Skip all outbound connections (§4 `--url`, §6 eMudhra probe); recorded as `skipped_offline` |
 | `ZES_SKILLPACT_CACHE` | Same as `--skillpact-cache` |
 | `ZES_GIT_TIMEOUT` | Timeout in seconds for git calls in §38/§46 (default 60); recorded as `git_timeout` |
+| `ZES_LANG` | `en` or `ja`, like `--lang` (an invalid value means English) |
 
 ### Browser UI
 
@@ -65,7 +67,7 @@ Open `index.html` in a browser. It works from `file://`; there is nothing to ins
 
 Drop a folder on the page (or use the folder picker). The scan runs in the browser and the page makes no network requests after it has loaded. You can also paste text for a check, export a findings.json, and load a findings.json produced by the CLI.
 
-The UI has 18 tabs: an overview with severity summary, filters and search, a SkillPact tab, MCP / GitHub Actions / browser extension viewers, and tabs per campaign or topic. "All tabs" opens a tab search (type a tab name or a § number). The UI has a light and a dark theme; it follows the OS setting until you pick one. Below 640px the findings list becomes cards, and tapping a card opens its details in a bottom sheet. Checks that need the host (processes, connections, kernel, mounts, installed tool versions) cannot run in a browser; those tabs point to the CLI instead of showing "0 findings".
+The UI has 18 tabs: an overview with severity summary, filters and search, a SkillPact tab, MCP / GitHub Actions / browser extension viewers, and tabs per campaign or topic. "All tabs" opens a tab search (type a tab name or a § number). The UI has a light and a dark theme; it follows the OS setting until you pick one. It is in English, or in Japanese when the browser prefers Japanese; the language menu next to the theme switches it (saved in the browser, or `?lang=en` / `?lang=ja` in the URL). Below 640px the findings list becomes cards, and tapping a card opens its details in a bottom sheet. Checks that need the host (processes, connections, kernel, mounts, installed tool versions) cannot run in a browser; those tabs point to the CLI instead of showing "0 findings".
 
 ## What it checks
 
@@ -113,7 +115,7 @@ Rules and output of §49 may change.
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "scan_roots": ["/abs/real/path/of/--root"],
   "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
   "scan_started_at": "2026-10-22T00:00:00Z",
@@ -122,13 +124,15 @@ Rules and output of §49 may change.
   "status": "ok|partial|error",
   "findings": [
     {
-      "id": "sha256:<SHA-256 of module|campaign|path|detail>",
+      "id": "sha256:<SHA-256 of zes-id-v2|module|campaign|path|code|params>",
       "level": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
       "module": "§49",
       "campaign": "skillpact-divergence",
       "path": "/abs/path",
-      "detail": "...",
+      "detail": "Compromised package keyv@6.0.0 (npm). Safe version: latest 5.x",
       "evidence_hash": "sha256:<SHA-256 of the file (over 100 MB: of path, size and mtime), or of detail when there is no regular file>",
+      "code": "s15.pkg_compromised_safe",
+      "params": { "ecosystem": "npm", "package": "keyv", "safe_version": "latest 5.x", "version": "6.0.0" },
       "evidence": { "kind": "file|large_file|symlink|tree|detail", "hash": "sha256:..." },
       "kind": "pkg.compromised",
       "subject": { "ecosystem": "npm", "package": "keyv", "version": "6.0.0", "safe_version": "latest 5.x", "fixed_versions": [] },
@@ -142,7 +146,8 @@ Rules and output of §49 may change.
 ```
 
 - `id` is deterministic: the same finding gets the same id on every scan, and each id appears once.
-- Format 1.1 (ZES 0.4.0) only adds optional fields to 1.0, so `id` and `evidence_hash` are computed as before. A reader of 1.0 that ignores unknown fields keeps working; strict 1.0 validators must switch to the 1.1 schema. The fields exist so that remediation (GER, through ZET) can act on a finding precisely, without ZES ever writing file contents:
+- Format 1.2 (ZES 0.5.0) adds `code` and `params` and makes `detail` English. `code` names the message (the key `f.<code>` in [`i18n/en.json`](i18n/en.json) and [`i18n/ja.json`](i18n/ja.json)); `params` holds the values in it, as strings, never file contents. `detail` is the English message with the params filled in. The id is now v2: the SHA-256 of `zes-id-v2|module|campaign|path|code|params`, where `params` is `key=value` in key order (C locale) joined by U+001F, and a `null` campaign or path is the empty string. It no longer depends on the wording or the language. **All ids change once in 0.5.0**: ZET decisions and GER approvals made on 0.4.x findings need a re-scan and a new triage. `evidence_hash` is computed as before (the file, otherwise the English `detail`).
+- Format 1.1 (ZES 0.4.0) only added optional fields to 1.0 (`id` and `evidence_hash` were unchanged). A reader of 1.0 that ignores unknown fields keeps working; strict 1.0 validators must switch to the 1.1 schema. The fields exist so that remediation (GER, through ZET) can act on a finding precisely, without ZES ever writing file contents:
   - `scan_roots`: the real paths of `--root`. ZET uses them as the plan's scope.
   - `evidence`: a typed version of `evidence_hash`. `file` (`large_file` over 100 MB) has the same hash as `evidence_hash`; `symlink` is the SHA-256 of the link value (`readlink`); `tree` is the [ger-tree-v1](https://github.com/kajisho5/gated-exec-remediation/blob/main/docs/design/design.md) hash of a directory (entry types, relative paths, modes, sizes, content hashes, link values; no times or owners); `detail` is everything else, including findings whose path is the scan root or the home directory itself.
   - `kind` (optional): a machine-readable category: `pkg.compromised`, `pkg.vulnerable`, `pkg.lockfile_compromised` (§15), `mcp.dangerous_command`, `mcp.unpinned` (§17), `gha.pwn_request` (§21), `gha.unpinned` (§22, §28), `secret.token` (§47), `runtime.cve` (version in a CVE range: §3, §5, §6, §16, §37, §41 and the intel tables).
@@ -170,8 +175,8 @@ Rules and output of §49 may change.
   | `lockfile_unparsed:<path>` | A lockfile format ZES does not parse (`bun.lockb`) |
   | `archive_not_inspected:<path>` | An archive (`.whl`, `.tgz`, `.tar.gz`, `.zip`, `.jar`, `.war`, `.pyz`, `.egg`, `.gem`, `.crate`, `.nupkg`, `.vsix`, `.crx`, `.xpi`) was not unpacked; does not change `status` |
 - All strings are valid UTF-8. Control characters are escaped as `\u00XX`. Invalid UTF-8 bytes in a file name are written as the text `\xHH` and the path is also recorded in `errors[]` as `non_utf8_path`. FIFOs, sockets and device files are not opened and are recorded as `special_file`.
-- Findings exported by the browser UI use paths relative to the dropped folder with a leading `/`, and record `ui:host_checks_not_performed` in `errors[]`. They carry the same 1.1 fields as the CLI except where the browser cannot know a value: no `scan_roots`, directory evidence is `detail` (file modes are not available) and symlinks arrive as 0-byte files. The UI loads both 1.0 and 1.1 documents. Their `status` is `partial`, or `error` when a loaded CLI findings.json had `status: error`.
-- Ids generated by the browser UI are derived differently from the CLI formula above: from `module|campaign|path|rule id`, where `path` is the relative path. They are stable only within the UI (the same folder dropped again gives the same ids) and do not match the CLI's ids for the same file. Unifying the two would change existing ids, so they are kept as they are. Ids of findings loaded from a CLI findings.json are kept unchanged.
+- Findings exported by the browser UI use paths relative to the dropped folder with a leading `/`, and record `ui:host_checks_not_performed` in `errors[]`. They carry the same fields as the CLI (format 1.2, the same `code` / `params` for the same check) except where the browser cannot know a value: no `scan_roots`, directory evidence is `detail` (file modes are not available) and symlinks arrive as 0-byte files. The UI loads 1.0, 1.1 and 1.2 documents; a finding without `code` shows its `detail` as it is. Their `status` is `partial`, or `error` when a loaded CLI findings.json had `status: error`.
+- Ids generated by the browser UI use the same v2 formula, but over the path relative to the dropped folder, so they do not match the CLI's ids for the same file. Ids of findings loaded from a CLI findings.json are kept unchanged.
 
 The guarantees that downstream tools may rely on are listed in section 9 of [docs/skill-contracts.md](docs/skill-contracts.md).
 

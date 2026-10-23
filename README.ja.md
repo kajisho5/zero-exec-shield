@@ -13,7 +13,7 @@ ZES は、サプライチェーン攻撃・侵害された開発マシン・AI �
 
 Bash の CLI（`zes-scan.sh`）と、1 ファイルで動くブラウザ UI（`index.html`）があります。どちらも同じ IoC データベース（`rules/ioc.json`）を使います。
 
-> スキャナのメッセージ（findings.json の `detail`、端末のログ）とブラウザ UI は日本語です。フィールド名・重大度・エラーコードは ASCII です。
+> CLI とブラウザ UI は英語が既定で、日本語も使えます（CLI は `--lang ja` か日本語のロケール、UI は言語のメニュー）。`findings.json` は言語に関係なく常に英語です（同じスキャンからは同じファイルができます）。
 
 ## クイックスタート
 
@@ -46,6 +46,7 @@ ZES_OFFLINE=1 ZES_HOST_CHECKS=0 ./zes-scan.sh --full --root . --json   # ファ�
 | `--url <URL>` | §4 の非侵襲ヘッダチェック（http/https の URL 1 件）。`HEAD`（405/501 のときだけ `GET`）、リダイレクトは追わない。`Server` / `X-Powered-By` の `PHP/x.y.z` を PHP2Shell の修正版と照合 |
 | `--json` | findings.json を標準出力へ |
 | `--skillpact-cache <dir>` | §49 の前版比較に使う SkillPact 契約の置き場所（ローカルのみ） |
+| `--lang en\|ja` | 端末のログ・ヘルプ・エラーの言語（既定は `ZES_LANG`、次に `LC_ALL` / `LC_MESSAGES` / `LANG`。UTF-8 の日本語ロケールなら日本語、それ以外は英語）。findings.json は常に英語 |
 
 | 環境変数 | 内容 |
 |---|---|
@@ -55,6 +56,7 @@ ZES_OFFLINE=1 ZES_HOST_CHECKS=0 ./zes-scan.sh --full --root . --json   # ファ�
 | `ZES_OFFLINE=1` | 外向き通信（§4 `--url`、§6 eMudhra 接続試験）をすべて無効化（`skipped_offline` を記録） |
 | `ZES_SKILLPACT_CACHE` | `--skillpact-cache` と同じ |
 | `ZES_GIT_TIMEOUT` | §38 / §46 の git 呼び出しの打ち切り秒数（既定 60。超過は `git_timeout` を記録） |
+| `ZES_LANG` | `en` か `ja`（`--lang` と同じ。不正な値は英語） |
 
 ### ブラウザ UI
 
@@ -65,7 +67,7 @@ ZES_OFFLINE=1 ZES_HOST_CHECKS=0 ./zes-scan.sh --full --root . --json   # ファ�
 
 フォルダをページにドロップする（またはフォルダ選択）と、ブラウザ内で検査します。ページを読み込んだ後の通信はありません。テキスト貼り付け判定、findings.json の書き出し、CLI の findings.json の読み込み表示もできます。
 
-18 タブ構成です。総合（重大度サマリ・フィルタ・検索）、SkillPact、MCP / GitHub Actions / ブラウザ拡張ビューア、キャンペーン・分野別のタブがあります。「すべてのタブ」はタブ検索です（タブ名や § 番号で絞り込み）。ライトとダークのテーマがあり、選ぶまでは OS の設定に従います。640px 未満では検出一覧がカード型になり、押すと詳細が下からのシートで開きます。ホスト側の情報（プロセス・接続・カーネル・マウント・インストール済みツールの版）はブラウザでは検査できないため、該当タブには「0 件」ではなく CLI の案内を表示します。
+18 タブ構成です。総合（重大度サマリ・フィルタ・検索）、SkillPact、MCP / GitHub Actions / ブラウザ拡張ビューア、キャンペーン・分野別のタブがあります。「すべてのタブ」はタブ検索です（タブ名や § 番号で絞り込み）。ライトとダークのテーマがあり、選ぶまでは OS の設定に従います。表示は英語で、ブラウザの言語が日本語なら日本語になります。テーマの隣の言語メニューで切り替えられます（ブラウザに保存。URL の `?lang=en` / `?lang=ja` でも指定できます）。640px 未満では検出一覧がカード型になり、押すと詳細が下からのシートで開きます。ホスト側の情報（プロセス・接続・カーネル・マウント・インストール済みツールの版）はブラウザでは検査できないため、該当タブには「0 件」ではなく CLI の案内を表示します。
 
 ## 検査する内容
 
@@ -113,7 +115,7 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "scan_roots": ["/--root の/実パス"],
   "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
   "scan_started_at": "2026-10-22T00:00:00Z",
@@ -122,13 +124,15 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
   "status": "ok|partial|error",
   "findings": [
     {
-      "id": "sha256:<module|campaign|path|detail の SHA-256>",
+      "id": "sha256:<zes-id-v2|module|campaign|path|code|params の SHA-256>",
       "level": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
       "module": "§49",
       "campaign": "skillpact-divergence",
       "path": "/abs/path",
-      "detail": "…",
+      "detail": "Compromised package keyv@6.0.0 (npm). Safe version: latest 5.x",
       "evidence_hash": "sha256:<通常ファイルはその SHA-256（100MB 超はパス・サイズ・mtime の SHA-256）、それ以外は detail の SHA-256>",
+      "code": "s15.pkg_compromised_safe",
+      "params": { "ecosystem": "npm", "package": "keyv", "safe_version": "latest 5.x", "version": "6.0.0" },
       "evidence": { "kind": "file|large_file|symlink|tree|detail", "hash": "sha256:…" },
       "kind": "pkg.compromised",
       "subject": { "ecosystem": "npm", "package": "keyv", "version": "6.0.0", "safe_version": "latest 5.x", "fixed_versions": [] },
@@ -142,7 +146,8 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
 ```
 
 - `id` は内容から決定的に生成します（再スキャンで同じ検出なら同じ ID）。同じ ID は 1 回だけ出力します。
-- 形式 1.1（ZES 0.4.0）は 1.0 に任意の項目を足しただけで、`id` と `evidence_hash` の作り方は変わりません。未知の項目を無視する 1.0 の読み手はそのまま動きます（strict に検証する読み手は 1.1 のスキーマに切り替えてください）。どの項目もファイルの内容は含まず、修復（ZET を通した GER）が finding を正確に扱えるようにするためのものです。
+- 形式 1.2（ZES 0.5.0）は `code` と `params` を足し、`detail` を英語にしたものです。`code` は文の識別子（[`i18n/en.json`](i18n/en.json)・[`i18n/ja.json`](i18n/ja.json) のキー `f.<code>`）、`params` は文に入る値（文字列だけ。ファイルの内容は入れない）で、`detail` は英語の文に params を入れたものです。id は v2 になりました: `zes-id-v2|module|campaign|path|code|params` の SHA-256（`params` は `key=value` をキーの順〔C ロケール〕に並べて U+001F でつないだもの、`null` の campaign・path は空文字）。文言や言語に依らなくなります。**0.5.0 ですべての id が 1 回だけ変わります**: 0.4.x の findings で作った ZET の判断・GER の承認は、再スキャンと再トリアージが必要です。`evidence_hash` の作り方は変わりません（ファイル、それ以外は英語の `detail`）。
+- 形式 1.1（ZES 0.4.0）は 1.0 に任意の項目を足したものでした（`id` と `evidence_hash` の作り方は 1.0 と同じ）。未知の項目を無視する 1.0 の読み手はそのまま動きます（strict に検証する読み手は 1.1 のスキーマに切り替えてください）。どの項目もファイルの内容は含まず、修復（ZET を通した GER）が finding を正確に扱えるようにするためのものです。
   - `scan_roots`: `--root` の実パス。ZET は計画の検査範囲（scope）にします。
   - `evidence`: `evidence_hash` の種類つき版。`file`（100MB 超は `large_file`）は `evidence_hash` と同じ値、`symlink` はリンクの値（`readlink`）の SHA-256、`tree` はディレクトリの [ger-tree-v1](https://github.com/kajisho5/gated-exec-remediation/blob/main/docs/design/design.md)（種類・相対パス・mode・サイズ・内容のハッシュ・リンクの値。時刻・所有者は含まない）、`detail` はそれ以外（検査ルート・ホームそのものの finding を含む）です。
   - `kind`（任意）: 機械可読な種別。`pkg.compromised` / `pkg.vulnerable` / `pkg.lockfile_compromised`（§15）、`mcp.dangerous_command` / `mcp.unpinned`（§17）、`gha.pwn_request`（§21）、`gha.unpinned`（§22・§28）、`secret.token`（§47）、`runtime.cve`（CVE の影響範囲の版。§3・§5・§6・§16・§37・§41 と intel の表）。
@@ -170,8 +175,8 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
   | `lockfile_unparsed:<path>` | ZES が解析しない形式のロックファイル（`bun.lockb`） |
   | `archive_not_inspected:<path>` | アーカイブ（`.whl`・`.tgz`・`.tar.gz`・`.zip`・`.jar`・`.war`・`.pyz`・`.egg`・`.gem`・`.crate`・`.nupkg`・`.vsix`・`.crx`・`.xpi`）を展開していない。`status` は変えない |
 - 文字列はすべて valid な UTF-8 です。制御文字は `\u00XX` でエスケープします。ファイル名の不正な UTF-8 バイトは `\xHH` というテキストに置き換え、そのパスを `errors[]` に `non_utf8_path` として記録します。FIFO・ソケット・デバイスファイルは開かず、`special_file` として記録します。
-- ブラウザ UI が書き出す findings.json のパスは、投入フォルダからの相対パスに `/` を前置したものです。`errors[]` に `ui:host_checks_not_performed` を記録します。1.1 の項目は CLI と同じものを付けますが、ブラウザが知りえない値は除きます（`scan_roots` は出さない、ディレクトリの `evidence` は `detail`〔ファイルの mode が分からない〕、シンボリックリンクは 0 バイトのファイルとして渡される）。UI は 1.0 と 1.1 のどちらの文書も読み込めます。`status` は `partial` で、取り込んだ CLI の findings.json が `status: error` だった場合は `error` です。
-- ブラウザ UI が生成する `id` は、上の CLI の式とは別の作り方です（`module|campaign|path|規則 ID` から生成し、`path` は相対パス）。UI の中でだけ安定し（同じフォルダを投入し直せば同じ `id`）、同じファイルの CLI の `id` とは一致しません。揃えると既存の `id` が変わるため、このままにしています。CLI の findings.json から取り込んだ finding の `id` はそのまま保ちます。
+- ブラウザ UI が書き出す findings.json のパスは、投入フォルダからの相対パスに `/` を前置したものです。`errors[]` に `ui:host_checks_not_performed` を記録します。CLI と同じ項目（形式 1.2。同じ検査には同じ `code`・`params`）を付けますが、ブラウザが知りえない値は除きます（`scan_roots` は出さない、ディレクトリの `evidence` は `detail`〔ファイルの mode が分からない〕、シンボリックリンクは 0 バイトのファイルとして渡される）。UI は 1.0・1.1・1.2 の文書を読み込めます（`code` の無い finding は `detail` をそのまま表示）。`status` は `partial` で、取り込んだ CLI の findings.json が `status: error` だった場合は `error` です。
+- ブラウザ UI が生成する `id` も同じ v2 の式ですが、`path` が投入フォルダからの相対パスのため、同じファイルの CLI の `id` とは一致しません。CLI の findings.json から取り込んだ finding の `id` はそのまま保ちます。
 
 後段のツールが依存してよい性質は、[docs/skill-contracts.md](docs/skill-contracts.ja.md) の §9 にまとめています。
 
