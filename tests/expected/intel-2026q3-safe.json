@@ -2,18 +2,28 @@
   "findings": [
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
       "level": "MEDIUM",
       "module": "§28",
       "path": "Dockerfile"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§37",
       "path": "package-lock.json"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "INFO",
       "module": "§4",
       "path": "Dockerfile"

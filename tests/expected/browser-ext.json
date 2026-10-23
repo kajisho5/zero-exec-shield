@@ -2,27 +2,63 @@
   "findings": [
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§24",
-      "path": "Extensions/abcd/manifest.json"
+      "path": "Extensions/abcd/manifest.json",
+      "related": [
+        {
+          "path": "Extensions/abcd",
+          "relation": "ext_dir"
+        }
+      ]
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§24",
-      "path": "Extensions/abcd/manifest.json"
+      "path": "Extensions/abcd/manifest.json",
+      "related": [
+        {
+          "path": "Extensions/abcd",
+          "relation": "ext_dir"
+        }
+      ]
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§24",
-      "path": "Extensions/efgh/2.0.0/manifest.json"
+      "path": "Extensions/efgh/2.0.0/manifest.json",
+      "related": [
+        {
+          "path": "Extensions/efgh",
+          "relation": "ext_dir"
+        }
+      ]
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§42",
-      "path": "Extensions/efgh/2.0.0/manifest.json"
+      "path": "Extensions/efgh/2.0.0/manifest.json",
+      "related": [
+        {
+          "path": "Extensions/efgh",
+          "relation": "ext_dir"
+        }
+      ]
     }
   ],
   "home": "_home",

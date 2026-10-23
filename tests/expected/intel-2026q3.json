@@ -2,181 +2,358 @@
   "findings": [
     {
       "campaign": "mcp-server-name-squat-canary",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "package-lock.json"
+      "path": "package-lock.json",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "mcp-server-github",
+        "safe_version": null,
+        "version": "0.0.1"
+      }
     },
     {
       "campaign": "proc-macro1-rust-dropper-aug2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "Cargo.lock"
+      "path": "Cargo.lock",
+      "subject": {
+        "ecosystem": "cargo",
+        "fixed_versions": [],
+        "package": "arrayref",
+        "safe_version": "0.3.9",
+        "version": "0.3.10"
+      }
     },
     {
       "campaign": "emudhra-ca-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.vulnerable",
       "level": "HIGH",
       "module": "§15",
-      "path": "Cargo.lock"
+      "path": "Cargo.lock",
+      "subject": {
+        "ecosystem": "cargo",
+        "fixed_versions": [
+          "1.0.10"
+        ],
+        "package": "webpki-roots",
+        "safe_version": "1.0.10",
+        "version": "1.0.9"
+      }
     },
     {
       "campaign": "emudhra-ca-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.vulnerable",
       "level": "HIGH",
       "module": "§15",
-      "path": "composer.lock"
+      "path": "composer.lock",
+      "subject": {
+        "ecosystem": "packagist",
+        "fixed_versions": [
+          "1.4.16 / 1.6.0"
+        ],
+        "package": "composer/ca-bundle",
+        "safe_version": "1.4.16 / 1.6.0",
+        "version": "1.4.15"
+      }
     },
     {
       "campaign": "mcp-ts-sdk-oct-2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.vulnerable",
       "level": "HIGH",
       "module": "§15",
-      "path": "package-lock.json"
+      "path": "package-lock.json",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [
+          "1.32.0 / 2.3.0"
+        ],
+        "package": "@modelcontextprotocol/sdk",
+        "safe_version": "1.32.0 / 2.3.0",
+        "version": "1.31.0"
+      }
     },
     {
       "campaign": "sigstore-fulcio-cve-2026-49478",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.vulnerable",
       "level": "HIGH",
       "module": "§15",
-      "path": "go.sum"
+      "path": "go.sum",
+      "subject": {
+        "ecosystem": "go",
+        "fixed_versions": [
+          "1.8.6"
+        ],
+        "package": "github.com/sigstore/fulcio",
+        "safe_version": "1.8.6",
+        "version": "v1.8.5"
+      }
     },
     {
       "campaign": "sigstore-js-cve-2026-48815",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.vulnerable",
       "level": "HIGH",
       "module": "§15",
-      "path": "package-lock.json"
+      "path": "package-lock.json",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [
+          "4.1.1"
+        ],
+        "package": "sigstore",
+        "safe_version": "4.1.1",
+        "version": "4.0.0"
+      }
     },
     {
       "campaign": "trinitite-7nohe-issue-comment-aug2026",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§15",
       "path": "scripts/sysvinit-detect-fash.sh"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "CRITICAL",
       "module": "§16",
       "path": "docker-compose.yml"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "CRITICAL",
       "module": "§16",
       "path": "docker-compose.yml"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "CRITICAL",
       "module": "§16",
       "path": "docker-compose.yml"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§16",
       "path": "Dockerfile"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§16",
       "path": "Dockerfile"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§16",
       "path": "docker-compose.yml"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§16",
       "path": "docker-compose.yml"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§16",
       "path": "docker-compose.yml"
     },
     {
       "campaign": "macsync-icloud-calendar-finder-backdoor",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§18",
       "path": "src/beacon.js"
     },
     {
       "campaign": "codfish-semantic-release-action-jun2026",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§22",
       "path": ".github/workflows/release.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
       "level": "HIGH",
       "module": "§22",
       "path": ".github/workflows/release.yml"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
       "level": "MEDIUM",
       "module": "§28",
       "path": "Dockerfile"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "CRITICAL",
       "module": "§3",
       "path": "docker-compose.yml"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§37",
       "path": "package-lock.json"
     },
     {
       "campaign": "codfish-semantic-release-action-jun2026",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§38",
       "path": ".github/workflows/release.yml"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§4",
       "path": "Dockerfile"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "INFO",
       "module": "§4",
       "path": "Dockerfile"
     },
     {
       "campaign": "emudhra-ca-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§6",
       "path": ".nvmrc"
     },
     {
       "campaign": "emudhra-ca-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§6",
       "path": "Dockerfile"
     },
     {
       "campaign": "emudhra-ca-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§6",
       "path": "lib/apk/db/installed"
     },
     {
       "campaign": "emudhra-ca-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§6",
       "path": "var/lib/dpkg/status"
     },
     {
       "campaign": "actions-cool-reactivation-sep2026",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/hooks/SessionStart/0"
+        }
+      ],
       "module": "§7",
       "path": ".claude/settings.json"
     }

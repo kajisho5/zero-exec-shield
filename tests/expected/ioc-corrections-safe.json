@@ -2,18 +2,37 @@
   "findings": [
     {
       "campaign": "mcp-python-sdk-jul-2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.vulnerable",
       "level": "HIGH",
       "module": "§15",
-      "path": "requirements.txt"
+      "path": "requirements.txt",
+      "subject": {
+        "ecosystem": "pypi",
+        "fixed_versions": [
+          "1.28.1"
+        ],
+        "package": "mcp",
+        "safe_version": "1.28.1",
+        "version": "1.27.2"
+      }
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§37",
       "path": "package-lock.json"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§37",
       "path": "requirements.txt"

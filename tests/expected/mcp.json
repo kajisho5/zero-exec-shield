@@ -2,13 +2,33 @@
   "findings": [
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "mcp.dangerous_command",
       "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/mcpServers/evil"
+        }
+      ],
       "module": "§17",
       "path": ".mcp.json"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "mcp.unpinned",
       "level": "MEDIUM",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/mcpServers/fetcher"
+        }
+      ],
       "module": "§17",
       "path": ".mcp.json"
     }

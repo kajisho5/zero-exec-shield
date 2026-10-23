@@ -2,6 +2,9 @@
   "findings": [
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§43",
       "path": "verify.sh"

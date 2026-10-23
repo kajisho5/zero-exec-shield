@@ -2,6 +2,9 @@
   "findings": [
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§18",
       "path": "upper/p.js"

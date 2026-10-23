@@ -2,18 +2,27 @@
   "findings": [
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§27",
       "path": "build.rs"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§27",
       "path": "pyproject.toml"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§27",
       "path": "pyproject.toml"

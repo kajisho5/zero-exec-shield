@@ -2,6 +2,10 @@
   "findings": [
     {
       "campaign": "emudhra-ca-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§6",
       "path": "ubuntu/var/lib/dpkg/status"

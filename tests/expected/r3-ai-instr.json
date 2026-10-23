@@ -2,48 +2,72 @@
   "findings": [
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§7",
       "path": ".claude/agents/reviewer.md"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§7",
       "path": ".clinerules/style.md"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§7",
       "path": ".github/instructions/review.instructions.md"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§7",
       "path": ".windsurfrules"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§7",
       "path": "AGENTS.md"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§7",
       "path": "CLAUDE.local.md"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§7",
       "path": "GEMINI.md"
     },
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§7",
       "path": "vs-run/CLAUDE.md"

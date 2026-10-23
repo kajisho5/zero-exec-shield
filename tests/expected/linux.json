@@ -2,13 +2,33 @@
   "findings": [
     {
       "campaign": "ebpf-rootkit",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
+      "locators": [
+        {
+          "format": "text",
+          "line": 1,
+          "line_sha256": "sha256:4aed34e23db5551797dadb4fe7852834f220ccab36e6bc8a6f6119ee9caf02d7"
+        }
+      ],
       "module": "§31",
       "path": "ld.so.preload"
     },
     {
       "campaign": "ebpf-rootkit",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
+      "locators": [
+        {
+          "format": "text",
+          "line": 2,
+          "line_sha256": "sha256:def9288ab3627bb5810aaf1915f8e2b2133707c92dae7bf090ef051d82c8b3dd"
+        }
+      ],
       "module": "§31",
       "path": ".bashrc"
     }

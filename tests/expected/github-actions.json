@@ -2,72 +2,118 @@
   "findings": [
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.pwn_request",
       "level": "CRITICAL",
       "module": "§21",
       "path": ".github/workflows/flow-ref.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.pwn_request",
       "level": "CRITICAL",
       "module": "§21",
       "path": ".github/workflows/flow-step-ref.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.pwn_request",
       "level": "CRITICAL",
       "module": "§21",
       "path": ".github/workflows/folded-ref.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.pwn_request",
       "level": "CRITICAL",
       "module": "§21",
       "path": ".github/workflows/next-line-uses.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.pwn_request",
       "level": "HIGH",
       "module": "§21",
       "path": ".github/workflows/pr-target.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§21",
       "path": ".github/workflows/pr-target.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "HIGH",
       "module": "§21",
       "path": ".github/workflows/pr-target.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
       "level": "CRITICAL",
       "module": "§22",
       "path": ".github/workflows/case-variant.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
       "level": "CRITICAL",
       "module": "§22",
       "path": ".github/workflows/flow-mapping.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
       "level": "CRITICAL",
       "module": "§22",
       "path": ".github/workflows/tag-ref.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
       "level": "HIGH",
       "module": "§22",
       "path": ".github/workflows/next-line-uses.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
       "level": "HIGH",
       "module": "§22",
       "path": ".github/workflows/tag-ref.yml"

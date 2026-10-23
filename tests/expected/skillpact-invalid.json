@@ -2,15 +2,33 @@
   "findings": [
     {
       "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§49",
-      "path": "integrity-mismatch/skill.contract.json"
+      "path": "integrity-mismatch/skill.contract.json",
+      "related": [
+        {
+          "path": "integrity-mismatch",
+          "relation": "skill_dir"
+        }
+      ]
     },
     {
       "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§49",
-      "path": "undeclared-effect/skill.contract.json"
+      "path": "undeclared-effect/skill.contract.json",
+      "related": [
+        {
+          "path": "undeclared-effect",
+          "relation": "skill_dir"
+        }
+      ]
     }
   ],
   "home": "_home",

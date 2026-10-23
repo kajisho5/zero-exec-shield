@@ -2,102 +2,263 @@
   "findings": [
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "c-yarn-crlf/yarn.lock"
+      "path": "c-yarn-crlf/yarn.lock",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "keyv",
+        "safe_version": "latest 5.x",
+        "version": "6.0.0"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "f-nm-min/node_modules/keyv/package.json"
+      "path": "f-nm-min/node_modules/keyv/package.json",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "keyv",
+        "safe_version": "latest 5.x",
+        "version": "6.0.0"
+      }
     },
     {
       "campaign": "chaindrop-keyv",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "f-nm-nested/node_modules/flat-cache/package.json"
+      "path": "f-nm-nested/node_modules/flat-cache/package.json",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "flat-cache",
+        "safe_version": null,
+        "version": "6.1.24"
+      }
     },
     {
       "campaign": "litellm-oct2026",
+      "evidence": {
+        "kind": "tree"
+      },
+      "kind": "pkg.compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "h-egg-pytag/site-packages/litellm-1.107.0-py3.11.egg-info"
+      "path": "h-egg-pytag/site-packages/litellm-1.107.0-py3.11.egg-info",
+      "subject": {
+        "ecosystem": "pypi",
+        "fixed_versions": [],
+        "package": "litellm",
+        "safe_version": "1.106.2",
+        "version": "1.107.0"
+      }
     },
     {
       "campaign": "sleepergem-rubygems-jul2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "c-gem-crlf/Gemfile.lock"
+      "path": "c-gem-crlf/Gemfile.lock",
+      "subject": {
+        "ecosystem": "gem",
+        "fixed_versions": [],
+        "package": "git_credential_manager",
+        "safe_version": null,
+        "version": "2.8.0"
+      }
     },
     {
       "campaign": "sleepergem-rubygems-jul2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "i-gem-platform/Gemfile.lock"
+      "path": "i-gem-platform/Gemfile.lock",
+      "subject": {
+        "ecosystem": "gem",
+        "fixed_versions": [],
+        "package": "git_credential_manager",
+        "safe_version": null,
+        "version": "2.8.1"
+      }
     },
     {
       "campaign": "solana-typosquat",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "g-nm-noversion/node_modules/@solana-labs/web3js/package.json"
+      "path": "g-nm-noversion/node_modules/@solana-labs/web3js/package.json",
+      "subject": {
+        "ecosystem": "npm",
+        "fixed_versions": [],
+        "package": "@solana-labs/web3js",
+        "safe_version": null,
+        "version": null
+      }
     },
     {
       "campaign": "teampcp-mini-shai-hulud",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "c-req-crlf/requirements.txt"
+      "path": "c-req-crlf/requirements.txt",
+      "subject": {
+        "ecosystem": "pypi",
+        "fixed_versions": [],
+        "package": "mistralai",
+        "safe_version": "2.4.5",
+        "version": "2.4.6"
+      }
     },
     {
       "campaign": "teampcp-mini-shai-hulud",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.lockfile_compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "d-req-bom/requirements.txt"
+      "path": "d-req-bom/requirements.txt",
+      "subject": {
+        "ecosystem": "pypi",
+        "fixed_versions": [],
+        "package": "mistralai",
+        "safe_version": "2.4.5",
+        "version": "2.4.6"
+      }
     },
     {
       "campaign": "teampcp-mini-shai-hulud",
+      "evidence": {
+        "kind": "tree"
+      },
+      "kind": "pkg.compromised",
       "level": "CRITICAL",
       "module": "§15",
-      "path": "h-egg-nover/site-packages/mistralai.egg-info"
+      "path": "h-egg-nover/site-packages/mistralai.egg-info",
+      "subject": {
+        "ecosystem": "pypi",
+        "fixed_versions": [],
+        "package": "mistralai",
+        "safe_version": "2.4.5",
+        "version": "2.4.6"
+      }
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "mcp.dangerous_command",
       "level": "HIGH",
+      "locators": [
+        {
+          "format": "jsonc",
+          "pointer": "/servers/fetcher"
+        }
+      ],
       "module": "§17",
       "path": "e-jsonc/.vscode/mcp.json"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "mcp.dangerous_command",
       "level": "HIGH",
+      "locators": [
+        {
+          "format": "toml",
+          "pointer": "/mcp_servers/fetcher"
+        }
+      ],
       "module": "§17",
       "path": "n-codex/.codex/config.toml"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "mcp.dangerous_command",
       "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/mcpServers/evil"
+        }
+      ],
       "module": "§17",
       "path": "o-mcp-string-args/.mcp.json"
     },
     {
       "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "mcp.unpinned",
       "level": "MEDIUM",
+      "locators": [
+        {
+          "format": "toml",
+          "pointer": "/mcp_servers/pinned"
+        }
+      ],
       "module": "§17",
       "path": "n-codex/.codex/config.toml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.pwn_request",
       "level": "CRITICAL",
       "module": "§21",
       "path": "k-case/.github/workflows/prt.yml"
     },
     {
       "campaign": "ghostaction-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.pwn_request",
       "level": "CRITICAL",
       "module": "§21",
       "path": "k-quoted/.github/workflows/prt.yml"
     },
     {
       "campaign": "overlord-fake-zoom-dotnet",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§30",
       "path": "b-host/Library/LaunchAgents/com.zoom.plist"

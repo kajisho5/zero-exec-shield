@@ -2,6 +2,9 @@
   "findings": [
     {
       "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
       "level": "MEDIUM",
       "module": "§49",
       "path": "policies/broken.json"

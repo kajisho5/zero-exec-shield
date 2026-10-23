@@ -2,12 +2,19 @@
   "findings": [
     {
       "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
       "level": "CRITICAL",
       "module": "§4",
       "path": "crlf/.tool-versions"
     },
     {
       "campaign": "emudhra-ca-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
       "level": "HIGH",
       "module": "§6",
       "path": "crlf/.tool-versions"
