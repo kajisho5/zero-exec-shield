@@ -161,17 +161,47 @@ test('敵対的な findings.json の取り込みで画面が消えない・書�
   expect(errors).toEqual([]);
 });
 
-test('375px 幅でページ全体が横スクロールしない', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 800 });
-  await open(page);
-  await scan(page, 'chaindrop');
-  await expect(page.getByTestId('finding-row').first()).toBeVisible();
-  for (const tab of [/^総合/, /^SkillPact/, /^MCP/]) {
-    await page.getByRole('tab', { name: tab }).click();
-    const { sw, cw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
-    expect(sw, `${tab}`).toBeLessThanOrEqual(cw);
-  }
-});
+/** ページ全体の横スクロール量と、はみ出している要素（スクロール領域内を除く）を返す。 */
+async function overflow(page: Page) {
+  return page.evaluate(() => {
+    const cw = document.documentElement.clientWidth;
+    const clipped = (e: Element) => { for (let p = e.parentElement; p; p = p.parentElement) { if (['auto', 'scroll', 'hidden'].includes(getComputedStyle(p).overflowX)) return true; } return false; };
+    const bad = [...document.querySelectorAll('body *')].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.right > cw + 1 && !clipped(e); })
+      .slice(-3).map((e) => `${e.tagName}.${String(e.className).slice(0, 60)} "${(e.textContent ?? '').slice(0, 30)}"`);
+    return { sw: document.documentElement.scrollWidth, cw, bad };
+  });
+}
+
+// 各ビューアが実際に描画されるフィクスチャで、狭い幅でもページ全体が横スクロールしないこと
+const NARROW: [string, RegExp, string?][] = [
+  ['chaindrop', /^総合/],
+  ['skillpact-signed-divergence', /^SkillPact/, 'skillpact-viewer'],
+  ['skillpact-prose', /^SkillPact/, 'prose-alert'],
+  ['skillpact-diff-anomaly', /^SkillPact/, 'skill-item'],
+  ['github-actions', /^GitHub Actions/, 'actions-viewer'],
+  ['browser-ext', /^ブラウザ拡張/, 'extension-viewer'],
+];
+for (const width of [375, 320]) {
+  test(`${width}px 幅でページ全体が横スクロールしない（総合 / SkillPact / MCP / Actions / 拡張）`, async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', 'Playwright WebKit は隠しエントリだけのフォルダを setInputFiles できない（github-actions）');
+    await page.setViewportSize({ width, height: 800 });
+    await open(page);
+    for (const [fixture, tab, testid] of NARROW) {
+      await page.getByRole('tab', { name: /^総合/ }).click();
+      await scan(page, fixture);
+      await page.getByRole('tab', { name: tab }).click();
+      if (testid) await expect(page.getByTestId(testid).first()).toBeVisible();
+      const r = await overflow(page);
+      expect(r.sw, `${fixture} ${tab} ${width}px: ${r.bad.join(' | ')}`).toBeLessThanOrEqual(r.cw);
+    }
+    // 17 タブすべても確認する（最後のフィクスチャの結果で）
+    for (const t of await page.getByRole('tab').all()) {
+      await t.click();
+      const r = await overflow(page);
+      expect(r.sw, `${await t.textContent()} ${width}px: ${r.bad.join(' | ')}`).toBeLessThanOrEqual(r.cw);
+    }
+  });
+}
 
 test('「すべてのタブ」メニュー: Escape・外側クリックで閉じ、フォーカスを戻す', async ({ page }) => {
   await open(page);
