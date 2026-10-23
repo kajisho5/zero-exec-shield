@@ -1,6 +1,12 @@
 {
   "findings": [
     {
+      "campaign": "cl-unk-1211-sysgorat",
+      "level": "HIGH",
+      "module": "§30",
+      "path": ".bashrc"
+    },
+    {
       "campaign": "ebpf-rootkit",
       "level": "CRITICAL",
       "module": "§31",

@@ -227,7 +227,7 @@ resolve_path() {
 
 expand_home() {
   local p="$1"
-  case "$p" in "~/"*) printf '%s/%s' "$HOME_DIR" "${p#\~/}" ;; "~") printf '%s' "$HOME_DIR" ;; *) printf '%s' "$p" ;; esac
+  case "$p" in "~/"*) printf '%s/%s' "$HOME_DIR" "${p#\~/}" ;; '$HOME/'*) printf '%s/%s' "$HOME_DIR" "${p#\$HOME/}" ;; "~") printf '%s' "$HOME_DIR" ;; *) printf '%s' "$p" ;; esac
 }
 
 stat_mtime() { if [ "$OS_NAME" = "Darwin" ]; then stat -f %m -- "$1" 2>/dev/null; else stat -c %Y -- "$1" 2>/dev/null; fi; }
@@ -601,7 +601,13 @@ infra_fixed() {
 #   各関数は対応する § から呼ばれる。データを足すだけで検出対象が増える。
 #   intel は jq 必須（無い場合は errors[] に記録し、0 件扱いしない）
 # =============================================================================
-intel_jq() { jq -r "$1" "$IOC_FILE" 2>/dev/null; }
+# jq が失敗（フィルタのコンパイルエラー・データ不正）した場合は errors[] に記録する（0 件扱いしない / fail-closed）
+intel_jq() {
+  local rc
+  jq -r "$1" "$IOC_FILE" 2>/dev/null; rc=$?
+  [ "$rc" -eq 0 ] || record_error "$CURRENT_MODULE" "intel_jq_failed:$(printf '%s' "$1" | tr -s '\n\t ' '   ' | cut -c1-60)"
+  return "$rc"
+}
 intel_ready() {
   [ "$HAVE_JQ" -eq 1 ] || { record_error "$CURRENT_MODULE" "jq_unavailable:intel"; return 1; }
   return 0
@@ -714,8 +720,15 @@ intel_host_files() {
     case "$kind" in
       path)
         e="$(expand_home "$val")"
-        for f in $e; do [ -e "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス"; done
-        local rel="${val#\~/}"; rel="${rel#/}"
+        # ホーム外の絶対パス（/tmp・/etc 等）はホスト状態のため ZES_HOST_CHECKS=0 では見ない
+        case "$val" in "~/"*|'$HOME/'*) ;; /*) host_enabled || e="" ;; *) e="" ;; esac
+        if [ -n "$e" ]; then
+          # 空白を含むパス（Application Support 等）を分割せず、グロブ文字のみ展開する
+          local IFS=$'\n'
+          for f in $e; do [ -e "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス"; done
+          unset IFS
+        fi
+        local rel="${val#\~/}"; rel="${rel#\$HOME/}"; rel="${rel#/}"
         while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス（検査ルート内）"; done < <(files_path "/$(printf '%s' "$rel" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
         ;;
       file_name)
@@ -736,7 +749,7 @@ intel_host_files() {
     esac
   done < <(intel_jq '.intel.host[]? | .campaign as $c | (.severity // "HIGH") as $s |
             (((.paths // [])[] | [$c,$s,"path",.]), ((.file_names // [])[] | [$c,$s,"file_name",.]),
-             ((.launch_labels // [])[] | [$c,$s,"launch_label",.]), ((.systemd_units // [])[] | [$c,$s,"systemd_unit",.]))) | @tsv')
+             ((.launch_labels // [])[] | [$c,$s,"launch_label",.]), ((.systemd_units // [])[] | [$c,$s,"systemd_unit",.])) | @tsv')
 }
 intel_host_processes() {
   intel_ready || return 0
