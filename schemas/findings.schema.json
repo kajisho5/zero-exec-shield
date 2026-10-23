@@ -34,7 +34,7 @@
         "detail": { "type": "string", "description": "English sentence: the catalog entry f.<code> (i18n/en.json) with params filled in. Never depends on --lang or the locale" },
         "evidence_hash": { "$ref": "#/$defs/sha256" },
         "code": { "type": "string", "pattern": "^[a-z0-9_.]+$", "description": "Message id (1.2): the catalog key f.<code>. Language-neutral" },
-        "params": { "type": "object", "propertyNames": { "pattern": "^[a-z_]+$" }, "additionalProperties": { "type": "string" }, "description": "Values of the message (1.2), strings only. Never file contents" },
+        "params": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Values of the message (1.2): string values, keys matching ^[a-z_]+$ (the catalog placeholders). Never file contents" },
         "kind": { "type": "string", "pattern": "^[a-z0-9_.]+$", "description": "機械可読な種別（例 pkg.compromised, pkg.vulnerable, mcp.dangerous_command, gha.unpinned）" },
         "subject": { "type": "object", "additionalProperties": false, "properties": { "ecosystem": { "type": "string" }, "package": { "type": "string" }, "version": { "type": ["string", "null"] }, "safe_version": { "type": ["string", "null"] }, "fixed_versions": { "type": "array", "items": { "type": "string" } } } },
         "locators": { "type": "array", "items": { "type": "object", "additionalProperties": false, "properties": { "format": { "enum": ["json", "jsonc", "toml", "yaml", "ini", "text", "plist"] }, "pointer": { "type": "string" }, "line": { "type": "integer", "minimum": 1 }, "line_sha256": { "$ref": "#/$defs/sha256" } } }, "description": "同じファイルの該当箇所（内容は出さずハッシュだけ）" },
