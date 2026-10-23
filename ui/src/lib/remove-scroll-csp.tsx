@@ -1,12 +1,12 @@
-// react-remove-scroll の CSP 互換モジュール（vite.config.ts の resolve.alias で差し替える）。
+// CSP-compatible module of react-remove-scroll (swapped in by resolve.alias in vite.config.ts).
 //
-// 本家は react-style-singleton で実行時に <style> を差し込んでスクロールをロックする。この UI の CSP は
-// style-src にビルド時の CSS のハッシュ 1 つだけを許可するので、実行時の <style> はブロックされ、
-// securitypolicyviolation が出る（設計書 §4.2）。ここでは同じ API（Radix が渡す props）を受け取り、
-// ロックは CSSOM（element.style）で行う。CSSOM での書き込みは CSP の対象外。
+// The original locks scrolling by injecting <style> at runtime with react-style-singleton. The CSP of this UI
+// allows only the one hash of the build-time CSS in style-src, so a runtime <style> is blocked and
+// securitypolicyviolation fires (design doc §4.2). This module accepts the same API (the props Radix passes)
+// and locks via CSSOM (element.style). Writes through CSSOM are not subject to CSP.
 //
-// Radix が使うのは <RemoveScroll as={Slot} allowPinchZoom shards enabled> だけ。shards / allowPinchZoom の
-// 「ロック中でもスクロールできる領域」は、body の overflow を止める方式では不要（中の要素は普通にスクロールする）。
+// Radix only uses <RemoveScroll as={Slot} allowPinchZoom shards enabled>. The "areas that can scroll even while locked"
+// of shards / allowPinchZoom are unnecessary with the approach of stopping body overflow (elements inside scroll normally).
 import { forwardRef, useEffect, type ElementType, type ReactNode } from 'react';
 
 let locks = 0;
@@ -15,7 +15,7 @@ let saved: { overflow: string; paddingRight: string } | null = null;
 function lock() {
   if (locks++ > 0) return;
   const body = document.body;
-  // スクロールバーが消える分だけ右に余白を足し、背面の配置がずれないようにする
+  // Add padding on the right for the width of the vanishing scrollbar, so the background layout does not shift
   const gap = window.innerWidth - document.documentElement.clientWidth;
   saved = { overflow: body.style.overflow, paddingRight: body.style.paddingRight };
   body.style.overflow = 'hidden';
@@ -39,7 +39,7 @@ interface Props {
   children?: ReactNode;
   enabled?: boolean;
   className?: string;
-  // 本家の props。受け取って捨てる（DOM に流さない）
+  // Props of the original. Accepted and discarded (not passed on to the DOM)
   allowPinchZoom?: boolean;
   shards?: unknown;
   removeScrollBar?: boolean;

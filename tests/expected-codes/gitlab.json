@@ -1,0 +1,136 @@
+[
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "CRITICAL",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-106218",
+      "cvss": "10.0",
+      "fixed": "2026.1.3 2025.11.7",
+      "product": "teamcity",
+      "version": "2025.11.6"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "CRITICAL",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-111094",
+      "cvss": "9.8",
+      "fixed": "2026.2 2026.1.4 2025.11.8",
+      "product": "teamcity",
+      "version": "2025.11.6"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "s16.artifactory_vulnerable",
+    "level": "CRITICAL",
+    "module": "§16",
+    "params": {
+      "fixed": "7.111.21 7.117.28 7.125.20 7.133.29 7.146.38 7.161.20",
+      "version": "7.120.5"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "s16.teamcity_vulnerable",
+    "level": "CRITICAL",
+    "module": "§16",
+    "params": {
+      "fixed": "2026.1.3 2025.11.7",
+      "version": "2025.11.6"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "HIGH",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-42016",
+      "cvss": "8.8",
+      "fixed": "7.133.11",
+      "product": "jfrog-artifactory",
+      "version": "7.120.5"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "HIGH",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-42018",
+      "cvss": "7.5",
+      "fixed": "7.111.20 7.117.27 7.125.19 7.133.28 7.146.8",
+      "product": "jfrog-artifactory",
+      "version": "7.120.5"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "HIGH",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-66384",
+      "cvss": "5.3",
+      "fixed": "7.146.35 7.161.16",
+      "product": "jfrog-artifactory",
+      "version": "7.120.5"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "s3.gitlab_vulnerable",
+    "level": "CRITICAL",
+    "module": "§3",
+    "params": {
+      "cve": "CVE-2026-110264",
+      "cvss": "10.0",
+      "first_fixed": "19.5.1",
+      "fixed": "19.5.1 19.4.3 19.3.6 19.2.9 19.1.9 19.0.10 18.11.13",
+      "version": "17.0.0"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "s3.gitlab_vulnerable",
+    "level": "CRITICAL",
+    "module": "§3",
+    "params": {
+      "cve": "CVE-2026-19478",
+      "cvss": "9.4",
+      "first_fixed": "18.11.11",
+      "fixed": "18.11.11 19.0.8 19.1.6 19.2.4",
+      "version": "17.0.0"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "s3.gitlab_vulnerable",
+    "level": "CRITICAL",
+    "module": "§3",
+    "params": {
+      "cve": "CVE-2026-85706",
+      "cvss": "10.0",
+      "first_fixed": "19.3.2",
+      "fixed": "19.3.2 19.2.6 19.1.8 19.0.9 18.11.12",
+      "version": "17.0.0"
+    },
+    "path": "docker-compose.yml"
+  }
+]

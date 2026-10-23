@@ -1,0 +1,121 @@
+[
+  {
+    "campaign": null,
+    "code": "s4.php_vulnerable",
+    "level": "CRITICAL",
+    "module": "§4",
+    "params": {
+      "fixed": "8.5.12 8.4.27 8.3.36 8.2.35",
+      "version": "8.4.26"
+    },
+    "path": "tv-vuln/.tool-versions"
+  },
+  {
+    "campaign": null,
+    "code": "s4.dpkg_vulnerable",
+    "level": "HIGH",
+    "module": "§4",
+    "params": {
+      "advisory": "DLA-4848-1",
+      "fixed": "8.2.35-1~deb12u1",
+      "os": "debian",
+      "os_version": "12",
+      "package": "php8.2-fpm",
+      "url": "https://security-tracker.debian.org/tracker/DLA-4848-1",
+      "version": "8.2.33-1~deb12u1"
+    },
+    "path": "deb12-vuln/var/lib/dpkg/status"
+  },
+  {
+    "campaign": null,
+    "code": "s4.dpkg_vulnerable",
+    "level": "HIGH",
+    "module": "§4",
+    "params": {
+      "advisory": "USN-8948-1",
+      "fixed": "8.3.6-0ubuntu0.24.04.13",
+      "os": "ubuntu",
+      "os_version": "24.04",
+      "package": "php8.3-fpm",
+      "url": "https://ubuntu.com/security/notices/USN-8948-1",
+      "version": "8.3.6-0ubuntu0.24.04.12"
+    },
+    "path": "ubuntu2404-vuln/var/lib/dpkg/status"
+  },
+  {
+    "campaign": null,
+    "code": "s4.dpkg_fixed",
+    "level": "INFO",
+    "module": "§4",
+    "params": {
+      "advisory": "USN-8948-1",
+      "fixed": "8.3.6-0ubuntu0.24.04.13",
+      "os": "ubuntu",
+      "os_version": "24.04",
+      "package": "libapache2-mod-php8.3",
+      "version": "8.3.6-0ubuntu0.24.04.13"
+    },
+    "path": "ubuntu2404-fixed/var/lib/dpkg/status"
+  },
+  {
+    "campaign": null,
+    "code": "s4.dpkg_fixed",
+    "level": "INFO",
+    "module": "§4",
+    "params": {
+      "advisory": "USN-8948-1",
+      "fixed": "8.3.6-0ubuntu0.24.04.13",
+      "os": "ubuntu",
+      "os_version": "24.04",
+      "package": "php8.3-fpm",
+      "version": "8.3.6-0ubuntu0.24.04.13"
+    },
+    "path": "ubuntu2404-fixed/var/lib/dpkg/status"
+  },
+  {
+    "campaign": null,
+    "code": "s4.dpkg_no_advisory",
+    "level": "MEDIUM",
+    "module": "§4",
+    "params": {
+      "os": "debian",
+      "os_version": "11",
+      "package": "php7.4-fpm",
+      "source": "php7.4",
+      "version": "7.4.33-1+deb11u8"
+    },
+    "path": "deb11-unknown/var/lib/dpkg/status"
+  },
+  {
+    "campaign": null,
+    "code": "s4.php_unknown_branch",
+    "level": "MEDIUM",
+    "module": "§4",
+    "params": {
+      "fixed": "8.5.12 8.4.27 8.3.36 8.2.35",
+      "version": "8.6.0"
+    },
+    "path": "tv-86/.tool-versions"
+  },
+  {
+    "campaign": null,
+    "code": "s4.php_unknown_branch",
+    "level": "MEDIUM",
+    "module": "§4",
+    "params": {
+      "fixed": "8.5.12 8.4.27 8.3.36 8.2.35",
+      "version": "9.0.0"
+    },
+    "path": "tv-9/.tool-versions"
+  },
+  {
+    "campaign": null,
+    "code": "s4.php_prerelease",
+    "level": "MEDIUM",
+    "module": "§4",
+    "params": {
+      "version": "8.5.12RC1"
+    },
+    "path": "tv-rc/.tool-versions"
+  }
+]

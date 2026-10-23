@@ -1,0 +1,20 @@
+[
+  {
+    "campaign": "skillpact-divergence",
+    "code": "s49.divergence.network.signed",
+    "level": "HIGH",
+    "module": "§49",
+    "params": {},
+    "path": "v08-valid-signed"
+  },
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.partial_check_errors",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "errors": "INTEGRITY_MISMATCH"
+    },
+    "path": "v08-valid-signed/skill.contract.json"
+  }
+]

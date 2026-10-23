@@ -1,0 +1,12 @@
+[
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.unsupported_version",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "version": "9.0"
+    },
+    "path": "version-unknown-major/skill.contract.json"
+  }
+]

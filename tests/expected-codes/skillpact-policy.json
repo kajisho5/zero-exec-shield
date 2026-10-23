@@ -1,0 +1,12 @@
+[
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.policy_invalid",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "problems": "defaults, rules"
+    },
+    "path": "policies/broken.json"
+  }
+]

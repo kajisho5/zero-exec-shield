@@ -1,0 +1,31 @@
+[
+  {
+    "campaign": null,
+    "code": "s28.from_digest",
+    "level": "MEDIUM",
+    "module": "§28",
+    "params": {},
+    "path": "Dockerfile"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s37.mcp_dependency",
+    "level": "MEDIUM",
+    "module": "§37",
+    "params": {
+      "package": "@modelcontextprotocol/sdk",
+      "version": "1.32.0"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": null,
+    "code": "s4.php_image",
+    "level": "INFO",
+    "module": "§4",
+    "params": {
+      "image": "php:8.3.36-apache"
+    },
+    "path": "Dockerfile"
+  }
+]

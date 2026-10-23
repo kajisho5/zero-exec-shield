@@ -18,30 +18,32 @@ import { Tabs, TabsContent } from './components/ui/tabs';
 import { useToast } from './components/ui/toast';
 import { ActionsViewer, ExtensionViewer, McpViewer } from './components/viewers/Viewers';
 import { useIsMobile } from './hooks/useMediaQuery';
+import { t as tNow, useLang } from './i18n';
 import { ScanProvider, useScan } from './state/ScanContext';
 import { allFindings } from './state/reducer';
 import { TABS, findingsForTab, type TabId } from './tabs/definitions';
 
 const nowIso = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-/** 検体名: 投入したフォルダの最上位の名前（webkitRelativePath の先頭）。 */
+/** Sample name: the top-level name of the dropped folder (the first segment of webkitRelativePath). */
 const specimenOf = (picked: PickedFile[]) => {
   const p = picked[0]?.relPath ?? '';
   const i = p.indexOf('/');
-  return i > 0 ? p.slice(0, i + 1) : p || 'フォルダ';
+  return i > 0 ? p.slice(0, i + 1) : p || tNow('ui.app.folder_fallback');
 };
 
 function Scanner() {
   const { state, dispatch } = useScan();
   const toast = useToast();
   const mobile = useIsMobile();
+  const { t, fmt } = useLang();
   const findings = allFindings(state);
   const tab = TABS.find((t) => t.id === state.ui.activeTab) ?? TABS[0]!;
   const busy = state.phase === 'reading' || state.phase === 'analyzing';
   const [specimen, setSpecimen] = useState<string | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
-  // 貼り付けシートを閉じたらフォーカスを開いたボタンへ戻す。開く前（未投入）と後（投入済み）でボタンが入れ替わるので、
-  // 押したボタンが消えていれば、いま出ている方（data-paste-opener）へ戻す
+  // When the paste sheet closes, return focus to the button that opened it. The button is swapped before (nothing loaded) and after (loaded),
+  // so if the pressed button is gone, return to the one now shown (data-paste-opener)
   const pasteOpener = useRef<HTMLElement | null>(null);
   const openPaste = (e: React.MouseEvent<HTMLElement>) => { pasteOpener.current = e.currentTarget; setPasteOpen(true); };
   const returnPasteFocus = (e: Event) => {
@@ -52,12 +54,12 @@ function Scanner() {
   const dirInput = useRef<HTMLInputElement>(null);
   const importInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    // React の型に無い属性のため DOM で付与（D&D 非対応環境のフォルダ選択フォールバック、F-02）
+    // Set via the DOM because the attribute is not in the React types (folder-picker fallback for environments without D&D, F-02)
     dirInput.current?.setAttribute('webkitdirectory', '');
     dirInput.current?.setAttribute('directory', '');
   }, []);
 
-  // 実行中のスキャン。クリア・次のスキャンで中断し、その結果は reducer が scanId の不一致で捨てる
+  // The scan in progress. Aborted by clear or the next scan; its result is discarded by the reducer on a scanId mismatch
   const current = useRef<AbortController | null>(null);
   const nextId = useRef(0);
   const cancelScan = () => { current.current?.abort(); current.current = null; };
@@ -65,8 +67,8 @@ function Scanner() {
 
   const scan = async (picked: PickedFile[]) => {
     if (!picked.length) {
-      // 何も起きないと「安全」と誤認させるため、0 件であることを必ず知らせる（隠しファイルを渡さないブラウザがある）
-      toast({ tone: 'error', text: 'ファイルが 0 件でした。隠しファイル（.mcp.json 等）だけのフォルダはブラウザによって渡されません。ドラッグ＆ドロップか CLI で確認してください' });
+      // Nothing happening would be mistaken for "safe", so always report that there are 0 files (some browsers do not pass hidden files)
+      toast({ tone: 'error', text: t('ui.toast.zero_files') });
       return;
     }
     cancelScan();
@@ -83,22 +85,22 @@ function Scanner() {
       if (ctl.signal.aborted) return;
       dispatch({ type: 'SCAN_RESULT', scanId, result, finishedAt: nowIso(), durationMs: performance.now() - t0 });
     } catch (e) {
-      if (ctl.signal.aborted) return; // クリア・次のスキャンで中断（エラーではない）
+      if (ctl.signal.aborted) return; // aborted by clear or the next scan (not an error)
       dispatch({ type: 'SCAN_FAIL', scanId, message: e instanceof Error ? e.message : String(e) });
-      toast({ tone: 'error', text: '判定中にエラーが発生しました（結果は表示しません）' });
+      toast({ tone: 'error', text: t('ui.toast.scan_failed') });
     }
   };
 
   const paste = async (text: string) => {
     dispatch({ type: 'PASTE_RESULT', findings: await analyzePaste(text) });
-    setSpecimen((s) => s ?? '貼り付けたテキスト');
+    setSpecimen((s) => s ?? t('ui.app.pasted_name'));
     setPasteOpen(false);
-    toast({ tone: 'ok', text: '貼り付けテキストを判定しました（内容は保持しません）' });
+    toast({ tone: 'ok', text: t('ui.toast.pasted') });
   };
 
   const tabFindings = useMemo(() => findingsForTab(tab, findings), [tab, findings]);
   const modules = useMemo(() => [...new Set(tabFindings.map((f) => f.module))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))), [tabFindings]);
-  // このタブに無いモジュールの絞り込みは効かせない（選択欄が「すべて」なのに全行が消える状態を作らない）。SET_TAB でも消す
+  // A module filter not present in this tab is not applied (avoid a state where the select shows "All" yet every row is gone). SET_TAB clears it too
   const moduleFilter = state.ui.moduleFilter && modules.includes(state.ui.moduleFilter) ? state.ui.moduleFilter : null;
   useEffect(() => { if (state.ui.moduleFilter && !moduleFilter) dispatch({ type: 'SET_MODULE', module: null }); }, [state.ui.moduleFilter, moduleFilter, dispatch]);
   const visible = useMemo(() => {
@@ -125,43 +127,43 @@ function Scanner() {
       const doc = parseFindingsDoc(await file.text());
       dispatch({ type: 'IMPORT_FINDINGS', doc });
       setSpecimen((s) => s ?? file.name);
-      if (doc.dropped) toast({ tone: 'error', text: `CLI の findings.json を読み込みました（スキーマに適合しない ${doc.dropped} 件を除外）` });
-      else toast({ tone: 'ok', text: 'CLI の findings.json を読み込みました' });
+      if (doc.dropped) toast({ tone: 'error', text: t('ui.toast.imported_dropped', { n: doc.dropped }) });
+      else toast({ tone: 'ok', text: t('ui.toast.imported') });
     } catch (e) {
-      toast({ tone: 'error', text: e instanceof ImportError ? e.message : 'findings.json を読み込めませんでした' });
+      toast({ tone: 'error', text: e instanceof ImportError ? t(e.key) : t('ui.toast.import_failed') });
     }
   };
 
   const r = state.result;
-  // SAFE = 実行したチェックのうち、1 件も該当しなかったもの（ブラウザ判定範囲のみ）
+  // SAFE = the checks that were run and matched nothing (within the browser scope only)
   const hitChecks = new Set((r?.findings ?? []).map((f) => f.ruleId.split(':')[0]!));
   const total = r?.checksRun.length ?? 0;
   const clearChecks = r ? r.checksRun.filter((c) => !hitChecks.has(c)).length : 0;
-  const empty = state.phase === 'idle' && !findings.length ? 'フォルダを投入するか、テキストを貼り付けてください' : findings.length ? '条件に一致する検出はありません' : '検出なし（ブラウザで判定できる範囲内。ホスト検査は CLI で実施）';
+  const empty = t(state.phase === 'idle' && !findings.length ? 'ui.empty.start' : findings.length ? 'ui.empty.filtered' : 'ui.empty.none');
   const und = r ? r.stats.skippedSize + r.stats.skippedBinary + r.stats.zeroByteDecoys + r.stats.errors : null;
 
   const status: SpecimenStatus = busy
-    ? { kind: 'busy', text: state.phase === 'reading' ? '読み取り中' : '判定中', sub: `${state.progress.processed.toLocaleString()} / ${state.progress.total.toLocaleString()} ファイル` }
-    : state.phase === 'error' ? { kind: 'error', text: 'エラー', sub: state.errorMessage ?? '' }
-      : r ? { kind: 'done', text: 'スキャン完了', sub: 'ドロップで差し替え' }
-        : state.imported ? { kind: 'imported', text: '取り込み完了', sub: 'CLI の findings.json' }
-          : { kind: 'pasted', text: '判定完了', sub: '貼り付けたテキスト' };
+    ? { kind: 'busy', text: t(state.phase === 'reading' ? 'ui.status.reading' : 'ui.status.analyzing'), sub: t('ui.status.progress', { done: fmt(state.progress.processed), total: fmt(state.progress.total) }) }
+    : state.phase === 'error' ? { kind: 'error', text: t('ui.status.error'), sub: state.errorMessage ?? '' }
+      : r ? { kind: 'done', text: t('ui.status.done'), sub: t('ui.status.done_sub') }
+        : state.imported ? { kind: 'imported', text: t('ui.status.imported'), sub: t('ui.status.imported_sub') }
+          : { kind: 'pasted', text: t('ui.status.pasted'), sub: t('ui.status.pasted_sub') };
   const started = state.phase !== 'idle' || !!state.imported || state.pasteFindings.length > 0;
   const pickFolder = () => dirInput.current?.click();
   const pickImport = () => importInput.current?.click();
   const dropFolder = async (dt: DataTransfer) => {
     let picked: PickedFile[];
     try { picked = await fromDataTransfer(dt); } catch {
-      // 読めなかったことを黙って捨てない（何も起きないと「問題なし」と誤認させる）
-      toast({ tone: 'error', text: 'ドロップしたフォルダを読み取れませんでした。「フォルダを選択…」か CLI で確認してください' });
+      // Do not silently drop what could not be read (nothing happening would be mistaken for "no problems")
+      toast({ tone: 'error', text: t('ui.toast.drop_unreadable') });
       return;
     }
     await scan(picked);
   };
 
-  // ドロップ先の外にファイルを落としても、ブラウザがそのファイルへ移動しない（file:// の画面が消え、
-  // ローカルのファイルを開いてしまう）。ファイルのドラッグだけを扱い、テキストのドラッグ（貼り付け欄など）は既定のまま。
-  // ドロップ先が処理したもの（defaultPrevented）は二重に扱わない。それ以外はドロップ先と同じくスキャンへ回す。
+  // Even if a file is dropped outside the drop target, the browser does not navigate to it (the file:// page would disappear
+  // and open the local file). Only file drags are handled; text drags (the paste box etc.) keep the default.
+  // What a drop target already handled (defaultPrevented) is not handled twice. Anything else goes to the scan, like the drop target.
   const dropRef = useRef({ busy, dropFolder });
   dropRef.current = { busy, dropFolder };
   useEffect(() => {
@@ -171,7 +173,7 @@ function Scanner() {
       if (!hasFiles(e) || e.defaultPrevented) return;
       e.preventDefault();
       const { busy: b, dropFolder: go } = dropRef.current;
-      if (b) toast({ tone: 'error', text: '判定中です。終わってから検体票（ドロップ先）へドロップしてください' });
+      if (b) toast({ tone: 'error', text: tNow('ui.toast.busy_drop') });
       else void go(e.dataTransfer!);
     };
     window.addEventListener('dragover', over);
@@ -195,22 +197,22 @@ function Scanner() {
                 <div className="grid grid-cols-[minmax(0,1fr)_320px] gap-8 max-xl:grid-cols-[minmax(0,1fr)_300px] max-lg:grid-cols-1">
                   <div className="flex min-w-0 flex-col gap-4 max-sm:gap-3">
                     {tab.id === 'overview' && (started
-                      ? <SpecimenForm name={specimen ?? '—'} files={r ? r.stats.files.toLocaleString() : '—'} duration={r ? `${(state.durationMs / 1000).toFixed(1)} 秒` : '—'}
-                          undetermined={und === null ? '—' : `${und.toLocaleString()} 件`} status={status} busy={busy} onDrop={dropFolder} onPick={pickFolder} />
+                      ? <SpecimenForm name={specimen ?? '—'} files={r ? fmt(r.stats.files) : '—'} duration={r ? t('ui.spec.seconds', { n: (state.durationMs / 1000).toFixed(1) }) : '—'}
+                          undetermined={und === null ? '—' : t('ui.spec.count', { n: fmt(und) })} status={status} busy={busy} onDrop={dropFolder} onPick={pickFolder} />
                       : <Intake busy={busy} onDrop={dropFolder} onPick={pickFolder} onImport={pickImport} />)}
                     {tab.id === 'overview' && mobile && started && (
                       <div className="flex gap-2">
-                        <Button variant="ink" size="touch" disabled={busy} onClick={pickFolder} className="flex-1 justify-start"><FolderOpen />フォルダを選択…</Button>
-                        <Button variant="outline" size="icon-touch" aria-label="テキスト貼り付け判定" data-paste-opener onClick={openPaste}><ClipboardPaste /></Button>
+                        <Button variant="ink" size="touch" disabled={busy} onClick={pickFolder} className="flex-1 justify-start"><FolderOpen />{t('ui.pick_folder')}</Button>
+                        <Button variant="outline" size="icon-touch" aria-label={t('ui.paste.title')} data-paste-opener onClick={openPaste}><ClipboardPaste /></Button>
                       </div>
                     )}
                     {tab.id === 'overview' && mobile && !started && (
-                      <Button variant="outline" size="touch" data-paste-opener onClick={openPaste}><ClipboardPaste />テキスト貼り付け判定</Button>
+                      <Button variant="outline" size="touch" data-paste-opener onClick={openPaste}><ClipboardPaste />{t('ui.paste.title')}</Button>
                     )}
                     {state.imported && (
                       <p className="text-xs text-muted-foreground" data-testid="import-status">
-                        CLI 取り込み: {state.imported.findings.length} 件（status: {state.imported.status}）
-                        {state.imported.dropped > 0 && <span className="text-high">。スキーマ不適合で除外 {state.imported.dropped} 件</span>}
+                        {t('ui.app.import_status', { n: state.imported.findings.length, status: state.imported.status })}
+                        {state.imported.dropped > 0 && <span className="text-high">{t('ui.app.import_dropped', { n: state.imported.dropped })}</span>}
                       </p>
                     )}
                     {tab.cliOnlyNote && <CliOnlyNotice note={tab.cliOnlyNote} compact />}
@@ -222,7 +224,7 @@ function Scanner() {
                     {tab.viewer === 'actions' && <ActionsViewer workflows={r?.viewers.actions ?? []} />}
                     {tab.viewer === 'extensions' && <ExtensionViewer manifests={r?.viewers.extensions ?? []} />}
                   </div>
-                  <aside aria-label="欄外" className="flex min-w-0 flex-col gap-4 max-lg:grid max-lg:grid-cols-2 max-lg:gap-x-8 max-sm:flex max-sm:pt-2 [&>*+*]:border-t [&>*+*]:border-border [&>*+*]:pt-4 max-lg:[&>*:nth-child(2)]:border-t-0 max-lg:[&>*:nth-child(2)]:pt-0 max-sm:[&>*:nth-child(2)]:border-t max-sm:[&>*:nth-child(2)]:pt-4">
+                  <aside aria-label={t('ui.app.margin')} className="flex min-w-0 flex-col gap-4 max-lg:grid max-lg:grid-cols-2 max-lg:gap-x-8 max-sm:flex max-sm:pt-2 [&>*+*]:border-t [&>*+*]:border-border [&>*+*]:pt-4 max-lg:[&>*:nth-child(2)]:border-t-0 max-lg:[&>*:nth-child(2)]:pt-0 max-sm:[&>*:nth-child(2)]:border-t max-sm:[&>*:nth-child(2)]:pt-4">
                     {tab.id === 'overview' && !mobile && <PasteCheck onPaste={paste} />}
                     <BlastRadius items={r?.blastRadius ?? []} />
                     <CliOnlyNotice />
@@ -236,7 +238,7 @@ function Scanner() {
       </Tabs>
       {mobile && (
         <Sheet open={pasteOpen} onOpenChange={setPasteOpen}>
-          <SheetContent title="テキスト貼り付け判定" onCloseAutoFocus={returnPasteFocus} className="pb-[max(env(safe-area-inset-bottom),16px)]">
+          <SheetContent title={t('ui.paste.title')} onCloseAutoFocus={returnPasteFocus} className="pb-[max(env(safe-area-inset-bottom),16px)]">
             <PasteCheck onPaste={paste} inSheet />
           </SheetContent>
         </Sheet>

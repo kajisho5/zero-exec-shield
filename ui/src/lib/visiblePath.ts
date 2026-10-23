@@ -1,18 +1,18 @@
-// 信頼できない名前（パス・ファイル名・取り込んだ findings.json の文字列）を画面に出すときだけ使う変換。
-// C0 / DEL / C1 の制御文字と双方向制御文字（LRM・RLM・ALM、LRE〜RLO、LRI〜PDI）は、そのまま描くと
-// 表示を偽装できる（例: "invoice<U+202E>gnp.js" が "invoicesj.png" に見える）。目に見える ⟨U+XXXX⟩ に置き換える。
-// 表示専用。コピー・書き出し・検索・id には元の値を使う（コピーは利用者が求めた「そのパス」なので、置き換えない）。
+// A conversion used only when showing untrusted names (paths, file names, strings from an imported findings.json) on screen.
+// C0 / DEL / C1 control characters and bidi control characters (LRM, RLM, ALM, LRE–RLO, LRI–PDI), drawn as is,
+// can spoof the display (e.g. "invoice<U+202E>gnp.js" looks like "invoicesj.png"). They are replaced by a visible ⟨U+XXXX⟩.
+// Display only. Copy, export, search and id use the original value (copy is "that path" the user asked for, so it is not replaced).
 
 const HIDDEN = /[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 
 const marker = (c: string) => `⟨U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}⟩`;
 
-/** 制御文字・双方向制御文字を ⟨U+XXXX⟩ の目印に置き換えた表示用の文字列。 */
+/** Display string with control and bidi control characters replaced by ⟨U+XXXX⟩ markers. */
 export function visiblePath(s: string): string {
   return s.replace(HIDDEN, marker);
 }
 
-/** null / undefined はそのまま返す visiblePath。 */
+/** visiblePath that returns null / undefined as is. */
 export function visibleOpt<T extends string | null | undefined>(s: T): T {
   return (typeof s === 'string' ? visiblePath(s) : s) as T;
 }

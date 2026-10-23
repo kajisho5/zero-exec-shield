@@ -1,5 +1,5 @@
-// 「検疫台」（設計書 v0.2）で増えた振る舞いの E2E: CSP 違反ゼロ（全エンジン）、テーマ、タブ検索、モバイルの詳細シート、
-// フォーカスの見え方、320px の集計、SkillPact の紫印。index.html（ビルド成果物）を file:// で開く。
+// E2E for the behavior added by the "quarantine bench" (design doc v0.2): zero CSP violations (all engines), theme, tab search, mobile detail sheet,
+// focus visibility, the 320px tally, the SkillPact violet stamp. Opens index.html (the build output) on file://.
 import { expect, test, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { pickDir } from './pick-dir';
@@ -11,14 +11,14 @@ declare global {
   interface Window { __csp: string[] }
 }
 
-/** 外部リクエスト・コンソールのエラー・securitypolicyviolation を記録して開く。 */
+/** Opens the page while recording external requests, console errors and securitypolicyviolation. */
 async function open(page: Page) {
   const external: string[] = [];
   const errors: string[] = [];
   page.on('request', (r) => { if (!/^(file|data|blob):/.test(r.url())) external.push(r.url()); });
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(e.message));
-  // ページのスクリプトより先に購読する（起動直後の違反も拾う）
+  // Subscribe before the page scripts (also catches violations right at startup)
   await page.addInitScript(() => {
     window.__csp = [];
     document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(`${e.violatedDirective} ${e.blockedURI} ${e.sample}`));
@@ -36,20 +36,20 @@ async function scan(page: Page, fixture: string) {
 test('CSP 違反ゼロ: 全タブ・タブ検索・メニュー・Tooltip・シート・トーストを開いても securitypolicyviolation が出ない', async ({ page }) => {
   const { external, errors, csp } = await open(page);
   await scan(page, 'chaindrop');
-  // 成果物の <style> はビルド時の 1 つだけ（実行時に差し込まれていない）
+  // The output has a single build-time <style> (nothing injected at runtime)
   expect(await page.evaluate(() => document.querySelectorAll('style').length)).toBe(1);
 
-  // 全タブ
+  // All tabs
   for (const t of await page.getByRole('tab').all()) await t.click();
   await page.getByRole('tab', { name: /^総合/ }).click();
 
-  // タブ検索（Popover＋Command）。開いている間は背面のスクロールを CSSOM でロックする（react-remove-scroll の互換モジュール）
+  // Tab search (Popover + Command). While open, background scrolling is locked via CSSOM (the react-remove-scroll compatible module)
   await page.getByTestId('all-tabs').click();
   await expect(page.getByRole('dialog', { name: 'すべてのタブ' })).toBeVisible();
   await page.keyboard.type('mcp');
   await page.keyboard.press('Escape');
 
-  // テーマのメニュー（DropdownMenu）
+  // Theme menu (DropdownMenu)
   await page.getByTestId('theme').click();
   await expect(page.getByRole('menu')).toBeVisible();
   expect(await page.evaluate(() => document.body.style.overflow)).toBe('hidden');
@@ -57,20 +57,20 @@ test('CSP 違反ゼロ: 全タブ・タブ検索・メニュー・Tooltip・シ�
   await expect(page.getByRole('menu')).toBeHidden();
   expect(await page.evaluate(() => document.body.style.overflow)).toBe('');
 
-  // Tooltip とトースト
+  // Tooltip and toast
   const copy = page.getByRole('button', { name: /^パスをコピー: / }).first();
   await copy.hover();
   await expect(page.getByRole('tooltip')).toContainText('パスをコピー');
   await copy.click();
   await expect(page.getByRole('status')).toContainText(/コピー/);
 
-  // SkillPact（押印）
+  // SkillPact (stamp)
   await page.getByRole('tab', { name: /^総合/ }).click();
   await scan(page, 'skillpact-signed-divergence');
   await page.getByRole('tab', { name: /^SkillPact/ }).click();
   await expect(page.getByTestId('signed-badge').first()).toBeVisible();
 
-  // モバイル: タブ検索のシート、「…」メニュー、検出の詳細シート、貼り付けのシート
+  // Mobile: tab search sheet, "…" menu, findings detail sheet, paste sheet
   await page.setViewportSize({ width: 375, height: 800 });
   await page.getByRole('tab', { name: /^総合/ }).click();
   await scan(page, 'chaindrop');
@@ -96,7 +96,7 @@ test('CSP 違反ゼロ: 全タブ・タブ検索・メニュー・Tooltip・シ�
 
 test.describe('テーマ', () => {
   const scheme = (page: Page) => page.evaluate(() => getComputedStyle(document.documentElement).colorScheme);
-  // 作業台の色（body の背景）を canvas で sRGB に直して返す（ブラウザごとの oklch の書式の差を吸収する）
+  // Returns the bench color (body background) converted to sRGB via canvas (absorbs differences in oklch formatting between browsers)
   const bg = (page: Page) => page.evaluate(() => {
     const x = document.createElement('canvas').getContext('2d')!;
     x.fillStyle = getComputedStyle(document.body).backgroundColor;
@@ -105,7 +105,7 @@ test.describe('テーマ', () => {
   });
   const near = (a: number[], b: number[]) => a.every((v, i) => Math.abs(v - b[i]!) <= 2);
 
-  // Chromium の colorScheme: 'no-preference' は light と同じ扱いになるため、OS の指定なしは CSS（:root の既定値がダーク）で担保する
+  // Chromium treats colorScheme: 'no-preference' the same as light, so "no OS preference" is covered by CSS (the :root default is dark)
   test('既定はダーク。OS がライトを指定しているときだけライト', async ({ browser }) => {
     for (const [colorScheme, want] of [['dark', 'dark'], ['light', 'light']] as const) {
       const ctx = await browser.newContext({ colorScheme });
@@ -186,13 +186,13 @@ test.describe('タブ検索', () => {
     await page.keyboard.press('Enter');
     await expect(page.getByRole('tab', { name: /^永続化/ })).toHaveAttribute('aria-selected', 'true');
 
-    // §番号（モジュール）と全角英字（NFKC で正規化）
+    // § number (module) and full-width letters (normalized with NFKC)
     await btn.click();
     await input.fill('§21');
     await expect(options).toHaveText([/^GitHub Actions/]);
     await input.fill('ＳＢＯＭ');
     await expect(options).toHaveText([/^Sigstore\/SBOM/]);
-    // 候補はクリックでも選べる
+    // Candidates can also be selected by click
     await options.first().click();
     await expect(page.getByRole('tab', { name: /^Sigstore/ })).toHaveAttribute('aria-selected', 'true');
 
@@ -221,14 +221,14 @@ test.describe('タブ検索', () => {
     await expect(sheet).toBeVisible();
     await expect(sheet).toContainText('並びは §7.2 の順で固定。数字は検出件数です。');
     await expect(sheet.getByRole('combobox')).toBeFocused();
-    // シートは画面の下端に付く
+    // The sheet is attached to the bottom edge of the screen
     await expect.poll(async () => { const b = (await sheet.boundingBox())!; return Math.round(b.y + b.height); }).toBe(800);
     await page.keyboard.insertText('actions');
     await page.keyboard.press('Enter');
     await expect(sheet).toBeHidden();
     await expect(page.getByRole('tab', { name: /^GitHub Actions/ })).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('tab', { name: /^GitHub Actions/ })).toBeFocused();
-    // 閉じるボタンでも閉じ、検索ボタンにフォーカスが戻る
+    // The close button closes it too, and focus returns to the search button
     await page.getByTestId('all-tabs').click();
     await sheet.getByRole('button', { name: '閉じる' }).click();
     await expect(sheet).toBeHidden();
@@ -242,7 +242,7 @@ test('モバイル（375px）: 検出はカード型の行で、行を押すと�
   await scan(page, 'chaindrop');
   const row = page.getByTestId('finding-row').first();
   await expect(row).toHaveAttribute('data-level', 'CRITICAL');
-  // パスが画面の中に見えている（W-1: 表の横スクロールでパスが画面外にならない）
+  // The path is visible on screen (W-1: horizontal scrolling of the table does not push the path off screen)
   const path = row.getByText(/^chaindrop\//).first();
   await expect(path).toBeVisible();
   const pb = (await path.boundingBox())!;
@@ -276,7 +276,7 @@ test('フォーカスが見える（墨の 2px の輪郭）: Tab で移ったボ
       const f = await page.evaluate(() => {
         const el = document.activeElement as HTMLElement | null;
         if (!el || el === document.body) return null;
-        // 入力欄は外側の枠（ラッパー）に輪郭を出す
+        // Inputs show the outline on the outer frame (wrapper)
         const target = el.matches('input, textarea') ? (el.closest('[data-slot=input-wrapper], [data-slot=command-input-wrapper]') as HTMLElement | null) ?? el : el;
         const cs = getComputedStyle(target);
         return { kind: el.getAttribute('role') ?? el.tagName.toLowerCase(), style: cs.outlineStyle, width: cs.outlineWidth, color: cs.outlineColor, fg: getComputedStyle(document.body).color };
@@ -327,12 +327,12 @@ test('SkillPact: 署名は紫印（--signed）で、緑の部品を置かない'
   });
   expect(color).toBe(signed);
   expect(border).toBe(signed);
-  // 押印の隣に意味の文がある（ツールチップに隠さない）
+  // A sentence with the meaning is next to the stamp (not hidden in a tooltip)
   await expect(page.getByTestId('level-note')).toContainText('L3 であっても「安全」を意味しません');
   await expect(page.getByRole('tabpanel').locator('[data-severity=SAFE], .text-safe, .bg-safe, .border-safe')).toHaveCount(0);
 });
 
-/** ページ全体の横スクロール量と、はみ出している要素（スクロール領域内を除く）を返す。 */
+/** Returns the horizontal scroll amount of the whole page and the overflowing elements (excluding those inside scroll areas). */
 async function overflow(page: Page) {
   return page.evaluate(() => {
     const cw = document.documentElement.clientWidth;
@@ -343,8 +343,8 @@ async function overflow(page: Page) {
   });
 }
 
-// app.spec.ts の幅ごとの検査は WebKit で skip される（github-actions のフィクスチャを setInputFiles できない）。
-// 隠しエントリだけのフィクスチャを使わずに、全エンジン・両テーマで同じ検査をする（シートを開いた状態も含む）。
+// The per-width checks of app.spec.ts are skipped on WebKit (setInputFiles cannot load the github-actions fixture).
+// Without fixtures made only of hidden entries, run the same checks on all engines and both themes (including with sheets open).
 for (const width of [320, 375]) {
   test(`${width}px: 全エンジン・両テーマで横スクロールしない（シートを開いた状態も含む）`, async ({ browser }) => {
     for (const colorScheme of ['dark', 'light'] as const) {
@@ -373,9 +373,9 @@ for (const width of [320, 375]) {
   });
 }
 
-// 設計書 §5.2・§5.3 のコントラスト（palette.json）を実際の描画で確かめる。計算は WCAG 2.1 の相対輝度。
+// Checks the contrast of design doc §5.2 and §5.3 (palette.json) on actual rendering. Computed with WCAG 2.1 relative luminance.
 test('重大度の文字色のコントラスト（台紙・作業台・淡色地の上、両テーマ）が設計値どおり 4.5 以上', async ({ browser }) => {
-  // [テーマ, 重大度, 台紙の上, 淡色地の上]（palette.json）
+  // [theme, severity, on the sheet, on the tint] (palette.json)
   const SPEC: Record<'dark' | 'light', Record<string, [number, number]>> = {
     dark: { CRITICAL: [6.48, 5.85], HIGH: [7.76, 6.92] },
     light: { CRITICAL: [6.76, 6.01], HIGH: [6.1, 5.5] },
@@ -416,7 +416,7 @@ test('重大度の文字色のコントラスト（台紙・作業台・淡色�
   }
 });
 
-// main の 61b64ed と同じ意図: 320px でもタブ列に 2〜3 枚のタブが収まり、検索ボタンなどに押し出されずに押せる。
+// Same intent as 61b64ed on main: even at 320px the tab row fits 2-3 tabs, which can be pressed without being pushed out by the search button etc.
 test('320px: タブ列に少なくとも 3 枚分の幅があり、見えているタブを押せる', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await open(page);

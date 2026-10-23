@@ -1,8 +1,9 @@
-// MCP / GitHub Actions / ブラウザ拡張のビューア（設計書 §10.6）。台紙 1 枚＋行の一覧。
-// §13-4 で許容した設定値（command/args、uses:、パーミッション名）だけを表示する。値は凹みの <code>、危険なトークンは SeverityTag。
-// Actions の参照: SHA 固定 = SAFE のタグ、タグ参照 = HIGH、汚染の可能性 = CRITICAL、ローカル = 無彩色のタグ。
+// Viewers for MCP / GitHub Actions / browser extensions (design doc §10.6). One sheet + a list of rows.
+// Only shows the config values allowed in §13-4 (command/args, uses:, permission names). Values are well-ground <code>, dangerous tokens a SeverityTag.
+// Actions references: SHA-pinned = SAFE tag, tag reference = HIGH, possibly poisoned = CRITICAL, local = neutral tag.
 import type { ReactNode } from 'react';
 import type { DisplaySeverity, ExtensionView, McpConfigView, WorkflowView } from '@/engine';
+import { useLang, type MsgKey } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { visibleOpt, visiblePath } from '@/lib/visiblePath';
 import { PathText } from '@/components/PathText';
@@ -26,14 +27,15 @@ const Code = ({ children, className }: { children: ReactNode; className?: string
 );
 
 export function McpViewer({ configs }: { configs: McpConfigView[] }) {
+  const { t } = useLang();
   if (!configs.length) return null;
   return (
-    <Viewer title="MCP 設定ビューア" note="command / args のみ表示（120 文字まで）。危険なコマンドを CRITICAL、要確認を MEDIUM で示します" testid="mcp-viewer">
+    <Viewer title={t('ui.viewer.mcp')} note={t('ui.viewer.mcp_desc')} testid="mcp-viewer">
       {configs.map((c) => (
         <div key={c.path} className="mt-4">
           <div className="flex flex-wrap items-center gap-2">
             <PathText path={c.path} wrap className="text-[13px]" />
-            {c.parseError && <SeverityTag level="HIGH">JSON として解析できません</SeverityTag>}
+            {c.parseError && <SeverityTag level="HIGH">{t('ui.viewer.unparsable')}</SeverityTag>}
           </div>
           <Rows>
             {c.servers.map((s, i) => (
@@ -43,7 +45,7 @@ export function McpViewer({ configs }: { configs: McpConfigView[] }) {
                 <span className="flex flex-wrap gap-1">{s.tokens.map((t) => <SeverityTag key={t} level={s.risk === 'high' ? 'CRITICAL' : 'MEDIUM'} className="font-mono">{visiblePath(t)}</SeverityTag>)}</span>
               </li>
             ))}
-            {!c.servers.length && <li className="py-2.5 text-[13px] text-muted-foreground">サーバー定義なし</li>}
+            {!c.servers.length && <li className="py-2.5 text-[13px] text-muted-foreground">{t('ui.viewer.no_servers')}</li>}
           </Rows>
         </div>
       ))}
@@ -51,17 +53,18 @@ export function McpViewer({ configs }: { configs: McpConfigView[] }) {
   );
 }
 
-const KIND: Record<WorkflowView['uses'][number]['kind'], { label: string; level: DisplaySeverity | null }> = {
-  sha: { label: 'SHA 固定', level: 'SAFE' },
-  tag: { label: 'タグ参照', level: 'HIGH' },
-  compromised: { label: '汚染の可能性', level: 'CRITICAL' },
-  local: { label: 'ローカル', level: null },
+const KIND: Record<WorkflowView['uses'][number]['kind'], { label: MsgKey; level: DisplaySeverity | null }> = {
+  sha: { label: 'ui.viewer.pinned', level: 'SAFE' },
+  tag: { label: 'ui.viewer.tag', level: 'HIGH' },
+  compromised: { label: 'ui.viewer.poisoned', level: 'CRITICAL' },
+  local: { label: 'ui.viewer.local', level: null },
 };
 
 export function ActionsViewer({ workflows }: { workflows: WorkflowView[] }) {
+  const { t } = useLang();
   if (!workflows.length) return null;
   return (
-    <Viewer title="GitHub Actions ビューア" note="uses: の参照を、SHA 固定 / タグ参照 / 汚染の可能性 / ローカルに分けて表示します" testid="actions-viewer">
+    <Viewer title={t('ui.viewer.actions')} note={t('ui.viewer.actions_desc')} testid="actions-viewer">
       {workflows.map((w) => (
         <div key={w.path} className="mt-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -74,7 +77,7 @@ export function ActionsViewer({ workflows }: { workflows: WorkflowView[] }) {
               return (
                 <li key={u.ref} className="flex items-center justify-between gap-3 py-2" data-kind={u.kind}>
                   <Code className="w-fit max-w-full">{visiblePath(u.ref)}</Code>
-                  {k.level ? <SeverityTag level={k.level}>{k.label}</SeverityTag> : <Tag>{k.label}</Tag>}
+                  {k.level ? <SeverityTag level={k.level}>{t(k.label)}</SeverityTag> : <Tag>{t(k.label)}</Tag>}
                 </li>
               );
             })}
@@ -86,20 +89,21 @@ export function ActionsViewer({ workflows }: { workflows: WorkflowView[] }) {
 }
 
 export function ExtensionViewer({ manifests }: { manifests: ExtensionView[] }) {
+  const { t } = useLang();
   if (!manifests.length) return null;
   return (
-    <Viewer title="ブラウザ拡張ビューア" note="危険なパーミッション名と <all_urls> を示します（update_url の値は表示しません）" testid="extension-viewer">
+    <Viewer title={t('ui.viewer.ext')} note={t('ui.viewer.ext_desc')} testid="extension-viewer">
       <Rows>
         {manifests.map((m) => (
           <li key={m.path} className="flex flex-wrap items-center gap-2 py-2.5">
             <span className="min-w-0 flex-1 basis-48">
-              <span className="block truncate text-sm font-medium">{visibleOpt(m.name) || '（名前なし）'}</span>
+              <span className="block truncate text-sm font-medium">{visibleOpt(m.name) || t('ui.viewer.unnamed')}</span>
               <PathText path={m.path} className="text-xs" />
             </span>
             {m.dangerous.map((p) => <SeverityTag key={p} level="HIGH" className="font-mono">{visiblePath(p)}</SeverityTag>)}
             {m.allUrls && <SeverityTag level="HIGH" className="font-mono">&lt;all_urls&gt;</SeverityTag>}
-            {m.unofficialUpdate && <SeverityTag level="CRITICAL">update_url: 公式ストア以外</SeverityTag>}
-            {!m.dangerous.length && !m.allUrls && !m.unofficialUpdate && <span className="text-xs text-muted-foreground">危険な設定なし</span>}
+            {m.unofficialUpdate && <SeverityTag level="CRITICAL">{t('ui.viewer.update_url')}</SeverityTag>}
+            {!m.dangerous.length && !m.allUrls && !m.unofficialUpdate && <span className="text-xs text-muted-foreground">{t('ui.viewer.clean')}</span>}
           </li>
         ))}
       </Rows>

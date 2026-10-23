@@ -1,0 +1,34 @@
+[
+  {
+    "campaign": null,
+    "code": "s2.lifecycle_suspicious",
+    "level": "HIGH",
+    "module": "§2",
+    "params": {},
+    "path": "bom/package.json"
+  },
+  {
+    "campaign": null,
+    "code": "s2.lifecycle_suspicious",
+    "level": "HIGH",
+    "module": "§2",
+    "params": {},
+    "path": "postprepare/package.json"
+  },
+  {
+    "campaign": null,
+    "code": "s2.lifecycle_suspicious",
+    "level": "HIGH",
+    "module": "§2",
+    "params": {},
+    "path": "prepare/package.json"
+  },
+  {
+    "campaign": null,
+    "code": "s2.lifecycle_suspicious",
+    "level": "HIGH",
+    "module": "§2",
+    "params": {},
+    "path": "trailing/package.json"
+  }
+]

@@ -1,10 +1,11 @@
-// SkillPact タブ（実験的。設計書 §10.5）。スキルが宣言した権限（SkillPact 0.8 契約）とコードの実態を比べる。
-// 左: 作業台の上のスキル一覧。右: 報告（台紙 1 枚を罫で節に分ける）。
-// SAFE（緑）の部品を一つも置かない。署名は紫印の「署名あり（未検証）」で、L2 / L3 や「安全」とは書かない。
-// 押印の隣には必ず意味の文を置く（ツールチップに隠さない）。
+// SkillPact tab (experimental. design doc §10.5). Compares the permissions a skill declared (SkillPact 0.8 contract) with what its code is observed to do.
+// Left: the skill list on the bench. Right: the report (one sheet divided into sections by rules).
+// Not a single SAFE (green) part. A signature is the violet stamp "signed (unverified)"; never write L2 / L3 or "safe".
+// Always place a sentence with the meaning next to a stamp (do not hide it in a tooltip).
 import { useMemo, useState, type ReactNode } from 'react';
 import { CircleDashed, GitCompare, Search } from 'lucide-react';
 import { EFFECTS, IOC, type Severity, type SkillPactAnalysis } from '@/engine';
+import { t as tNow, textLang, useLang, type MsgKey } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { visibleOpt, visiblePath } from '@/lib/visiblePath';
 import { SEV } from '@/components/severity/severity';
@@ -16,22 +17,23 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 
 const SPEC = IOC.skillpact.spec;
-const LEVEL_NOTE = 'ZES は署名の検証・テストの実行を行わないため、L2 / L3 は判定しません。L3 であっても「安全」を意味しません。';
 const ORDER: Severity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
 
-/** 契約の状態（ZES の部分検査の結果）。L2 / L3 は判定しない。 */
-function contractValue(a: SkillPactAnalysis): { text: string; tone?: 'medium' } {
+/** Contract status (result of the ZES partial checks). L2 / L3 are not evaluated. */
+function contractValue(a: SkillPactAnalysis, t: typeof tNow): { text: string; tone?: 'medium' } {
   const s = a.contract.status;
-  if (s === 'none') return { text: 'なし（比較対象外）' };
-  if (s === 'unparseable') return { text: 'JSON 不正', tone: 'medium' };
-  if (s === 'unsupported') return { text: `未対応の版（${a.contract.contractVersion ?? '?'}）`, tone: 'medium' };
-  if (s === 'invalid') return { text: `検証できない（v${a.contract.contractVersion ?? '?'}）`, tone: 'medium' };
-  return { text: `あり（v${a.contract.contractVersion ?? '?'}）` };
+  const v = a.contract.contractVersion ?? '?';
+  if (s === 'none') return { text: t('ui.sp.contract.none') };
+  if (s === 'unparseable') return { text: t('ui.sp.contract.unparseable'), tone: 'medium' };
+  if (s === 'unsupported') return { text: t('ui.sp.contract.unsupported', { v }), tone: 'medium' };
+  if (s === 'invalid') return { text: t('ui.sp.contract.invalid', { v }), tone: 'medium' };
+  return { text: t('ui.sp.contract.ok', { v }) };
 }
 
 export function SignedStamp({ signed, size }: { signed: boolean; size?: 'sm' | 'md' }) {
+  const { t } = useLang();
   if (!signed) return null;
-  return <Stamp size={size} data-testid="signed-badge" title="integrity.signatures があります。ZES は署名を検証しません。署名の有無で重大度は変えません。">署名あり（未検証）</Stamp>;
+  return <Stamp size={size} data-testid="signed-badge" title={t('ui.sp.signed_title')}>{t('ui.sp.signed')}</Stamp>;
 }
 
 function Counts({ a, className }: { a: SkillPactAnalysis; className?: string }) {
@@ -44,16 +46,17 @@ function Counts({ a, className }: { a: SkillPactAnalysis; className?: string }) 
 
 function SkillList({ skills, selected, onSelect }: { skills: SkillPactAnalysis[]; selected: string | null; onSelect(id: string): void }) {
   const [q, setQ] = useState('');
+  const { t } = useLang();
   const shown = useMemo(() => {
     const n = q.normalize('NFKC').toLowerCase().trim();
     return n ? skills.filter((s) => `${s.name} ${s.skillId}`.normalize('NFKC').toLowerCase().includes(n)) : skills;
   }, [q, skills]);
   return (
     <div className="flex min-w-0 flex-col">
-      <h2 className="flex items-baseline gap-2 text-base font-semibold">スキル<span className="text-[13px] font-normal text-muted-foreground tabular-nums">{skills.length} 件</span></h2>
-      <p className="mt-0.5 text-xs text-muted-foreground">SKILL.md / 契約ファイルを含むディレクトリ単位</p>
-      {skills.length >= 5 && <Input icon={<Search aria-hidden="true" className="size-4 shrink-0" />} value={q} onChange={(e) => setQ(e.target.value)} placeholder="スキル名・パスで絞り込み" aria-label="スキル名・パスで絞り込み" className="mt-3" />}
-      <ul className="mt-3 flex flex-col gap-2" aria-label="スキル一覧">
+      <h2 className="flex items-baseline gap-2 text-base font-semibold">{t('ui.sp.skills')}<span className="text-[13px] font-normal text-muted-foreground tabular-nums">{t('ui.sp.skills_count', { n: skills.length })}</span></h2>
+      <p className="mt-0.5 text-xs text-muted-foreground">{t('ui.sp.unit')}</p>
+      {skills.length >= 5 && <Input icon={<Search aria-hidden="true" className="size-4 shrink-0" />} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('ui.sp.filter')} aria-label={t('ui.sp.filter')} className="mt-3" />}
+      <ul className="mt-3 flex flex-col gap-2" aria-label={t('ui.sp.list')}>
         {shown.map((s) => {
           const sel = s.skillId === selected;
           return (
@@ -66,7 +69,7 @@ function SkillList({ skills, selected, onSelect }: { skills: SkillPactAnalysis[]
                 <span className="mt-2 flex flex-wrap items-center gap-2">
                   <SignedStamp signed={s.signed} size="sm" />
                   <Counts a={s} />
-                  {!s.maxLevel && <span className="text-xs text-muted-foreground">検出なし（静的解析の範囲内）</span>}
+                  {!s.maxLevel && <span className="text-xs text-muted-foreground">{t('ui.sp.no_findings')}</span>}
                 </span>
               </button>
             </li>
@@ -74,11 +77,11 @@ function SkillList({ skills, selected, onSelect }: { skills: SkillPactAnalysis[]
         })}
       </ul>
       <div className="mt-4 rounded-md border border-dashed border-input p-4">
-        <div className="flex items-center gap-2 text-[13.5px] font-semibold"><GitCompare aria-hidden="true" className="size-4" />前版との差分比較</div>
-        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">同じスキルの前版の契約を一緒に投入すると、major を上げない権限拡大（SkillPact §17）を検出します。ブラウザはレジストリを取得しません。</p>
+        <div className="flex items-center gap-2 text-[13.5px] font-semibold"><GitCompare aria-hidden="true" className="size-4" />{t('ui.sp.diff_title')}</div>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{t('ui.sp.diff_body')}</p>
       </div>
-      <p className="mt-6 text-xs text-muted-foreground">SAFE 表示は使用しません（安全の断定をしない）</p>
-      <p className="mt-1.5 text-xs text-muted-foreground"><a className="underline underline-offset-2" href={SPEC.url} target="_blank" rel="noreferrer">SkillPact</a> © SEVENTHWELL (shogo kajiyama)、仕様 CC BY 4.0</p>
+      <p className="mt-6 text-xs text-muted-foreground">{t('ui.sp.no_safe')}</p>
+      <p className="mt-1.5 text-xs text-muted-foreground"><a className="underline underline-offset-2" href={SPEC.url} target="_blank" rel="noreferrer">SkillPact</a> {t('ui.sp.license')}</p>
     </div>
   );
 }
@@ -98,29 +101,30 @@ function Section({ children, className }: { children: ReactNode; className?: str
 
 function EffectMatrix({ a }: { a: SkillPactAnalysis }) {
   const compared = a.contract.status === 'ok' || a.contract.status === 'invalid';
+  const { t } = useLang();
   const cell = 'border border-border px-2 text-center';
   return (
     <Section>
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-        <h3 className="text-[15px] font-semibold">エフェクト：宣言（契約） vs 実態（静的解析）</h3>
+        <h3 className="text-[15px] font-semibold">{t('ui.sp.effects_title')}</h3>
         <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5"><span className="size-3 rounded-xs bg-critical-solid" />未宣言（乖離）</span>
-          <span className="flex items-center gap-1.5"><span className="size-3 rounded-xs border-[1.5px] border-foreground" />宣言あり</span>
-          <span>— なし</span>
+          <span className="flex items-center gap-1.5"><span className="size-3 rounded-xs bg-critical-solid" />{t('ui.sp.undeclared')}</span>
+          <span className="flex items-center gap-1.5"><span className="size-3 rounded-xs border-[1.5px] border-foreground" />{t('ui.sp.declared')}</span>
+          <span>{t('ui.sp.none')}</span>
         </div>
       </div>
-      {/* エフェクトの列は狭い幅に収まらないので、表だけを横スクロールさせる（ページ全体は横にスクロールさせない） */}
+      {/* The effects columns do not fit a narrow width, so only the table scrolls horizontally (the page as a whole never scrolls horizontally) */}
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[640px] table-fixed border-collapse text-[13px]">
           <thead>
             <tr className="h-8 bg-muted text-xs text-muted-foreground">
-              <th className={cn(cell, 'w-40 pl-3 text-left font-medium')}>区分</th>
+              <th className={cn(cell, 'w-40 pl-3 text-left font-medium')}>{t('ui.sp.col.kind')}</th>
               {EFFECTS.map((e) => <th key={e} className={cn(cell, 'font-mono text-[12.5px] font-medium')}>{e}</th>)}
             </tr>
           </thead>
           <tbody>
             <tr className="h-10">
-              <th scope="row" className={cn(cell, 'pl-3 text-left font-medium')}>宣言（契約）</th>
+              <th scope="row" className={cn(cell, 'pl-3 text-left font-medium')}>{t('ui.sp.col.declared')}</th>
               {EFFECTS.map((e) => (
                 <td key={e} className={cell}>
                   {!compared ? <span className="text-muted-foreground">?</span>
@@ -130,7 +134,7 @@ function EffectMatrix({ a }: { a: SkillPactAnalysis }) {
               ))}
             </tr>
             <tr className="h-10">
-              <th scope="row" className={cn(cell, 'pl-3 text-left font-medium')}>実態（静的解析）</th>
+              <th scope="row" className={cn(cell, 'pl-3 text-left font-medium')}>{t('ui.sp.col.observed')}</th>
               {EFFECTS.map((e) => {
                 const d = a.divergence.find((x) => x.effect === e);
                 return (
@@ -144,13 +148,13 @@ function EffectMatrix({ a }: { a: SkillPactAnalysis }) {
               })}
             </tr>
             <tr className="h-10">
-              <th scope="row" className={cn(cell, 'pl-3 text-left font-medium')}>差分</th>
+              <th scope="row" className={cn(cell, 'pl-3 text-left font-medium')}>{t('ui.sp.col.diff')}</th>
               {EFFECTS.map((e) => {
                 const d = a.divergence.find((x) => x.effect === e);
                 return (
                   <td key={e} className={cn(cell, 'text-xs')}>
-                    {d ? <span className={cn('inline-flex items-center gap-1 font-semibold', SEV[d.level].fg)}><SevIcon level={d.level} />未宣言・{d.level}</span>
-                      : a.observed.includes(e) && a.declared.includes(e) ? <span className="text-muted-foreground">一致</span> : <span className="text-muted-foreground">—</span>}
+                    {d ? <span className={cn('inline-flex items-center gap-1 font-semibold', SEV[d.level].fg)}><SevIcon level={d.level} />{t('ui.sp.diff_cell', { level: d.level })}</span>
+                      : a.observed.includes(e) && a.declared.includes(e) ? <span className="text-muted-foreground">{t('ui.sp.match')}</span> : <span className="text-muted-foreground">—</span>}
                   </td>
                 );
               })}
@@ -158,25 +162,28 @@ function EffectMatrix({ a }: { a: SkillPactAnalysis }) {
           </tbody>
         </table>
       </div>
-      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">read は機密ファイル（~/.ssh、.env、認証情報など）を読む兆候のみ、write は作業領域外への永続的な書き込み（crontab、.bashrc など）を含みます。宣言は permissions.*.level が none 以外のもの。</p>
+      <p className="mt-3 text-xs leading-relaxed text-muted-foreground">{t('ui.sp.effects_note')}</p>
     </Section>
   );
 }
+
+const RESULT: Record<SkillPactAnalysis['results'][number]['status'], MsgKey> = { hit: 'ui.sp.result.hit', clear: 'ui.sp.result.clear', 'n/a': 'ui.sp.result.na', undetermined: 'ui.sp.result.undetermined' };
 
 function SevIcon({ level }: { level: Severity }) {
   const Icon = SEV[level].icon;
   return <Icon aria-hidden="true" strokeWidth={2.25} className="size-[13px] shrink-0" />;
 }
 
-/** 指摘の行（検出一覧と同じ溝の帯）。判定不可は破線の帯と鉛筆色（色で安心させない）。 */
+/** A finding row (the same gutter band as the findings list). Inconclusive uses a dashed band and pencil color (no reassurance by color). */
 function Remark({ level, title, children, testid }: { level: Severity | null; title: string; children: ReactNode; testid?: string }) {
+  const { t } = useLang();
   return (
     <div data-testid={testid} className="relative min-w-0 pl-4">
       {level ? <span aria-hidden="true" className={cn('absolute inset-y-0 left-0 w-1', SEV[level].bar)} />
         : <span aria-hidden="true" className="absolute inset-y-0 left-0 w-0 border-l-[3px] border-dashed border-input" />}
       <h3 className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {level ? <SeverityMark level={level} /> : <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground"><CircleDashed aria-hidden="true" className="size-[13px]" />判定不可</span>}
-        <span className="text-sm font-semibold">{title}</span>
+        {level ? <SeverityMark level={level} /> : <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground"><CircleDashed aria-hidden="true" className="size-[13px]" />{t('ui.sp.inconclusive')}</span>}
+        <span lang={textLang(title)} className="text-sm font-semibold">{title}</span>
       </h3>
       <div className="mt-1.5 text-[12.5px] leading-relaxed break-words">{children}</div>
     </div>
@@ -186,34 +193,35 @@ function Remark({ level, title, children, testid }: { level: Severity | null; ti
 function Report({ a }: { a: SkillPactAnalysis }) {
   const hits = a.results.filter((r) => r.status === 'hit').length;
   const und = a.results.filter((r) => r.status === 'undetermined').length;
-  const ident = a.diffAnomaly ? { same: '前版と同一（未検証）', changed: '前版と異なる（未検証）', unsigned: '署名なし' }[a.diffAnomaly.identity] : '';
+  const { t } = useLang();
+  const ident = a.diffAnomaly ? t(({ same: 'ui.sp.author.same', changed: 'ui.sp.author.changed', unsigned: 'ui.sp.author.unsigned' } as const)[a.diffAnomaly.identity]) : '';
   const compareUndetermined = !a.diffAnomaly && a.results.some((r) => r.ruleNo === 9 && r.status === 'undetermined');
-  const contract = contractValue(a);
+  const contract = contractValue(a, t);
   return (
     <Card data-testid="skillpact-viewer" className="min-w-0">
       <div className="px-7 pt-6 pb-6 max-sm:px-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="text-[22px] leading-[1.35] font-semibold break-words">{visiblePath(a.skillName ?? a.name)}</h2>
-            <p className="mt-1 font-mono text-[12.5px] text-muted-foreground wrap-anywhere"><bdi dir="ltr">{visiblePath(a.contract.path ?? `${a.skillId}/`)}</bdi>{a.contract.path ? '' : '（skill.contract.json なし）'}</p>
+            <p className="mt-1 font-mono text-[12.5px] text-muted-foreground wrap-anywhere"><bdi dir="ltr">{visiblePath(a.contract.path ?? `${a.skillId}/`)}</bdi>{a.contract.path ? '' : t('ui.sp.no_contract')}</p>
           </div>
           <Counts a={a} />
         </div>
         <dl className="mt-5 flex flex-wrap gap-x-10 gap-y-3">
           <Fact k="author">{visibleOpt(a.author) ?? '—'}</Fact>
           <Fact k="version">{visibleOpt(a.skillVersion) ?? '—'}</Fact>
-          <Fact k="署名ファイル">{a.signed ? 'あり（検証は未実行）' : 'なし'}</Fact>
-          <Fact k="契約">{contract.tone ? <Tag className="border-0 bg-medium-tint text-medium">{contract.text}</Tag> : contract.text}</Fact>
-          <Fact k="ZES の判定">{a.level ? 'L1 相当（部分検査）' : '—'}</Fact>
-          {a.signers.length > 0 && <Fact k="署名者（自己申告）">{visiblePath(a.signers.join(', '))}</Fact>}
+          <Fact k={t('ui.sp.fact.sigfile')}>{t(a.signed ? 'ui.sp.fact.sig_yes' : 'ui.sp.fact.sig_no')}</Fact>
+          <Fact k={t('ui.sp.fact.contract')}>{contract.tone ? <Tag className="border-0 bg-medium-tint text-medium">{contract.text}</Tag> : contract.text}</Fact>
+          <Fact k={t('ui.sp.fact.verdict')}>{a.level ? t('ui.sp.fact.l1') : '—'}</Fact>
+          {a.signers.length > 0 && <Fact k={t('ui.sp.fact.signer')}>{visiblePath(a.signers.join(', '))}</Fact>}
         </dl>
-        {a.contract.errors.length > 0 && <p className="mt-3 text-xs break-words text-medium">ZES の部分検査で不合格: <span className="font-mono">{a.contract.errors.join(', ')}</span></p>}
-        {a.contract.problem && <p className="mt-3 text-xs break-words text-medium">JSON の問題: {a.contract.problem}</p>}
+        {a.contract.errors.length > 0 && <p className="mt-3 text-xs break-words text-medium">{t('ui.sp.failed')}<span className="font-mono">{a.contract.errors.join(', ')}</span></p>}
+        {a.contract.problem && <p className="mt-3 text-xs break-words text-medium">{t('ui.sp.json_problem')}<span lang={textLang(a.contract.problem)}>{a.contract.problem}</span></p>}
         <div className="mt-5 flex flex-wrap items-start gap-x-4 gap-y-2">
           <SignedStamp signed={a.signed} />
           <div className="min-w-0 flex-1 basis-80" data-testid="level-note">
-            <p className="text-[13px] font-medium">{LEVEL_NOTE}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">実験的。契約は JSON パースのみ。スキル・L2 テスト・署名検証は実行しません。</p>
+            <p className="text-[13px] font-medium">{t('ui.sp.level_note')}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t('ui.sp.experimental')}</p>
           </div>
         </div>
       </div>
@@ -221,23 +229,23 @@ function Report({ a }: { a: SkillPactAnalysis }) {
       {(a.diffAnomaly || compareUndetermined) && (
         <Section>
           {a.diffAnomaly ? (
-            <Remark level={a.diffAnomaly.level} title="前版から major を上げずに権限拡大" testid="diff-alert">
-              <p>{a.diffAnomaly.previousVersion} → {a.skillVersion}：{a.diffAnomaly.widened.join(' / ')}</p>
-              <p>作者署名鍵: {ident}</p>
-              <p className="mt-1 text-xs text-muted-foreground">SkillPact §17: 権限を広げるときは major を上げ、利用者に再確認を求めるべきです。署名済みでも警告します（署名は信頼の根拠にしない）。</p>
+            <Remark level={a.diffAnomaly.level} title={t('ui.sp.widened')} testid="diff-alert">
+              <p>{t('ui.sp.widened_line', { prev: a.diffAnomaly.previousVersion, cur: a.skillVersion ?? '', changes: a.diffAnomaly.widened.join(' / ') })}</p>
+              <p>{t('ui.sp.author_key', { ident })}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{t('ui.sp.widened_body')}</p>
             </Remark>
           ) : (
-            <Remark level={null} title="差分異常">
-              <p>前版の契約が投入されていないため比較できません</p>
-              <p className="text-xs text-muted-foreground">署名があっても、前版から権限が増えていれば警告します</p>
+            <Remark level={null} title={t('ui.sp.diff_anomaly')}>
+              <p>{t('ui.sp.no_prev')}</p>
+              <p className="text-xs text-muted-foreground">{t('ui.sp.signed_warn')}</p>
             </Remark>
           )}
         </Section>
       )}
       <Section>
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h3 className="text-[15px] font-semibold">§49 検出ルール</h3>
-          <span className="text-[12.5px] text-muted-foreground">{a.results.length} ルール：該当 {hits}、非該当・対象外 {a.results.length - hits - und}、判定不可 {und}</span>
+          <h3 className="text-[15px] font-semibold">{t('ui.sp.rules')}</h3>
+          <span className="text-[12.5px] text-muted-foreground">{t('ui.sp.rules_summary', { n: a.results.length, hit: hits, clear: a.results.length - hits - und, und })}</span>
         </div>
         <ol className="mt-3 grid grid-cols-1 gap-x-10 gap-y-1 xl:grid-cols-2">
           {a.results.map((r) => {
@@ -247,9 +255,9 @@ function Report({ a }: { a: SkillPactAnalysis }) {
                 className={cn('relative grid min-h-8 grid-cols-[22px_minmax(0,1fr)_auto_56px] items-center gap-x-2.5 rounded-sm px-2.5 py-1 text-[13px]', hit && SEV[r.level].tint)}>
                 {hit && <span aria-hidden="true" className={cn('absolute inset-y-0 left-0 w-[3px]', SEV[r.level].bar)} />}
                 <span className="text-right text-[12.5px] font-medium text-muted-foreground tabular-nums">{r.ruleNo}</span>
-                <span className="min-w-0 break-words">{r.title}</span>
+                <span className="min-w-0 break-words">{t(r.title)}</span>
                 <span className={cn('text-xs font-medium', hit ? SEV[r.level].fg : 'text-muted-foreground')}>{r.level}</span>
-                <span className={cn('text-right text-[12.5px]', hit ? cn('font-semibold', SEV[r.level].fg) : 'text-muted-foreground')}>{{ hit: '該当', clear: '非該当', 'n/a': '対象外', undetermined: '判定不可' }[r.status]}</span>
+                <span className={cn('text-right text-[12.5px]', hit ? cn('font-semibold', SEV[r.level].fg) : 'text-muted-foreground')}>{t(RESULT[r.status])}</span>
               </li>
             );
           })}
@@ -261,13 +269,14 @@ function Report({ a }: { a: SkillPactAnalysis }) {
 
 export function SkillPactTab({ skills, selected, onSelect }: { skills: SkillPactAnalysis[]; selected: string | null; onSelect(id: string): void }) {
   const a = skills.find((s) => s.skillId === selected) ?? skills[0];
+  const { lang, t } = useLang();
   if (!a) {
     return (
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-center gap-2 rounded-md border border-dashed border-input px-6 py-12 text-center text-sm text-muted-foreground">
-          <CircleDashed aria-hidden="true" className="size-4 shrink-0" />スキル（SKILL.md / skill.contract.json）が見つかりません。スキルのフォルダを投入してください。
+          <CircleDashed aria-hidden="true" className="size-4 shrink-0" />{t('ui.sp.empty')}
         </div>
-        <p className="text-xs text-muted-foreground" data-testid="level-note">実験的: AI エージェントのスキルが宣言した権限（SkillPact 契約 skill.contract.json）と、コードが実際にしていること（静的解析）が一致するかを確かめます。{LEVEL_NOTE}</p>
+        <p className="text-xs text-muted-foreground" data-testid="level-note">{t('ui.sp.empty_note')}{lang === 'en' && ' '}{t('ui.sp.level_note')}</p>
       </div>
     );
   }

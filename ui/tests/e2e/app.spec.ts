@@ -1,4 +1,4 @@
-// index.html（ビルド成果物）を file:// で開き、外部リクエストゼロと主要操作を確認する。
+// Opens index.html (the build output) on file:// and checks zero external requests and the main operations.
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,14 +10,14 @@ import { pickDir } from './pick-dir';
 const INDEX = 'file://' + fileURLToPath(new URL('../../../index.html', import.meta.url));
 const FIX = fileURLToPath(new URL('../../../tests/fixtures/', import.meta.url));
 
-/** file: / data: / blob: 以外へのリクエストと、CSP 違反・コンソールエラーを記録する。 */
+/** Records requests to anything other than file: / data: / blob:, CSP violations and console errors. */
 async function open(page: Page) {
   const external: string[] = [];
   const errors: string[] = [];
   page.on('request', (r) => { if (!/^(file|data|blob):/.test(r.url())) external.push(r.url()); });
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(e.message));
-  // 念のため外部を全遮断した状態でも動作すること
+  // Must work even with all external traffic blocked, just in case
   await page.context().route(/^(?!file:|data:|blob:).*/, (r) => r.abort());
   await page.goto(INDEX);
   return { external, errors };
@@ -49,10 +49,10 @@ test('フォルダ投入 → 総合タブに検出・重大度フィルタ・パ
   await expect(rows.first()).toHaveAttribute('data-level', 'CRITICAL');
   await expect(page.getByTestId('findings-table')).toContainText('chaindrop/package.json');
   await expect(page.locator('body')).not.toContainText('zes-canary');
-  // CRITICAL を外すと CRITICAL 行が消える
+  // Deselecting CRITICAL removes the CRITICAL rows
   await page.getByTestId('filter-CRITICAL').click();
   await expect(page.locator('[data-testid=finding-row][data-level=CRITICAL]')).toHaveCount(0);
-  // Blast Radius は存在のみ（.npmrc 等が無ければ空）
+  // Blast Radius is existence only (empty if there is no .npmrc etc.)
   await expect(page.getByTestId('blast-radius')).toBeVisible();
 });
 
@@ -68,7 +68,7 @@ test('SkillPact タブ: 乖離の赤ハイライト、署名を「安全」と�
   await expect(badge).toContainText('署名あり（未検証）');
   for (const word of ['安全', '信頼済み', 'Verified', 'Trusted', 'L3']) await expect(badge).not.toContainText(word);
   await expect(page.getByTestId('level-note')).toContainText('実験的');
-  // SkillPact タブでは SAFE バッジ・安全色（緑）の表示を使わない
+  // The SkillPact tab uses no SAFE badge and no safe color (green)
   await expect(page.getByRole('tabpanel').locator('[data-severity=SAFE], .text-safe, .bg-safe, .border-safe')).toHaveCount(0);
   await expect(page.getByTestId('rule-row').filter({ hasText: '未宣言の network' })).toHaveAttribute('data-status', 'hit');
 });
@@ -82,18 +82,18 @@ test('SkillPact: 前版から major を上げない権限拡大の警告', async
 });
 
 test('MCP / Actions / 拡張ビューアと CLI 案内', async ({ page, browserName }) => {
-  // Playwright の WebKit は、直下が隠しエントリだけのフォルダ（.github/ や .mcp.json のみ）で setInputFiles が返らない
-  // （隠しエントリを除外して 0 件になり change が発火しないとみられる。実 Safari での挙動は未確認）。PR #8 参照
+  // Playwright WebKit does not return from setInputFiles for a folder whose top level holds only hidden entries (only .github/ or .mcp.json)
+  // (apparently the hidden entries are excluded, leaving 0 files, so change does not fire; behavior in real Safari is unconfirmed). See PR #8
   test.skip(browserName === 'webkit', 'Playwright WebKit は隠しエントリだけのフォルダを setInputFiles できない');
   await open(page);
-  // 隠しファイル（.mcp.json）を渡さないブラウザがあるため、ビューアの確認は非隠しの設定ファイルで行う（隠しファイルの扱いは別テスト）
+  // Some browsers do not pass hidden files (.mcp.json), so the viewers are checked with non-hidden config files (hidden files are handled by another test)
   await scan(page, 'mcp-visible');
   await page.getByRole('tab', { name: /^MCP/ }).click();
   await expect(page.getByTestId('mcp-viewer').locator('[data-risk=high]')).toHaveCount(1);
   await page.getByRole('tab', { name: /^総合/ }).click();
   await scan(page, 'github-actions');
   await page.getByRole('tab', { name: /^GitHub Actions/ }).click();
-  // tag-ref.yml・case-variant.yml・next-line-uses.yml（値が次行の uses:）がタグ参照、tag-ref.yml と flow-mapping.yml が汚染タグ
+  // tag-ref.yml, case-variant.yml and next-line-uses.yml (uses: with the value on the next line) are tag references; tag-ref.yml and flow-mapping.yml are poisoned tags
   await expect(page.getByTestId('actions-viewer').locator('[data-kind=tag]')).toHaveCount(3);
   await expect(page.getByTestId('actions-viewer').locator('[data-kind=compromised]')).toHaveCount(2);
   await page.getByRole('tab', { name: /^アンチフォレンジック/ }).click();
@@ -118,14 +118,14 @@ test('findings.json の書き出し（ネットワーク不使用のダウンロ
   const [dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export').click()]);
   const path = await dl.path();
   const doc = JSON.parse(readFileSync(path, 'utf8'));
-  expect(doc.schema_version).toBe('1.1');
+  expect(doc.schema_version).toBe('1.2');
   expect(['ok', 'partial']).toContain(doc.status);
   expect(doc.findings.find((f: { level: string }) => f.level === 'HIGH').skillpact.divergence).toEqual(['read', 'network']);
 });
 
 test('隠しファイルだけのフォルダでも無反応にならない（完了または 0 件の通知）', async ({ page, browserName }, info) => {
-  // Playwright の WebKit は、直下が隠しエントリだけのフォルダ（.github/ や .mcp.json のみ）で setInputFiles が返らない
-  // （隠しエントリを除外して 0 件になり change が発火しないとみられる。実 Safari での挙動は未確認）。PR #8 参照
+  // Playwright WebKit does not return from setInputFiles for a folder whose top level holds only hidden entries (only .github/ or .mcp.json)
+  // (apparently the hidden entries are excluded, leaving 0 files, so change does not fire; behavior in real Safari is unconfirmed). See PR #8
   test.skip(browserName === 'webkit', 'Playwright WebKit は隠しエントリだけのフォルダを setInputFiles できない');
   await open(page);
   await pickDir(page, FIX + 'mcp');
@@ -158,7 +158,7 @@ test('敵対的な findings.json の取り込みで画面が消えない・書�
   expect(errors).toEqual([]);
 });
 
-/** ページ全体の横スクロール量と、はみ出している要素（スクロール領域内を除く）を返す。 */
+/** Returns the horizontal scroll amount of the whole page and the overflowing elements (excluding those inside scroll areas). */
 async function overflow(page: Page) {
   return page.evaluate(() => {
     const cw = document.documentElement.clientWidth;
@@ -169,7 +169,7 @@ async function overflow(page: Page) {
   });
 }
 
-// 各ビューアが実際に描画されるフィクスチャで、狭い幅でもページ全体が横スクロールしないこと
+// With fixtures that actually render each viewer, the page as a whole does not scroll horizontally even at narrow widths
 const NARROW: [string, RegExp, string?][] = [
   ['chaindrop', /^総合/],
   ['skillpact-signed-divergence', /^SkillPact/, 'skillpact-viewer'],
@@ -192,7 +192,7 @@ for (const width of [768, 375, 320]) {
       const r = await overflow(page);
       expect(r.sw, `${fixture} ${tab} ${width}px: ${r.bad.join(' | ')}`).toBeLessThanOrEqual(r.cw);
     }
-    // 17 タブすべても確認する（最後のフィクスチャの結果で）
+    // Also check all 17 tabs (with the result of the last fixture)
     for (const t of await page.getByRole('tab').all()) {
       await t.click();
       const r = await overflow(page);
@@ -201,8 +201,8 @@ for (const width of [768, 375, 320]) {
   });
 }
 
-// 「すべてのタブ」はメニューからタブ検索（Popover＋cmdk の Command）に変わった（設計書 §10.2、§14）。
-// menu / menuitem は dialog / combobox / listbox / option になる。閉じ方とフォーカスの戻り方は同じことを確かめる。
+// "All tabs" changed from a menu to tab search (Popover + cmdk Command) (design doc §10.2, §14).
+// menu / menuitem become dialog / combobox / listbox / option. Checks that closing and focus return behave the same.
 test('「すべてのタブ」タブ検索: Escape・外側クリックで閉じ、フォーカスを戻す', async ({ page }) => {
   await open(page);
   const btn = page.getByTestId('all-tabs');
@@ -211,7 +211,7 @@ test('「すべてのタブ」タブ検索: Escape・外側クリックで閉じ
   await expect(dialog).toBeVisible();
   await expect(btn).toHaveAttribute('aria-expanded', 'true');
   await expect(btn).toHaveAttribute('aria-controls', await dialog.getAttribute('id') ?? 'missing');
-  // 入力欄にフォーカスがあり、18 タブすべてが候補
+  // The input has focus, and all 18 tabs are candidates
   await expect(dialog.getByRole('combobox')).toBeFocused();
   await expect(dialog.getByRole('option')).toHaveCount(18);
   await page.keyboard.press('Escape');
@@ -222,7 +222,7 @@ test('「すべてのタブ」タブ検索: Escape・外側クリックで閉じ
   await expect(dialog).toBeVisible();
   await page.getByRole('heading', { name: 'Zero-Exec Shield' }).click();
   await expect(dialog).toBeHidden();
-  // 矢印キーで移動して選択すると、そのタブが選択されフォーカスされる（最初の候補は選択中のタブ＝総合）
+  // Moving with the arrow keys and selecting selects and focuses that tab (the first candidate is the selected tab = Overview)
   await btn.click();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
@@ -252,7 +252,7 @@ test('次のスキャン中は前回の結果を表示せず、書き出しも�
   await expect(page.getByTestId('count-CRITICAL')).not.toHaveText('0');
   const big = mkdtempSync(join(tmpdir(), 'zes-big-'));
   mkdirSync(join(big, 'd'));
-  // 300 件で足りる: 読み取り（50 件ごとに UI へ制御を返す）の途中の画面を確かめられる。1,500 件では遅いエンジンで不安定だった
+  // 300 files are enough to check the screen in the middle of reading (control returns to the UI every 50 files). 1,500 was flaky on slow engines
   for (let i = 0; i < 300; i++) writeFileSync(join(big, 'd', `f${i}.txt`), 'hello ' + i);
   await pickDir(page, big);
   const status = page.getByTestId('scan-status');

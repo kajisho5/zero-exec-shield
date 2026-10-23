@@ -1,0 +1,26 @@
+[
+  {
+    "campaign": "litellm-oct2026",
+    "code": "s2.pth_exec",
+    "level": "HIGH",
+    "module": "§2",
+    "params": {},
+    "path": "getattr/site-packages/zz_helper.pth"
+  },
+  {
+    "campaign": "litellm-oct2026",
+    "code": "s2.pth_exec",
+    "level": "HIGH",
+    "module": "§2",
+    "params": {},
+    "path": "system/site-packages/zz_helper.pth"
+  },
+  {
+    "campaign": "litellm-oct2026",
+    "code": "s2.pth_import",
+    "level": "MEDIUM",
+    "module": "§2",
+    "params": {},
+    "path": "plain/site-packages/zz_plain.pth"
+  }
+]

@@ -1,6 +1,6 @@
-// パスの組み方（設計書 §6）: ディレクトリを鉛筆、ファイル名を墨の 500 で。等幅。
-// パスは信頼できない文字列。制御文字・双方向制御文字は visiblePath() で目に見える目印にし、<bdi dir="ltr"> で
-// 周りの文字列から双方向の並びを切り離す（パス内の RTL 文字が隣の UI 文言や行の並びを入れ替えないように）。
+// How paths are set (design doc §6): directories in pencil, the file name in ink at 500. Monospace.
+// Paths are untrusted strings. Control characters and bidi control characters become visible markers via visiblePath(), and <bdi dir="ltr">
+// isolates the bidi ordering from the surrounding text (so RTL characters in a path do not reorder the adjacent UI text or the row).
 import { cn } from '@/lib/utils';
 import { visiblePath } from '@/lib/visiblePath';
 

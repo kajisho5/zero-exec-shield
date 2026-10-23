@@ -1,198 +1,200 @@
-# ZES v5.2 Web Scanner UI（`index.html`）詳細設計書 — Step 1
+English | [日本語](ui-design.ja.md)
 
-- 対象仕様: ZES v5.2 Master Specification §1（絶対原則）/ §6（findings.json）/ §7（index.html）/ §5.7（§49 SkillPact）
-- 版: 0.1（設計レビュー用ドラフト）
-- 状態: **Step 2（SVGデザイン）とセットで承認待ち。承認前に React 実装へ着手しない。**
-- 付随デザイン: `docs/design/ui-overview.svg` / `docs/design/ui-skillpact.svg` / `docs/design/ui-components.svg`
+# ZES v5.2 Web Scanner UI (`index.html`) detailed design — Step 1
 
-> **注記（0.3.1）**: 本書の画面（付随の SVG を含む）は 0.3.0 の「検疫台」への作り直しより前のものです。現在の見た目とコンポーネントは [ui-design-0.3.md](ui-design-0.3.md) を参照してください。要件（F-01〜F-13、N-01〜N-08）・状態管理・エンジンの記述は引き続き有効です。
+- Target specification: ZES v5.2 Master Specification §1 (absolute principles) / §6 (findings.json) / §7 (index.html) / §5.7 (§49 SkillPact)
+- Version: 0.1 (draft for design review)
+- Status: **awaiting approval together with Step 2 (SVG designs). Do not start the React implementation before approval.**
+- Accompanying designs: `docs/design/ui-overview.svg` / `docs/design/ui-skillpact.svg` / `docs/design/ui-components.svg`
 
-> **注記（2026-10-23）**: 本書は実装前の設計ドラフトで、記録として残しています。UI は 0.1.0 で実装済みです。§49 SkillPact に関する記述（4.2 のタブ 2、5・7 の SkillPact 関連の型、8.5）は旧形式（`.skillpact/contract.json`・`secrets` 効果・L2 記録・L3 署名ファイル・prose 矛盾・`reversible`・未宣言効果の CRITICAL）を前提としており、0.2.0 で SkillPact 0.8 形式に合わせて作り直した現在の動作とは異なります。現在の動作は [README](../../README.ja.md) の「§49 SkillPact 契約（実験的）」と [CHANGELOG](../../CHANGELOG.md) を参照してください。
+> **Note (0.3.1)**: the screens in this document (including the accompanying SVGs) predate the 0.3.0 rebuild into the "quarantine bench". For the current look and components, see [ui-design-0.3.md](ui-design-0.3.md). The requirements (F-01 to F-13, N-01 to N-08), state management and engine descriptions remain valid.
 
-> 表記ルール: 【事実】=仕様書に明記、【設計判断】=本書での提案、【要承認】=ユーザー判断が必要、【不明】=現時点で確認できない事項。
+> **Note (2026-10-23)**: this document is a pre-implementation design draft, kept as a record. The UI was implemented in 0.1.0. The descriptions of §49 SkillPact (tab 2 in 4.2, the SkillPact-related types in 5 and 7, and 8.5) assume the old format (`.skillpact/contract.json`, the `secrets` effect, L2 records, L3 signature files, prose conflicts, `reversible`, CRITICAL for undeclared effects) and differ from the current behavior, which was rebuilt in 0.2.0 to match the SkillPact 0.8 format. For the current behavior, see "§49 SkillPact contracts (experimental)" in the [README](../../README.md) and the [CHANGELOG](../../CHANGELOG.md).
 
----
-
-## 1. 要件定義
-
-### 1.1 機能要件
-
-| ID | 要件 | 根拠 |
-|---|---|---|
-| F-01 | フォルダのドラッグ＆ドロップで配下ファイル一覧を取得し判定する | 【事実】§7.1 |
-| F-02 | D&D非対応環境では `<input type="file" webkitdirectory multiple>` でフォルダ選択にフォールバック | 【事実】§7.1 |
-| F-03 | テキスト貼り付け欄で C2ドメイン/IP、`base64`/`exec(`/`curl` 等を判定 | 【事実】§7.1, §7.3 |
-| F-04 | `rules/ioc.json` をビルド時に index.html へインライン埋め込み（`file://` で動作） | 【事実】§7.1 |
-| F-05 | 全18タブ（§7.2 の順序固定）。主画面は「総合サマリ＋重大度フィルタ」 | 【事実】§7.2, §15 |
-| F-06 | 重大度色分け（CRITICAL/HIGH/MEDIUM/LOW/INFO/SAFE）、検出パスのコピー | 【事実】§7.4（MEDIUM/LOW/INFOは §6 の level 列挙に合わせ【設計判断】で追加） |
-| F-07 | Blast Radius パネル: 対象パスのリストのみ表示、内容は表示しない | 【事実】§7.4, §1 |
-| F-08 | MCP設定ビューア（`command`/`args` ハイライト） | 【事実】§7.4 |
-| F-09 | GitHub Actions ビューア（`uses:` のタグ参照/SHA固定を色分け） | 【事実】§7.4 |
-| F-10 | ブラウザ拡張ビューア（危険パーミッション/`<all_urls>` ハイライト） | 【事実】§7.4 |
-| F-11 | SkillPact ビューア: 契約・実態・差分・ポリシー決定・差分異常 | 【事実】§7.4, §5.7 |
-| F-12 | 結果を findings.json（§6 互換）としてエクスポート（Blob + `<a download>`。ネットワーク不使用） | 【設計判断】§6 との相互運用 |
-| F-13 | ZES CLI が出力した `findings.json` を読み込んで表示（ビューアモード） | 【設計判断】【要承認】 |
-
-### 1.2 非機能要件（絶対制約）
-
-| ID | 制約 | 実現手段 |
-|---|---|---|
-| N-01 | 外部通信ゼロ（CDN禁止、`fetch`/`XMLHttpRequest`/`WebSocket`/`EventSource`/`navigator.sendBeacon` 不使用） | 単一HTMLへ全インライン化＋CSP `connect-src 'none'`＋ビルド後の静的grepテスト＋Playwrightでのリクエスト監視（§11） |
-| N-02 | `file://` で動作 | ES Module の外部読込をしない（全スクリプトをインライン）。`type="module"` のインラインスクリプトは file:// でも動作するが、念のため IIFE 出力も選択可能に（【要承認】§13） |
-| N-03 | ダークUI、背景 `#0a0a0a` | デザイントークン §2 |
-| N-04 | ファイル内容は**判定にのみ**使用し、UI・エクスポートに内容を一切出さない | 判定関数の戻り値型を「パス＋ルールID＋メタ情報」に限定（§6.3 の型で強制）。プレビュー機能を持たない |
-| N-05 | Zero-Execution: 投入ファイルを評価・実行しない（`eval`/`new Function`/`<script>` 挿入/Worker への投入コード渡し禁止） | ESLint `no-eval`/`no-new-func`/`no-implied-eval` を error、`dangerouslySetInnerHTML` 禁止ルール |
-| N-06 | 大量ファイル（数万件）でもUIが固まらない | ファイル読み取りはチャンク処理（`requestIdleCallback`/`setTimeout(0)` 分割）、テーブルは仮想スクロール |
-| N-07 | 読み取り上限 | 1ファイルあたり既定 2 MiB まで読み取り（超過分は「サイズ超過・未判定」として INFO 表示。0件扱いしない＝§10.1 fail-closed の精神） |
-| N-08 | アクセシビリティ WCAG 2.1 AA 相当 | §10 |
-
-### 1.3 スコープ外
-
-- サーバー送信・クラウド連携・自動更新（N-01 により禁止）
-- ファイル内容のプレビュー（N-04 により禁止）
-- 修復操作（§0.2 の3層構えにより修復層の責務。UIは検知層）
-- L3署名の暗号学的検証（§5.7 により実施しない。「署名ファイルあり」の表示のみ）
+> Notation: [Fact] = stated in the specification, [Design decision] = proposed in this document, [Needs approval] = requires the user's decision, [Unknown] = cannot be confirmed at this time.
 
 ---
 
-## 2. デザイントークン（SVGと一致）
+## 1. Requirements
 
-### 2.1 カラー
+### 1.1 Functional requirements
 
-| トークン | 値 | 用途 |
+| ID | Requirement | Basis |
 |---|---|---|
-| `--bg` | `#0a0a0a` | ページ背景 |
-| `--surface` | `#141414` | カード・パネル |
-| `--surface-2` | `#1c1c1c` | テーブルヘッダ・入力欄・ホバー |
-| `--border` | `#2a2a2a` | 区切り線・枠 |
-| `--border-strong` | `#3a3a3a` | フォーカス前の入力枠 |
-| `--text` | `#ededed` | 本文 |
-| `--text-muted` | `#a3a3a3` | 補足 |
-| `--text-subtle` | `#8a8a8a` | キャプション（`#0a0a0a` 上でコントラスト約5.9:1） |
-| `--accent` | `#38bdf8` | フォーカスリング・リンク・アクティブタブ下線 |
-| `--critical` / `--critical-bg` | `#ef4444` / `#2a0f0f` | CRITICAL、宣言外エフェクト（差分）の赤ハイライト |
+| F-01 | Get the list of files under a folder by drag and drop, and check them | [Fact] §7.1 |
+| F-02 | Where D&D is not supported, fall back to folder selection with `<input type="file" webkitdirectory multiple>` | [Fact] §7.1 |
+| F-03 | A text paste box that checks C2 domains / IPs, `base64` / `exec(` / `curl`, etc. | [Fact] §7.1, §7.3 |
+| F-04 | Embed `rules/ioc.json` inline into index.html at build time (works over `file://`) | [Fact] §7.1 |
+| F-05 | All 18 tabs (fixed order of §7.2). The main screen is "overall summary + severity filter" | [Fact] §7.2, §15 |
+| F-06 | Severity colors (CRITICAL/HIGH/MEDIUM/LOW/INFO/SAFE), copying of detected paths | [Fact] §7.4 (MEDIUM/LOW/INFO added as a [Design decision] to match the level enumeration of §6) |
+| F-07 | Blast Radius panel: shows only the list of target paths, never the contents | [Fact] §7.4, §1 |
+| F-08 | MCP configuration viewer (highlights `command` / `args`) | [Fact] §7.4 |
+| F-09 | GitHub Actions viewer (colors tag references / SHA pinning in `uses:`) | [Fact] §7.4 |
+| F-10 | Browser extension viewer (highlights dangerous permissions / `<all_urls>`) | [Fact] §7.4 |
+| F-11 | SkillPact viewer: contract, observed behavior, divergence, policy decision, diff anomaly | [Fact] §7.4, §5.7 |
+| F-12 | Export the results as findings.json (§6-compatible) (Blob + `<a download>`; no network use) | [Design decision] interoperability with §6 |
+| F-13 | Load and display a `findings.json` output by the ZES CLI (viewer mode) | [Design decision] [Needs approval] |
+
+### 1.2 Non-functional requirements (absolute constraints)
+
+| ID | Constraint | Means |
+|---|---|---|
+| N-01 | Zero external communication (no CDN; no use of `fetch` / `XMLHttpRequest` / `WebSocket` / `EventSource` / `navigator.sendBeacon`) | Inline everything into a single HTML file + CSP `connect-src 'none'` + a static grep test after the build + request monitoring with Playwright (§11) |
+| N-02 | Works over `file://` | No external loading of ES Modules (all scripts inline). Inline scripts with `type="module"` work under file://, but IIFE output can also be selected just in case ([Needs approval] §13) |
+| N-03 | Dark UI, background `#0a0a0a` | Design tokens §2 |
+| N-04 | File contents are used **only for checks**; no content ever appears in the UI or the export | Restrict the return type of the check functions to "path + rule ID + metadata" (enforced by the types in §6.3). No preview feature |
+| N-05 | Zero-Execution: do not evaluate or execute submitted files (no `eval` / `new Function` / `<script>` insertion / passing submitted code to a Worker) | ESLint `no-eval` / `no-new-func` / `no-implied-eval` as errors, and a rule forbidding `dangerouslySetInnerHTML` |
+| N-06 | The UI does not freeze even with a large number of files (tens of thousands) | Read files in chunks (split with `requestIdleCallback` / `setTimeout(0)`); virtual scrolling for tables |
+| N-07 | Read limit | By default read up to 2 MiB per file (beyond that, shown as INFO "size exceeded, not scanned". Not treated as 0 findings, in the spirit of §10.1 fail-closed) |
+| N-08 | Accessibility equivalent to WCAG 2.1 AA | §10 |
+
+### 1.3 Out of scope
+
+- Sending to servers, cloud integration, automatic updates (forbidden by N-01)
+- Previewing file contents (forbidden by N-04)
+- Remediation operations (the remediation layer's responsibility under the three-layer setup of §0.2; the UI is the detection layer)
+- Cryptographic verification of L3 signatures (not done, per §5.7; only "has a signature file" is shown)
+
+---
+
+## 2. Design tokens (consistent with the SVGs)
+
+### 2.1 Colors
+
+| Token | Value | Use |
+|---|---|---|
+| `--bg` | `#0a0a0a` | Page background |
+| `--surface` | `#141414` | Cards, panels |
+| `--surface-2` | `#1c1c1c` | Table headers, inputs, hover |
+| `--border` | `#2a2a2a` | Dividers, frames |
+| `--border-strong` | `#3a3a3a` | Input frame before focus |
+| `--text` | `#ededed` | Body text |
+| `--text-muted` | `#a3a3a3` | Supplementary text |
+| `--text-subtle` | `#8a8a8a` | Captions (contrast about 5.9:1 on `#0a0a0a`) |
+| `--accent` | `#38bdf8` | Focus ring, links, active tab underline |
+| `--critical` / `--critical-bg` | `#ef4444` / `#2a0f0f` | CRITICAL, red highlight of undeclared effects (divergence) |
 | `--high` / `--high-bg` | `#f97316` / `#2a170a` | HIGH |
 | `--medium` / `--medium-bg` | `#eab308` / `#262008` | MEDIUM |
 | `--low` / `--low-bg` | `#3b82f6` / `#0d1a30` | LOW |
 | `--info` / `--info-bg` | `#a3a3a3` / `#1c1c1c` | INFO |
-| `--safe` / `--safe-bg` | `#22c55e` / `#0c2214` | SAFE（※SkillPactタブでは使用しない。§8.5） |
-| `--signed` / `--signed-bg` | `#a78bfa` / `#1b1430` | L3「署名済みファイル」バッジ（安全色の緑を意図的に避ける） |
+| `--safe` / `--safe-bg` | `#22c55e` / `#0c2214` | SAFE (* not used in the SkillPact tab; §8.5) |
+| `--signed` / `--signed-bg` | `#a78bfa` / `#1b1430` | L3 "signed files" badge (deliberately avoids the green safe color) |
 
-- 重大度は**色だけに依存しない**（WCAG 1.4.1）: 必ずラベル文字列（CRITICAL 等）とアイコン形状（八角形/三角/円/チェック）を併記。
+- Severity **does not rely on color alone** (WCAG 1.4.1): always show the label text (CRITICAL, etc.) and an icon shape (octagon / triangle / circle / check) alongside.
 
-### 2.2 タイポグラフィ
+### 2.2 Typography
 
-- `font-family: system-ui, 'Hiragino Sans', 'Noto Sans JP', sans-serif`（Webフォント読込なし＝N-01）
-- 等幅（パス・コマンド・ハッシュ）: `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
-- スケール: 24/600（ページタイトル）、18/600（セクション）、14/400（本文）、13/400（テーブル）、12/500（バッジ・キャプション）、行間 1.5（日本語本文は 1.7）
+- `font-family: system-ui, 'Hiragino Sans', 'Noto Sans JP', sans-serif` (no web fonts loaded = N-01)
+- Monospace (paths, commands, hashes): `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+- Scale: 24/600 (page title), 18/600 (section), 14/400 (body), 13/400 (table), 12/500 (badges, captions), line height 1.5 (1.7 for Japanese body text)
 
-### 2.3 余白・形状
+### 2.3 Spacing and shape
 
-- 8px グリッド（4/8/12/16/24/32）。ページ左右余白 32px（≥1280px）、16px（<768px）
-- 角丸: カード 12px、ボタン/入力 8px、バッジ 6px、タブ 0（下線スタイル）
-- 最小タップ領域 32×32px（ポインタ）/ 44×44px（タッチ時）
+- 8px grid (4/8/12/16/24/32). Page side margins 32px (≥1280px), 16px (<768px)
+- Corner radius: cards 12px, buttons / inputs 8px, badges 6px, tabs 0 (underline style)
+- Minimum hit area 32×32px (pointer) / 44×44px (touch)
 
 ---
 
-## 3. 技術スタック方針
+## 3. Technology stack policy
 
-【事実】ユーザー規約により React ベース必須。【事実】§1/§7.1 により CDN 禁止・`file://` 動作・外部通信ゼロ。
-→【設計判断】**ビルド時に全依存をバンドルし、単一の `index.html` に JS/CSS/ioc.json をインライン化**する。ランタイムで外部リソースを一切取得しない。
+[Fact] React is required by the user's conventions. [Fact] Per §1/§7.1: no CDN, works over `file://`, zero external communication.
+→ [Design decision] **Bundle all dependencies at build time and inline the JS/CSS/ioc.json into a single `index.html`**. Nothing external is fetched at runtime.
 
-| 層 | 候補 | 備考 |
+| Layer | Candidate | Notes |
 |---|---|---|
-| UI | React 18 系 + TypeScript（strict） | バージョンは**実装時に公式（react.dev / npm）で確認し lockfile で固定** |
-| ビルド | Vite | 同上 |
-| 単一ファイル化 | `vite-plugin-singlefile`（候補） | 同上。代替: Vite の `build.assetsInlineLimit` + 自前インライン化スクリプト |
-| スタイル | Tailwind CSS（ビルド時にCSS生成、未使用クラスはパージ） | 同上。v3/v4 の選択は実装時に確認 |
-| 仮想スクロール | 自前実装（依存削減）または `@tanstack/react-virtual`（候補） | 【要承認】依存最小化を優先し自前実装を推奨（※ `@tanstack/*` は §3.2 で侵害キャンペーン対象名前空間のため、採用時はバージョン/ハッシュの厳格固定が必須） |
-| テスト | Vitest（ロジック）、Playwright（E2E・外部リクエストゼロ検証） | 同上 |
-| Lint | ESLint（`no-eval`, `no-new-func`, `no-implied-eval`, `no-restricted-globals: fetch, XMLHttpRequest, WebSocket, EventSource`, `react/no-danger`） | 同上 |
+| UI | React 18 + TypeScript (strict) | **Confirm the version on the official sources (react.dev / npm) at implementation time and pin it in the lockfile** |
+| Build | Vite | Same as above |
+| Single-file output | `vite-plugin-singlefile` (candidate) | Same as above. Alternative: Vite's `build.assetsInlineLimit` + our own inlining script |
+| Styles | Tailwind CSS (CSS generated at build time, unused classes purged) | Same as above. Choose between v3/v4 at implementation time |
+| Virtual scrolling | Our own implementation (fewer dependencies) or `@tanstack/react-virtual` (candidate) | [Needs approval] Our own implementation is recommended to minimize dependencies (* `@tanstack/*` is a namespace targeted by a compromise campaign in §3.2, so adopting it requires strict version / hash pinning) |
+| Tests | Vitest (logic), Playwright (E2E, verifying zero external requests) | Same as above |
+| Lint | ESLint (`no-eval`, `no-new-func`, `no-implied-eval`, `no-restricted-globals: fetch, XMLHttpRequest, WebSocket, EventSource`, `react/no-danger`) | Same as above |
 
-- 依存は `package-lock.json` を **`npm ci --ignore-scripts`** で導入（§3.2 キャンペーン対策・§12 ワクチンと整合）。ビルド成果物はリポジトリ直下 `index.html` にコミットし、利用者はビルド不要。
-- **CSP（`<meta http-equiv>`）案**:
+- Dependencies are installed from `package-lock.json` with **`npm ci --ignore-scripts`** (consistent with the §3.2 campaign countermeasures and the §12 vaccine). The build output is committed as `index.html` at the repository root, so users need no build.
+- **Proposed CSP (`<meta http-equiv>`)**:
   `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`
-  - 【不明】`file://` 下での CSP meta の挙動はブラウザ差があり得るため、実装時に Chromium / Firefox / Safari で実測確認する。
-  - 【設計判断】`'unsafe-inline'` は単一ファイル化の都合上必要。代替としてビルド時にスクリプトの SHA-256 を計算し `script-src 'sha256-…'` を出力する方式を推奨（【要承認】）。
+  - [Unknown] The behavior of a CSP meta under `file://` may differ between browsers, so measure it in Chromium / Firefox / Safari at implementation time.
+  - [Design decision] `'unsafe-inline'` is needed because of the single-file output. As an alternative, computing the scripts' SHA-256 at build time and emitting `script-src 'sha256-…'` is recommended ([Needs approval]).
 
 ---
 
-## 4. 画面構成
+## 4. Screen layout
 
-### 4.1 全体レイアウト（1440×900 基準、`ui-overview.svg`）
+### 4.1 Overall layout (based on 1440×900, `ui-overview.svg`)
 
 ```
 ┌ Header (64px) ─────────────────────────────────────────────────────────┐
-│ [盾ロゴ] Zero-Exec Shield v5.2   bundle: ZES-2026-OCT-EMERGENCY-V5.2    │
-│                              [● オフライン / 外部通信ゼロ] [JSON出力] [クリア] │
-├ TabBar (48px, 横スクロール + 左右スクロールボタン + 「すべてのタブ ▾」) ──────┤
-│ 総合 | SkillPact | TeamPCP | ChainDrop | PyPI | Solana | Post-ShaiHulud | … │
+│ [shield logo] Zero-Exec Shield v5.2   bundle: ZES-2026-OCT-EMERGENCY-V5.2 │
+│                  [● Offline / zero external communication] [Export JSON] [Clear] │
+├ TabBar (48px, horizontal scroll + left/right scroll buttons + "All tabs ▾") ──┤
+│ Overview | SkillPact | TeamPCP | ChainDrop | PyPI | Solana | Post-ShaiHulud | … │
 ├ Main ──────────────────────────────────────────────────────────────────┤
-│ ┌ 入力(左 2/3) ─────────────────────┐ ┌ Blast Radius(右 1/3) ─────────┐ │
-│ │ DropZone  |  PasteBox             │ │ シークレット存在リスト（パスのみ） │ │
+│ ┌ Input (left 2/3) ─────────────────┐ ┌ Blast Radius (right 1/3) ──────┐ │
+│ │ DropZone  |  PasteBox             │ │ List of secrets present (paths only) │ │
 │ └───────────────────────────────────┘ │                                │ │
 │ SummaryCards: CRITICAL / HIGH / MEDIUM / SAFE                          │ │
-│ SeverityFilter(トグル) + 検索 + モジュール絞込                             │ │
-│ FindingsTable(仮想スクロール): 重大度 | モジュール | キャンペーン | パス[コピー] | 詳細 │
+│ SeverityFilter (toggles) + search + module filter                      │ │
+│ FindingsTable (virtual scroll): severity | module | campaign | path [copy] | detail │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **18タブの扱い**【設計判断】: 1段・横スクロール（`overflow-x: auto`、スクロールスナップ）＋両端フェード＋左右スクロールボタン＋右端「すべてのタブ ▾」メニュー（全18件をリスト表示しジャンプ）。各タブに件数バッジ（最大重大度色）を表示。2段折返しはタブ位置が変動し記憶しづらいため不採用。
-- <1024px: Blast Radius パネルは入力エリアの下へ縦積み。<768px: SummaryCards は 2×2。
+- **Handling the 18 tabs** [Design decision]: one row with horizontal scrolling (`overflow-x: auto`, scroll snap) + fades at both ends + left/right scroll buttons + an "All tabs ▾" menu at the right end (lists all 18 and jumps to one). Each tab shows a count badge (in the color of its highest severity). Wrapping into two rows was rejected because it moves tab positions and makes them hard to remember.
+- <1024px: the Blast Radius panel stacks below the input area. <768px: SummaryCards become 2×2.
 
-### 4.2 タブ一覧と表示内容（§7.2 順序固定）
+### 4.2 Tabs and their contents (fixed order of §7.2)
 
-| # | タブ | 主な判定（UI側） | 対応CLIモジュール | ビューア |
+| # | Tab | Main checks (UI side) | Corresponding CLI modules | Viewer |
 |---|---|---|---|---|
-| 1 | 総合 | 全ルールの集約、重大度サマリ、Blast Radius | 全§ | SummaryCards / FindingsTable |
-| 2 | SkillPact | 契約JSONパース、宣言vs実態、prose矛盾、ポリシー、L2/L3、差分異常 | §49（§2/§7/§15/§17 再利用相当） | SkillPactViewer |
-| 3 | TeamPCP | `router_init.js`/`tanstack_runner.js`/`vite_setup.mjs`、`@tanstack/*` 等の lockfile 照合、C2 IoC（貼付） | §15, §18, §45 | FindingsTable |
-| 4 | ChainDrop | `setup.mjs`/`Math_Symbol.js`/`math_init.js`、`preinstall: "node setup.mjs"`、SHA-256 照合、keyv 系バージョン | §15 | FindingsTable |
-| 5 | PyPI | litellm/lightning/telnyx/py2ops/mistralai/guardrails-ai、`cook.pth`/`sitecustomize.py`、`_runtime/` | §2, §15 | FindingsTable |
-| 6 | Solana | `@solana-labs/*` タイポ（lockfile/package.json） | §9, §15 | FindingsTable |
-| 7 | Post-ShaiHulud | `iron-worm`/`sckit`/`miasma`/`cargo-install` 偽装（ファイル名） | §25 | FindingsTable |
-| 8 | MCP | `.mcp.json` 等の `command`/`args` 危険コマンド、SymJack デコイ、`runOn: folderOpen`、description 内の注入語 | §17, §20, §37 | McpViewer |
-| 9 | GitHub Actions | `pull_request_target`+checkout(refなし)+secrets、`uses:` タグ参照、`permissions: write-all`、cache キー | §21, §22, §38 | ActionsViewer |
-| 10 | ブラウザ拡張 | `manifest.json` の危険パーミッション/`<all_urls>`/`update_url` | §24, §42 | ExtensionViewer |
-| 11 | ビルドフック | `build.rs` の `Command::new`/`include_bytes!`、`//go:generate curl`、`build-backend` 非safe | §27 | FindingsTable |
-| 12 | モデル供給網 | `.pkl`/`.pickle`/`.pt`/`.bin`、`weights_only=False`、`trust_remote_code=True`、`--extra-index-url` | §32 | FindingsTable |
-| 13 | 永続化 | LaunchAgents plist、`ld.so.preload`、systemd user、autostart、`.envrc`、shell hooks（投入ファイル内で判定） | §10, §26, §30, §31, §33 | FindingsTable |
-| 14 | アンチフォレンジック | `HISTFILE=/dev/null`/`HISTSIZE=0`（投入ファイル内）。※noatime/auditd はブラウザから判定不可→「CLIで確認」案内 | §35 | FindingsTable + CliOnlyNotice |
-| 15 | HF | データセットスクリプトの `subprocess`/`eval`/`__reduce__`/`pickle.loads`/`dill`、`transformers.pyz` | §36 | FindingsTable |
-| 16 | eBPF/LD_PRELOAD | 投入ファイル内の `LD_PRELOAD`、`/etc/ld.so.preload` 参照、QLNX/LinkPro/VoidLink 指標。※`bpftool`/`lsmod` はCLI専用 | §40 | FindingsTable + CliOnlyNotice |
-| 17 | AIアシスタント | `.cursorrules`/`CLAUDE.md`/`.github/copilot-instructions.md` の不可視文字・BiDi（U+202A–202E, U+2066–2069）・ホモグリフ、リポジトリ直下 `git.exe` | §7, §41 | FindingsTable |
-| 18 | Sigstore/SBOM | cosign 引数の `--certificate-identity`/`--certificate-oidc-issuer` 欠落、SBOM 有無、`provenance` 不在 | §28, §43, §48 | FindingsTable |
+| 1 | Overview | Aggregation of all rules, severity summary, Blast Radius | All § | SummaryCards / FindingsTable |
+| 2 | SkillPact | Contract JSON parsing, declared vs observed, prose conflicts, policy, L2/L3, diff anomaly | §49 (equivalent to reusing §2/§7/§15/§17) | SkillPactViewer |
+| 3 | TeamPCP | `router_init.js` / `tanstack_runner.js` / `vite_setup.mjs`, lockfile matching of `@tanstack/*` etc., C2 IoCs (pasted) | §15, §18, §45 | FindingsTable |
+| 4 | ChainDrop | `setup.mjs` / `Math_Symbol.js` / `math_init.js`, `preinstall: "node setup.mjs"`, SHA-256 matching, keyv-family versions | §15 | FindingsTable |
+| 5 | PyPI | litellm/lightning/telnyx/py2ops/mistralai/guardrails-ai, `cook.pth` / `sitecustomize.py`, `_runtime/` | §2, §15 | FindingsTable |
+| 6 | Solana | `@solana-labs/*` typosquats (lockfile / package.json) | §9, §15 | FindingsTable |
+| 7 | Post-ShaiHulud | `iron-worm` / `sckit` / `miasma` / `cargo-install` masquerades (file names) | §25 | FindingsTable |
+| 8 | MCP | Dangerous commands in `command` / `args` of `.mcp.json` etc., SymJack decoys, `runOn: folderOpen`, injection words in description | §17, §20, §37 | McpViewer |
+| 9 | GitHub Actions | `pull_request_target` + checkout (no ref) + secrets, tag references in `uses:`, `permissions: write-all`, cache keys | §21, §22, §38 | ActionsViewer |
+| 10 | Browser extensions | Dangerous permissions / `<all_urls>` / `update_url` in `manifest.json` | §24, §42 | ExtensionViewer |
+| 11 | Build hooks | `Command::new` / `include_bytes!` in `build.rs`, `//go:generate curl`, non-safe `build-backend` | §27 | FindingsTable |
+| 12 | Model supply chain | `.pkl` / `.pickle` / `.pt` / `.bin`, `weights_only=False`, `trust_remote_code=True`, `--extra-index-url` | §32 | FindingsTable |
+| 13 | Persistence | LaunchAgents plists, `ld.so.preload`, systemd user, autostart, `.envrc`, shell hooks (checked within submitted files) | §10, §26, §30, §31, §33 | FindingsTable |
+| 14 | Anti-forensics | `HISTFILE=/dev/null` / `HISTSIZE=0` (within submitted files). * noatime / auditd cannot be checked from the browser → "check with the CLI" guidance | §35 | FindingsTable + CliOnlyNotice |
+| 15 | HF | `subprocess` / `eval` / `__reduce__` / `pickle.loads` / `dill` in dataset scripts, `transformers.pyz` | §36 | FindingsTable |
+| 16 | eBPF/LD_PRELOAD | `LD_PRELOAD` in submitted files, references to `/etc/ld.so.preload`, QLNX / LinkPro / VoidLink indicators. * `bpftool` / `lsmod` are CLI only | §40 | FindingsTable + CliOnlyNotice |
+| 17 | AI assistants | Invisible characters, BiDi (U+202A–202E, U+2066–2069) and homoglyphs in `.cursorrules` / `CLAUDE.md` / `.github/copilot-instructions.md`, `git.exe` at the repository root | §7, §41 | FindingsTable |
+| 18 | Sigstore/SBOM | Missing `--certificate-identity` / `--certificate-oidc-issuer` in cosign arguments, presence of an SBOM, absence of `provenance` | §28, §43, §48 | FindingsTable |
 
-- ホスト状態に依存する判定（`ps`/`lsof`/`uname`/`docker version`/`bpftool`/`mount` 等）はブラウザでは実施不可。該当タブに **CliOnlyNotice**（「この項目は `./zes-scan.sh --full` で確認」）を表示し、0件=安全と誤認させない（§10.1 fail-closed）。
+- Checks that depend on host state (`ps` / `lsof` / `uname` / `docker version` / `bpftool` / `mount`, etc.) cannot be done in the browser. The relevant tabs show a **CliOnlyNotice** ("check this item with `./zes-scan.sh --full`") so that 0 findings is not mistaken for safe (§10.1 fail-closed).
 
 ---
 
-## 5. コンポーネント分割
+## 5. Component breakdown
 
-### 5.1 ツリー
+### 5.1 Tree
 
 ```
 <App>
- ├─ <ScanProvider>                     … Context + useReducer（§6）
+ ├─ <ScanProvider>                     … Context + useReducer (§6)
  │   ├─ <Header>
  │   │    ├─ <BrandMark/>
  │   │    ├─ <BundleBadge bundle/>
- │   │    ├─ <OfflineIndicator/>        … 常時「外部通信ゼロ」表示
+ │   │    ├─ <OfflineIndicator/>        … always shows "zero external communication"
  │   │    └─ <HeaderActions onExport onClear/>
  │   ├─ <TabBar tabs activeId counts onSelect/>
  │   │    ├─ <TabScrollButton direction/>
  │   │    ├─ <Tab …/> ×18
  │   │    └─ <AllTabsMenu/>
  │   └─ <TabPanel id>                   … role="tabpanel"
- │        ├─ [総合] <OverviewTab>
+ │        ├─ [Overview] <OverviewTab>
  │        │    ├─ <InputArea>
  │        │    │    ├─ <DropZone onFiles/>        … D&D + webkitdirectory fallback
  │        │    │    └─ <PasteBox onSubmit/>
  │        │    ├─ <ScanProgress/>
  │        │    ├─ <SummaryCards counts filter onToggle/>
- │        │    ├─ <FindingsToolbar>（<SeverityFilter/> <SearchInput/> <ModuleSelect/>）
- │        │    ├─ <FindingsTable findings/>   … 仮想スクロール
- │        │    │    └─ <FindingRow finding/>（<SeverityBadge/> <CopyPathButton/>）
+ │        │    ├─ <FindingsToolbar> (<SeverityFilter/> <SearchInput/> <ModuleSelect/>)
+ │        │    ├─ <FindingsTable findings/>   … virtual scroll
+ │        │    │    └─ <FindingRow finding/> (<SeverityBadge/> <CopyPathButton/>)
  │        │    └─ <BlastRadiusPanel items/>
  │        ├─ [SkillPact] <SkillPactTab>
  │        │    ├─ <SkillList skills selectedId onSelect/>
@@ -204,12 +206,12 @@
  │        │         └─ <RuleResultList results/>
  │        ├─ [MCP] <McpViewer configs/>
  │        ├─ [GitHub Actions] <ActionsViewer workflows/>
- │        ├─ [ブラウザ拡張] <ExtensionViewer manifests/>
- │        └─ [その他] <CampaignTab campaignIds modules cliOnly?/>（FindingsTable 再利用）
+ │        ├─ [Browser extensions] <ExtensionViewer manifests/>
+ │        └─ [Others] <CampaignTab campaignIds modules cliOnly?/> (reuses FindingsTable)
  └─ <ToastRegion/>                       … aria-live="polite"
 ```
 
-### 5.2 主要 Props 型
+### 5.2 Main Props types
 
 ```ts
 type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
@@ -218,17 +220,17 @@ type DisplaySeverity = Severity | 'SAFE';
 interface TabDef { id: TabId; label: string; modules: string[]; campaigns: string[]; cliOnlyNote?: string }
 interface TabBarProps { tabs: TabDef[]; activeId: TabId; counts: Record<TabId, { total: number; max?: Severity }>; onSelect(id: TabId): void }
 interface DropZoneProps { disabled?: boolean; onFiles(files: ScannedFileInput[]): void }   // File + webkitRelativePath
-interface PasteBoxProps { maxLength: number; onSubmit(text: string): void }                 // 既定 1,000,000 文字
+interface PasteBoxProps { maxLength: number; onSubmit(text: string): void }                 // default 1,000,000 characters
 interface SummaryCardsProps { counts: Record<DisplaySeverity, number>; active: Set<Severity>; onToggle(s: Severity): void }
 interface SeverityFilterProps { active: Set<Severity>; onChange(next: Set<Severity>): void }
 interface FindingsTableProps { findings: Finding[]; rowHeight?: number; emptyState: 'not-scanned' | 'no-match' | 'clean' }
 interface FindingRowProps { finding: Finding; onCopyPath(path: string): void }
-interface CopyPathButtonProps { path: string }                                               // navigator.clipboard.writeText（ネットワーク非使用）
+interface CopyPathButtonProps { path: string }                                               // navigator.clipboard.writeText (no network)
 interface BlastRadiusPanelProps { items: BlastRadiusItem[] }
 interface SkillListProps { skills: SkillPactAnalysis[]; selectedId?: string; onSelect(id: string): void }
 interface SkillPactViewerProps { analysis: SkillPactAnalysis }
 interface EffectMatrixProps { declared: Effect[]; observed: Effect[]; divergence: Effect[] }
-interface LevelBadgeProps { level: 'L1' | 'L2' | 'L3' | null; signed: boolean }             // L3 でも「安全」表記禁止
+interface LevelBadgeProps { level: 'L1' | 'L2' | 'L3' | null; signed: boolean }             // never label as "safe", even for L3
 interface PolicyDecisionBadgeProps { decision: 'allow' | 'ask' | 'deny' | null }
 interface ProseConflictAlertProps { conflicts: ProseConflict[] }
 interface DiffAnomalyAlertProps { anomaly: DiffAnomaly | null }
@@ -240,25 +242,25 @@ interface CampaignTabProps { tab: TabDef; findings: Finding[] }
 
 ---
 
-## 6. 状態管理
+## 6. State management
 
-【設計判断】外部状態ライブラリは使わず `useReducer` + Context（依存最小化＝供給網リスク低減）。重い判定は純関数 `engine/*` に分離し UI から独立テスト可能にする。
+[Design decision] No external state library; `useReducer` + Context (fewer dependencies = lower supply-chain risk). Heavy checks are separated into pure functions in `engine/*` so they can be tested independently of the UI.
 
-### 6.1 State 型
+### 6.1 State type
 
 ```ts
 interface ScanState {
   phase: 'idle' | 'reading' | 'analyzing' | 'done' | 'error';
   progress: { processed: number; total: number };
-  files: ScannedFile[];                 // メタ情報のみ（内容は保持しない）
+  files: ScannedFile[];                 // metadata only (contents are not kept)
   findings: Finding[];
   skillpact: SkillPactAnalysis[];
   blastRadius: BlastRadiusItem[];
   viewers: { mcp: McpConfigView[]; actions: WorkflowView[]; extensions: ExtensionView[] };
-  errors: ScanError[];                  // §6 errors[] 互換
+  errors: ScanError[];                  // compatible with §6 errors[]
   ui: {
     activeTab: TabId;
-    severityFilter: Set<Severity>;      // 既定: 全選択
+    severityFilter: Set<Severity>;      // default: all selected
     query: string;
     moduleFilter: string | null;
     selectedSkillId: string | null;
@@ -273,7 +275,7 @@ interface ScanState {
 type Action =
   | { type: 'SCAN_START'; total: number; startedAt: string }
   | { type: 'SCAN_PROGRESS'; processed: number }
-  | { type: 'SCAN_RESULT'; result: EngineResult }          // findings/skillpact/blastRadius/viewers/errors を一括
+  | { type: 'SCAN_RESULT'; result: EngineResult }          // findings/skillpact/blastRadius/viewers/errors at once
   | { type: 'SCAN_FAIL'; error: ScanError }
   | { type: 'PASTE_RESULT'; result: EngineResult }
   | { type: 'IMPORT_FINDINGS'; doc: FindingsDoc }           // F-13
@@ -285,17 +287,17 @@ type Action =
   | { type: 'CLEAR' };
 ```
 
-### 6.3 内容非保持の担保
+### 6.3 Guaranteeing that contents are not kept
 
-- ファイル内容（`string`）は `engine/analyzeFile()` の**ローカル変数としてのみ**存在し、State・Finding・エクスポートに入らない。`Finding.detail` はルール定義側の固定テンプレート文字列（例: 「契約は read のみ宣言、実態に exec を検出」）からのみ生成し、ファイル由来の文字列を連結しない。
-- 例外: ファイルの**パス**（`webkitRelativePath`）と JSON 設定のキー名・`command` 値（MCPビューア）・`uses:` 参照（Actionsビューア）・パーミッション名（拡張ビューア）。これらは §7.4 で表示が要求されているため「設定値のハイライト表示」として許容。【要承認】§13-4。
+- File contents (`string`) exist **only as local variables** of `engine/analyzeFile()` and never enter the State, a Finding or the export. `Finding.detail` is generated only from fixed template strings on the rule-definition side (for example "the contract declares only read; exec was observed"), and never concatenates strings taken from files.
+- Exceptions: file **paths** (`webkitRelativePath`), and key names and `command` values of JSON configurations (MCP viewer), `uses:` references (Actions viewer) and permission names (extension viewer). §7.4 requires these to be displayed, so they are allowed as "highlighted display of configuration values". [Needs approval] §13-4.
 
 ---
 
-## 7. データ構造（TypeScript）
+## 7. Data structures (TypeScript)
 
 ```ts
-// ---- IoC DB（rules/ioc.json をビルド時インライン、§3） ----
+// ---- IoC DB (rules/ioc.json inlined at build time, §3) ----
 interface IocDb {
   incident_bundle: string;                        // "ZES-2026-OCT-EMERGENCY-V5.2"
   packages: IocPackage[];
@@ -322,26 +324,26 @@ interface SkillPactRules {
 }
 type Effect = 'exec' | 'network' | 'write' | 'read' | 'secrets' | 'spend';
 
-// ---- 入力ファイル（メタ情報のみ保持） ----
+// ---- Input files (metadata only) ----
 interface ScannedFile {
-  relPath: string;            // webkitRelativePath または D&D の fullPath
+  relPath: string;            // webkitRelativePath or the D&D fullPath
   name: string; size: number; lastModified: number;
-  isZeroByte: boolean;        // SymJack デコイ判定用（§7.3）
+  isZeroByte: boolean;        // for the SymJack decoy check (§7.3)
   readState: 'read' | 'skipped-size' | 'skipped-binary' | 'error';
 }
 
-// ---- findings.json（§6 互換。UI 由来は path を相対パスで出す） ----
+// ---- findings.json (§6-compatible; UI output uses relative paths for path) ----
 interface Finding {
-  id: string;                 // "sha256:<hex>" = SHA-256(module|campaign|path|ruleId)（crypto.subtle.digest、決定的）
+  id: string;                 // "sha256:<hex>" = SHA-256(module|campaign|path|ruleId) (crypto.subtle.digest, deterministic)
   level: Severity;
-  module: string;             // "§49" 等
+  module: string;             // "§49", etc.
   campaign: string | null;
   path: string;
-  detail: string;             // 固定テンプレート由来（§6.3）
-  evidence_hash?: string;     // "sha256:<hex>"（対象ファイル内容のハッシュ。内容そのものは出さない）
+  detail: string;             // from a fixed template (§6.3)
+  evidence_hash?: string;     // "sha256:<hex>" (hash of the target file's contents; the contents themselves are never output)
   skillpact?: SkillPactFindingField;
-  source: 'ui' | 'cli-import';     // UI 内部用。エクスポート時は除外
-  ruleId: string;                  // UI 内部用。エクスポート時は除外
+  source: 'ui' | 'cli-import';     // UI internal; excluded from the export
+  ruleId: string;                  // UI internal; excluded from the export
 }
 interface SkillPactFindingField {
   contract_path: string | null; contract_version: string | null;
@@ -353,32 +355,32 @@ interface SkillPactFindingField {
 interface FindingsDoc {
   schema_version: '1.0'; incident_bundle: string;
   scan_started_at: string; scan_finished_at: string;
-  scan_mode: 'quick'|'standard'|'full'|'worm'|'skillpact';   // UI は【要承認】§13-5
+  scan_mode: 'quick'|'standard'|'full'|'worm'|'skillpact';   // for the UI: [Needs approval] §13-5
   status: 'ok'|'partial'|'error';
   findings: Omit<Finding, 'source'|'ruleId'>[];
   errors: ScanError[];
 }
 interface ScanError { module: string; reason: string }
 
-// ---- SkillPact 解析結果（ビューア用） ----
+// ---- SkillPact analysis result (for the viewer) ----
 interface SkillPactAnalysis {
-  skillId: string;                    // SKILL.md を含むディレクトリの相対パス
+  skillId: string;                    // relative path of the directory containing SKILL.md
   skillMdPath: string;
   contract: { found: boolean; path: string | null; parseError: boolean; schemaVersion: string | null; supported: boolean };
   author: string | null; version: string | null;
   level: 'L1'|'L2'|'L3'|null;
-  signature: { fileFound: boolean; verifyCommandDeclared: boolean };   // 検証はしない
+  signature: { fileFound: boolean; verifyCommandDeclared: boolean };   // not verified
   l2: { recordFound: boolean; recordPath: string | null; hashDeclared: boolean; hashMatches: boolean | null };
   declared: Effect[]; observed: Effect[];
-  observedEvidence: { effect: Effect; path: string; ruleId: string }[];   // パスとルールIDのみ
-  divergence: Effect[];               // observed − declared（exec/network/secrets を CRITICAL 対象）
+  observedEvidence: { effect: Effect; path: string; ruleId: string }[];   // paths and rule IDs only
+  divergence: Effect[];               // observed − declared (exec/network/secrets are CRITICAL candidates)
   destructiveHits: { marker: string; path: string }[];
   persistenceHits: { marker: string; path: string }[];
   policy: { file: string | null; decision: 'allow'|'ask'|'deny'|null; neverAutoAllowViolations: string[] };
-  irreversibleAllowed: string[];      // reversible:false かつ allow の操作ID
+  irreversibleAllowed: string[];      // IDs of operations with reversible:false and allow
   proseConflicts: ProseConflict[];
   diffAnomaly: DiffAnomaly | null;
-  results: RuleResult[];              // §5.7 検出ルール表 12 行の判定結果
+  results: RuleResult[];              // results for the 12 rows of the §5.7 detection rule table
 }
 interface ProseConflict { claim: 'read-only'|'no-network'|'no-modify'|'no-exec'; phraseId: string; sourcePath: string; contradictedBy: Effect[] }
 interface DiffAnomaly { previousVersion: string; addedEffects: Effect[]; addedNetworkTargets: number; secretsScopeExpanded: boolean; score: number; threshold: number }
@@ -389,73 +391,73 @@ interface BlastRadiusItem { path: string; kind: 'ssh'|'aws'|'gcloud'|'claude'|'c
 
 ---
 
-## 8. 判定ロジック（クライアントサイド、§7.3）
+## 8. Check logic (client side, §7.3)
 
-すべて `engine/` 配下の純関数。入力は `File` 群または貼り付け文字列、出力は `EngineResult`（内容を含まない）。
+All are pure functions under `engine/`. The input is a set of `File`s or a pasted string; the output is an `EngineResult` (containing no contents).
 
-### 8.1 ファイル名一致
-- `ioc.malicious_files` / `worm_iocs.*.files` / `post_shaihulud.binaries` とファイル名（basename）を完全一致比較 → CRITICAL。
-- ChainDrop 系はファイル内容の SHA-256 を `crypto.subtle.digest` で計算し `worm_iocs.chaindrop.hashes.sha256` と照合（一致で CRITICAL、名前一致のみで HIGH）。【設計判断】
+### 8.1 File name match
+- Compare file names (basename) exactly against `ioc.malicious_files` / `worm_iocs.*.files` / `post_shaihulud.binaries` → CRITICAL.
+- For the ChainDrop family, compute the SHA-256 of the file contents with `crypto.subtle.digest` and match it against `worm_iocs.chaindrop.hashes.sha256` (CRITICAL on a match, HIGH on a name match only). [Design decision]
 
-### 8.2 `package.json` の `preinstall`/`postinstall`
-- `JSON.parse` のみ。`scripts.preinstall === "node setup.mjs"` → CRITICAL（ChainDrop）。その他の install 系フック存在 → HIGH。
-- `dependencies` 等と `ioc.packages`（eco=npm）を照合。`package-lock.json` も同様（バージョン比較は semver 簡易比較の自前実装）。
+### 8.2 `preinstall` / `postinstall` in `package.json`
+- `JSON.parse` only. `scripts.preinstall === "node setup.mjs"` → CRITICAL (ChainDrop). Any other install hook present → HIGH.
+- Match `dependencies` etc. against `ioc.packages` (eco=npm). The same for `package-lock.json` (version comparison is our own simple semver comparison).
 
 ### 8.3 SymJack
-- `webkitRelativePath` がデコイ名パターン（`vid-` 接頭、`logo.`/`readme.` 接頭、`docs/` 配下）**かつ** `size === 0` → 「要手動確認（HIGH）」。【事実】ブラウザはシンボリックリンクのリンク先を取得できないため確定判定はしない（CLI §17 で `readlink -f` 確認を案内）。
+- `webkitRelativePath` matches a decoy name pattern (`vid-` prefix, `logo.` / `readme.` prefix, under `docs/`) **and** `size === 0` → "needs manual check (HIGH)". [Fact] The browser cannot get the target of a symbolic link, so no definite verdict is made (guides the user to check with `readlink -f` in CLI §17).
 
-### 8.4 貼り付けテキスト
-- C2ドメイン/IP: `ioc` 内の `[.]` 無害化表記を照合用に復元（メモリ内のみ）し、貼り付け文字列と大文字小文字無視で部分一致 → CRITICAL。
-- `base64`（長さ ≥ 40 の Base64 連続文字列 or `base64 -d`）、`exec(`、`curl`、`wget`、`| bash`、`| sh` → HIGH。
-- 表示はルールIDとヒット件数のみ（貼り付け内容を再表示しない）。
+### 8.4 Pasted text
+- C2 domains / IPs: restore the `[.]` defanged notation in `ioc` for matching (in memory only), and match the pasted string by case-insensitive substring → CRITICAL.
+- `base64` (a Base64 run of length ≥ 40 or `base64 -d`), `exec(`, `curl`, `wget`, `| bash`, `| sh` → HIGH.
+- Only the rule ID and hit count are displayed (the pasted content is not displayed again).
 
-### 8.5 SkillPact（§5.7 を UI で再現）
-1. **スキル単位の特定**: `SKILL.md` を含むディレクトリ = 1スキル。
-2. **契約探索**: `contract_filenames`（`skill.contract.json`, `.skillpact/contract.json`）。**`JSON.parse` のみ**。パース失敗は「契約不正」として扱い 0件扱いしない。
-3. **スキーマ**: `schema_version` が `schema_versions`（"0.8"）以外 → MEDIUM。
-4. **実態エフェクト推定**（静的・正規表現）: SKILL.md のコードフェンス/スクリプト（`.sh/.py/.js/.ts/.mjs/.ps1` 等）から exec/network/write/secrets/spend の痕跡を抽出。パターン定義は CLI §49 と共通の `rules/ioc.json` を参照（【要承認】§13-6: パターンの置き場所）。
-5. **突合**: `divergence = observed − declared`。exec/network/secrets の未宣言 → CRITICAL（赤ハイライト）。
-6. **L2**: `effects` に exec/network/secrets があり L2 記録ファイルが無い → HIGH。記録は存在とハッシュのみ確認（再実行しない）。
-7. **L3**: 署名ファイルの存在と検証コマンド宣言の有無のみ表示。**バッジ文言は「L3 署名済みファイル」。「安全」「信頼済み」「Verified」等の語を使わない**。安全色（緑）も使わない（`--signed` 紫）。ツールチップ: 「L3 は署名済みファイルであることのみを示し、安全性や作者の信頼性を意味しません（trust_model.l3_does_not_mean）」。
-8. **ポリシー**: `policy_files` を JSON パースし `allow/ask/deny` を表示。`never_auto_allow_any` を尊重していない場合 → HIGH。
-9. **破壊的/永続化マーカー**: `destructive_markers` 検出 ∧ 決定 `allow` → HIGH。`persistence_markers` 検出 ∧ 契約に `persist`/`write` なし → CRITICAL。
-10. **不可逆操作**: `reversible: false` ∧ `allow` → CRITICAL。
-11. **prose矛盾**: SKILL.md/README のコードフェンス外テキストから「読み取りのみ / read-only / 参照だけ」「外部通信なし / no network」「ファイル変更なし / does not modify」「実行しない / does not execute」を抽出し、契約エフェクトと矛盾 → HIGH。
-12. **差分異常**: 同一 `author` の前バージョン契約が**同時に投入されている場合のみ**比較（ブラウザはレジストリ取得不可＝N-01）。exec/network 新規追加、network 送信先増加、secrets スコープ拡大 → HIGH（L3 でも警告）。前バージョンが無い場合は「undetermined（比較対象なし）」と明示。
-- **SkillPact タブでは SAFE 表示を使わない**。全ルール非該当でも「検出なし（静的解析の範囲内）」と表記し、安全の断定をしない。
+### 8.5 SkillPact (reproducing §5.7 in the UI)
+1. **Identify skills**: a directory containing `SKILL.md` = 1 skill.
+2. **Find contracts**: `contract_filenames` (`skill.contract.json`, `.skillpact/contract.json`). **`JSON.parse` only**. A parse failure is treated as an "invalid contract", not as 0 findings.
+3. **Schema**: `schema_version` other than `schema_versions` ("0.8") → MEDIUM.
+4. **Estimate observed effects** (static, regular expressions): extract traces of exec/network/write/secrets/spend from code fences in SKILL.md and scripts (`.sh/.py/.js/.ts/.mjs/.ps1`, etc.). The pattern definitions refer to `rules/ioc.json`, shared with CLI §49 ([Needs approval] §13-6: where the patterns live).
+5. **Comparison**: `divergence = observed − declared`. Undeclared exec/network/secrets → CRITICAL (red highlight).
+6. **L2**: `effects` has exec/network/secrets and there is no L2 record file → HIGH. Only the existence and hash of the record are checked (nothing is re-run).
+7. **L3**: show only whether a signature file exists and whether a verification command is declared. **The badge text is "L3 signed files". Never use words such as "safe", "trusted" or "Verified"**. Do not use the safe color (green) either (`--signed` purple). Tooltip: "L3 only indicates that the files are signed; it does not mean they are safe or that the author is trustworthy (trust_model.l3_does_not_mean)".
+8. **Policy**: JSON-parse `policy_files` and show `allow/ask/deny`. Not respecting `never_auto_allow_any` → HIGH.
+9. **Destructive / persistence markers**: `destructive_markers` detected ∧ decision `allow` → HIGH. `persistence_markers` detected ∧ no `persist` / `write` in the contract → CRITICAL.
+10. **Irreversible operations**: `reversible: false` ∧ `allow` → CRITICAL.
+11. **Prose conflicts**: extract claims such as "read-only" (読み取りのみ / 参照だけ), "no network" (外部通信なし), "does not modify" (ファイル変更なし) and "does not execute" (実行しない) from the text outside code fences in SKILL.md / README; a conflict with the contract's effects → HIGH.
+12. **Diff anomaly**: compare **only when the previous version's contract by the same `author` is submitted at the same time** (the browser cannot fetch from a registry = N-01). Newly added exec/network, more network destinations, expanded secrets scope → HIGH (warns even for L3). If there is no previous version, state "undetermined (nothing to compare)" explicitly.
+- **The SkillPact tab does not use the SAFE display**. Even when no rule matches, it says "nothing detected (within the scope of static analysis)" and does not assert safety.
 
-### 8.6 MCP / Actions / 拡張ビューア
-- MCP: `.mcp.json` 等を JSON/TOML（TOML は最小パーサ自前実装、【要承認】）でパース、`mcpServers.*.command/args` を表示し `suspicious_commands` 該当トークンを赤ハイライト。
-- Actions: YAML は**完全パーサを使わず**行単位の正規表現で `uses:` / `on: pull_request_target` / `permissions:` を抽出（依存削減。誤検知は CLI で確定）。`@v*` 等タグ参照 = HIGH 色、40桁SHA = SAFE 色。
-- 拡張: `manifest.json` の `permissions`/`host_permissions`/`update_url` を表示し危険値をハイライト。
+### 8.6 MCP / Actions / extension viewers
+- MCP: parse `.mcp.json` etc. as JSON/TOML (TOML with our own minimal parser, [Needs approval]), display `mcpServers.*.command/args`, and highlight tokens matching `suspicious_commands` in red.
+- Actions: YAML is **not parsed with a full parser**; `uses:` / `on: pull_request_target` / `permissions:` are extracted with per-line regular expressions (fewer dependencies; false positives are settled by the CLI). Tag references such as `@v*` = HIGH color, 40-digit SHA = SAFE color.
+- Extensions: display `permissions` / `host_permissions` / `update_url` from `manifest.json` and highlight dangerous values.
 
 ---
 
-## 9. ディレクトリ構成
+## 9. Directory layout
 
 ```text
 zero-exec-shield/
-├── index.html                 ← ビルド成果物（単一ファイル、コミット対象）
-├── rules/ioc.json             ← 単一の真実の源。ビルド時に ui/ から import してインライン化
+├── index.html                 ← build output (single file, committed)
+├── rules/ioc.json             ← single source of truth. Imported from ui/ at build time and inlined
 └── ui/
     ├── package.json / package-lock.json
-    ├── vite.config.ts         ← singlefile 化、outDir: '..'、emptyOutDir: false、出力名 index.html
+    ├── vite.config.ts         ← single-file output, outDir: '..', emptyOutDir: false, output name index.html
     ├── tailwind.config.ts / postcss.config.js / tsconfig.json / eslint.config.js
-    ├── index.html             ← テンプレート（CSP meta を含む）
+    ├── index.html             ← template (includes the CSP meta)
     ├── scripts/
-    │   ├── inject-csp-hash.mjs    ← ビルド後に script/style の SHA-256 を CSP へ（【要承認】）
-    │   └── verify-no-network.mjs  ← 成果物に fetch/XMLHttpRequest/WebSocket/http(s):// 参照が無いか静的検査
+    │   ├── inject-csp-hash.mjs    ← after the build, puts the SHA-256 of script/style into the CSP ([Needs approval])
+    │   └── verify-no-network.mjs  ← statically checks the output for fetch/XMLHttpRequest/WebSocket/http(s):// references
     ├── src/
     │   ├── main.tsx / App.tsx
     │   ├── state/ (ScanContext.tsx, reducer.ts, types.ts)
-    │   ├── engine/                ← 純関数（Vitest 対象）
+    │   ├── engine/                ← pure functions (tested with Vitest)
     │   │   ├── index.ts (analyzeFiles, analyzePaste)
     │   │   ├── rules/ (filenames.ts, packageJson.ts, lockfiles.ts, symjack.ts, paste.ts, mcp.ts,
     │   │   │          actions.ts, extensions.ts, buildHooks.ts, modelSupply.ts, persistence.ts,
     │   │   │          antiForensics.ts, hf.ts, ebpf.ts, aiAssistant.ts, sigstore.ts)
     │   │   ├── skillpact/ (discover.ts, contract.ts, observe.ts, prose.ts, policy.ts, diff.ts, rules.ts)
     │   │   ├── ioc.ts (refang, loaders)  / hash.ts (crypto.subtle)  / semver.ts / findingId.ts
-    │   │   └── export.ts (FindingsDoc 生成)
+    │   │   └── export.ts (builds FindingsDoc)
     │   ├── components/
     │   │   ├── layout/ (Header, TabBar, Tab, AllTabsMenu, TabPanel)
     │   │   ├── input/ (DropZone, PasteBox, ScanProgress)
@@ -465,68 +467,68 @@ zero-exec-shield/
     │   │   │              ProseConflictAlert, DiffAnomalyAlert, RuleResultList, ContractStatus)
     │   │   ├── viewers/ (McpViewer, ActionsViewer, ExtensionViewer, CliOnlyNotice)
     │   │   └── ui/ (SeverityBadge, Badge, Button, Toast, Icon)
-    │   ├── tabs/definitions.ts    ← §7.2 の18タブ定義（順序固定）
-    │   └── styles/tokens.css      ← §2 トークン（CSS 変数）→ Tailwind theme へマップ
+    │   ├── tabs/definitions.ts    ← definitions of the 18 tabs of §7.2 (fixed order)
+    │   └── styles/tokens.css      ← §2 tokens (CSS variables) → mapped to the Tailwind theme
     └── tests/
-        ├── unit/ (engine/*.test.ts)       … tests/fixtures/ を流用
+        ├── unit/ (engine/*.test.ts)       … reuses tests/fixtures/
         └── e2e/ (offline.spec.ts, skillpact.spec.ts, a11y.spec.ts)
 ```
 
 ---
 
-## 10. アクセシビリティ
+## 10. Accessibility
 
-- **コントラスト**: 本文 `#ededed`/`#0a0a0a` ≈ 17:1、`--text-subtle #8a8a8a` ≈ 5.9:1、重大度色は暗色背景上で ≥ 4.5:1 となる値を採用（実装時に自動計測で再確認）。
-- **色非依存**: 重大度は「ラベル文字＋アイコン形状」併記。差分（宣言外エフェクト）は赤色＋破線枠＋「未宣言」テキスト＋⚠アイコン。
-- **タブ**: WAI-ARIA Tabs パターン（`role="tablist"`/`tab`/`tabpanel`、`aria-selected`、`aria-controls`、ローヴィングtabindex、←→/Home/End で移動、Enter/Space で選択＝手動アクティベーション）。件数は `aria-label="TeamPCP、検出 3 件、最大 CRITICAL"`。
-- **D&D 代替**: ドロップゾーンは `<button>` を内包し、キーボードでフォルダ選択ダイアログを開ける。
-- **ライブリージョン**: スキャン進捗・完了・コピー完了を `aria-live="polite"` で通知。
-- **フォーカス可視**: `--accent` 2px リング + 2px オフセット。
-- **モーション**: `prefers-reduced-motion` でアニメーション無効。
+- **Contrast**: body text `#ededed` / `#0a0a0a` ≈ 17:1, `--text-subtle #8a8a8a` ≈ 5.9:1; severity colors use values that reach ≥ 4.5:1 on the dark background (re-checked with automatic measurement at implementation time).
+- **Not relying on color**: severity is shown as "label text + icon shape". Divergence (undeclared effects) is shown in red + a dashed frame + the text "undeclared" + a ⚠ icon.
+- **Tabs**: the WAI-ARIA Tabs pattern (`role="tablist"` / `tab` / `tabpanel`, `aria-selected`, `aria-controls`, roving tabindex, ←→/Home/End to move, Enter/Space to select = manual activation). Counts go in `aria-label="TeamPCP, 3 findings, highest CRITICAL"`.
+- **D&D alternative**: the drop zone contains a `<button>`, so the folder selection dialog can be opened from the keyboard.
+- **Live region**: scan progress, completion and copy completion are announced with `aria-live="polite"`.
+- **Visible focus**: `--accent` 2px ring + 2px offset.
+- **Motion**: animations are disabled under `prefers-reduced-motion`.
 
 ---
 
-## 11. テスト方針
+## 11. Test policy
 
-| 種別 | ツール | 内容 |
+| Kind | Tool | Content |
 |---|---|---|
-| 単体 | Vitest | `engine/` の各ルールを `tests/fixtures/`（§12）で検証。SkillPact は §14 受け入れ基準の各行に1テスト以上 |
-| 内容非出力 | Vitest | 全 Finding/エクスポート JSON にフィクスチャ内の識別用カナリア文字列が**含まれない**ことを検証 |
-| 外部通信ゼロ（動的） | Playwright（Chromium） | `file://` で index.html を開き、`page.on('request')` で `file:`/`data:`/`blob:` 以外のリクエストが 0 件であることを検証。`context.route('**/*')` で外部を全遮断した状態でも全機能が動くこと |
-| 外部通信ゼロ（静的） | `verify-no-network.mjs` | 成果物中の `fetch(`/`XMLHttpRequest`/`WebSocket`/`EventSource`/`sendBeacon`/`http://`/`https://`（ライセンスコメント等の許可リスト除く）を検出したらビルド失敗 |
-| 実行禁止 | ESLint + 静的検査 | `eval`/`new Function`/`dangerouslySetInnerHTML`/動的 `<script>` 生成の不在 |
-| SkillPact 表示 | Playwright | L3 バッジに「安全」「信頼」「Verified」等の語が出ないこと、宣言外エフェクトに `data-divergence="true"` と赤スタイルが付くこと |
-| a11y | Playwright + axe-core（候補、バージョンは実装時確認） | 重大な違反 0 件、タブのキーボード操作 |
-| 性能 | Playwright | 20,000 ファイル投入でメインスレッド長時間ブロックが無いこと（目標値は【要承認】） |
+| Unit | Vitest | Verify each rule in `engine/` with `tests/fixtures/` (§12). For SkillPact, at least one test per row of the §14 acceptance criteria |
+| No content output | Vitest | Verify that no Finding / export JSON **contains** the identifying canary strings in the fixtures |
+| Zero external communication (dynamic) | Playwright (Chromium) | Open index.html over `file://` and verify with `page.on('request')` that there are 0 requests other than `file:` / `data:` / `blob:`. All features must work even with everything external blocked by `context.route('**/*')` |
+| Zero external communication (static) | `verify-no-network.mjs` | Fail the build if the output contains `fetch(` / `XMLHttpRequest` / `WebSocket` / `EventSource` / `sendBeacon` / `http://` / `https://` (excluding an allowlist such as license comments) |
+| No execution | ESLint + static checks | Absence of `eval` / `new Function` / `dangerouslySetInnerHTML` / dynamic `<script>` creation |
+| SkillPact display | Playwright | No words such as "safe", "trusted" or "Verified" on the L3 badge; undeclared effects get `data-divergence="true"` and the red style |
+| a11y | Playwright + axe-core (candidate; confirm the version at implementation time) | 0 serious violations, keyboard operation of the tabs |
+| Performance | Playwright | No long main-thread blocking with 20,000 files submitted (target values: [Needs approval]) |
 
 ---
 
-## 12. 想定エッジケース
+## 12. Expected edge cases
 
-- フォルダ内に巨大バイナリ（>2 MiB）→ 内容未読・`skipped-size` として INFO、件数をサマリに表示。
-- 文字コード不明 → `TextDecoder('utf-8', { fatal: false })`。BiDi/不可視文字判定はデコード後のコードポイントで実施。
-- `skill.contract.json` が JSON 不正 / 巨大 / 循環のない深いネスト → パース失敗を HIGH（契約不正）として表示、例外を握り潰さない。
-- 同名スキル複数・入れ子 SKILL.md → 最も近い祖先ディレクトリに帰属。
-- `webkitRelativePath` が空（個別ファイル投入）→ ファイル名のみで判定し、相対パス依存ルール（SymJack 等）は undetermined。
-- 同一ファイルを二重投入 → `relPath` で重複排除。
-- クリップボード API 不可（file:// で権限制限される場合あり【不明：ブラウザ依存】）→ フォールバックとしてパスを選択状態にしたテキスト欄を表示。
+- A huge binary (>2 MiB) in the folder → contents not read; INFO as `skipped-size`, with the count shown in the summary.
+- Unknown character encoding → `TextDecoder('utf-8', { fatal: false })`. BiDi / invisible-character checks run on the code points after decoding.
+- `skill.contract.json` is invalid JSON / huge / deeply nested without cycles → show the parse failure as HIGH (invalid contract); do not swallow the exception.
+- Several skills with the same name, nested SKILL.md → belongs to the nearest ancestor directory.
+- `webkitRelativePath` is empty (individual files submitted) → check by file name only; rules that depend on relative paths (SymJack, etc.) are undetermined.
+- The same file submitted twice → deduplicated by `relPath`.
+- Clipboard API unavailable (may be restricted under file://, [Unknown: browser-dependent]) → as a fallback, show a text field with the path selected.
 
 ---
 
-## 13. 要承認事項 / 未確定事項
+## 13. Items needing approval / open items
 
-| # | 区分 | 内容 | 推奨 |
+| # | Category | Content | Recommendation |
 |---|---|---|---|
-| 1 | 要承認 | 技術スタック: Vite + React 18 + TS + Tailwind を**ビルド時に単一 index.html へインライン化**（ランタイム外部取得ゼロ）。成果物 index.html をコミット | 推奨（React必須規約と §1 CDN禁止の両立） |
-| 2 | 要承認 | CSP: `'unsafe-inline'` 方式か、ビルド時 SHA-256 ハッシュ方式か | ハッシュ方式 |
-| 3 | 要承認 | 18タブの表示方式: 1段横スクロール＋「すべてのタブ」メニュー | 推奨（SVG参照） |
-| 4 | 要承認 | 内容非表示の例外範囲: MCP `command/args`、Actions `uses:`、拡張パーミッション名の表示（§7.4 の要求） | 許容（値の表示は最小限・長さ上限 120 文字） |
-| 5 | 要承認 | UI からのエクスポート時の `scan_mode` 値（§6 の列挙に UI 用が無い）: `"skillpact"`/`"quick"` 流用か、`"ui"` 追加か | 列挙を変えず `scan_mode` は最も近い値 + `errors[]` に「ui: host checks not performed」を追記 |
-| 6 | 要承認 | SkillPact 実態推定の正規表現パターン置き場所（CLI と共通化するため `rules/ioc.json` に置くか） | CLI 実装と同じキーを参照（CLI 側の決定に追従） |
-| 7 | 要承認 | F-13（CLI の findings.json 読み込みビューア）を初版に含めるか | 含める（実装コスト小） |
-| 8 | 要承認 | TOML 最小パーサ自前実装（`.codex/config.toml`）の可否 | 自前（依存追加なし） |
-| 9 | 要承認 | 仮想スクロールを自前実装するか `@tanstack/react-virtual` を使うか | 自前（§3.2 で `@tanstack/*` が侵害対象名前空間） |
-| 10 | 不明 | 採用ライブラリの最新安定版・ライセンス | 実装時に公式（npm / 各公式サイト）で確認し lockfile 固定 |
-| 11 | 不明 | `file://` 下の CSP meta / Clipboard API の各ブラウザ挙動 | 実装時に Chromium/Firefox/Safari で実測 |
-| 12 | 不明 | SkillPact v0.8 契約の正式スキーマ（フィールド名: `effects`/`level`/`author`/`operations[].reversible`/署名・L2記録の参照方法） | 一次情報未確認。CLI §49 実装の仮定スキーマに合わせ、パーサは寛容に実装 |
-| 13 | 要承認 | 性能目標（投入ファイル数上限・解析時間） | 20,000 ファイル / 30 秒以内を初期目標 |
+| 1 | Needs approval | Technology stack: Vite + React 18 + TS + Tailwind **inlined into a single index.html at build time** (zero runtime external fetches). Commit the output index.html | Recommended (satisfies both the React requirement and the §1 CDN ban) |
+| 2 | Needs approval | CSP: the `'unsafe-inline'` approach or the build-time SHA-256 hash approach | Hash approach |
+| 3 | Needs approval | Display of the 18 tabs: one row with horizontal scrolling + an "All tabs" menu | Recommended (see the SVG) |
+| 4 | Needs approval | Scope of exceptions to hiding contents: displaying MCP `command/args`, Actions `uses:`, and extension permission names (required by §7.4) | Allow (show values minimally, up to 120 characters) |
+| 5 | Needs approval | The `scan_mode` value when exporting from the UI (the §6 enumeration has no value for the UI): reuse `"skillpact"` / `"quick"`, or add `"ui"` | Do not change the enumeration; use the closest `scan_mode` value + add "ui: host checks not performed" to `errors[]` |
+| 6 | Needs approval | Where the regular-expression patterns for estimating SkillPact observed behavior live (put them in `rules/ioc.json` to share with the CLI?) | Refer to the same keys as the CLI implementation (follow the CLI's decision) |
+| 7 | Needs approval | Whether to include F-13 (viewer that loads the CLI's findings.json) in the first version | Include (low implementation cost) |
+| 8 | Needs approval | Whether to write our own minimal TOML parser (`.codex/config.toml`) | Our own (no added dependency) |
+| 9 | Needs approval | Implement virtual scrolling ourselves or use `@tanstack/react-virtual` | Our own (`@tanstack/*` is a compromised namespace in §3.2) |
+| 10 | Unknown | Latest stable versions and licenses of the adopted libraries | Confirm on the official sources (npm / each official site) at implementation time and pin in the lockfile |
+| 11 | Unknown | Behavior of a CSP meta / the Clipboard API under `file://` in each browser | Measure in Chromium/Firefox/Safari at implementation time |
+| 12 | Unknown | The official schema of SkillPact v0.8 contracts (field names: `effects` / `level` / `author` / `operations[].reversible` / how signatures and L2 records are referenced) | Primary source not confirmed. Follow the assumed schema of the CLI §49 implementation and implement the parser leniently |
+| 13 | Needs approval | Performance targets (maximum number of submitted files, analysis time) | Initial target: 20,000 files within 30 seconds |

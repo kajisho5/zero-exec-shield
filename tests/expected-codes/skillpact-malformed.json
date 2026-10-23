@@ -1,0 +1,22 @@
+[
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.contract_unparseable",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "problem": "duplicate member name"
+    },
+    "path": "json-duplicate-key/skill.contract.json"
+  },
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.contract_unparseable",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "problem": "number outside ±(2^53-1)"
+    },
+    "path": "v08-json-bigint/skill.contract.json"
+  }
+]

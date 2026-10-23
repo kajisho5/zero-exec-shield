@@ -1,4 +1,4 @@
-// shadcn/ui new-york-v4 の textarea を手で取り込み、「検疫台」に書き換えたもの（MIT。NOTICE を参照）。
+// The shadcn/ui new-york-v4 textarea, imported by hand and rewritten for the "quarantine bench" (MIT; see NOTICE).
 import type * as React from 'react';
 import { cn } from '@/lib/utils';
 

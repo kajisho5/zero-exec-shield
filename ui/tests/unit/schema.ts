@@ -1,5 +1,5 @@
-// schemas/findings.schema.json で使っているキーワードだけを解釈する最小の JSON Schema 検証器（テスト専用）。
-// 対応: $ref（#/$defs/...）, type, const, enum, pattern, minimum, required, properties, additionalProperties:false, items, uniqueItems, if/then/else, not
+// A minimal JSON Schema validator that interprets only the keywords used in schemas/findings.schema.json (test-only).
+// Supports: $ref (#/$defs/...), type, const, enum, pattern, minimum, required, properties, additionalProperties:false, items, uniqueItems, if/then/else, not
 import { readFileSync } from 'node:fs';
 
 type S = Record<string, unknown>;
@@ -7,7 +7,7 @@ export const FINDINGS_SCHEMA = JSON.parse(readFileSync(new URL('../../../schemas
 
 const typeOf = (v: unknown) => (v === null ? 'null' : Array.isArray(v) ? 'array' : Number.isInteger(v) ? 'integer' : typeof v);
 
-/** 違反の JSON Pointer 風の位置と理由の一覧（空なら妥当）。 */
+/** List of JSON-Pointer-like locations and reasons of violations (empty if valid). */
 export function validate(v: unknown, schema: S = FINDINGS_SCHEMA, root: S = FINDINGS_SCHEMA, at = ''): string[] {
   const errs: string[] = [];
   const known = new Set(['$schema', '$id', 'title', 'description', '$defs', '$ref', 'type', 'const', 'enum', 'pattern', 'required', 'properties', 'additionalProperties', 'items', 'uniqueItems', 'if', 'then', 'else', 'not', 'minimum']);

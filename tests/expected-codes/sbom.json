@@ -1,0 +1,31 @@
+[
+  {
+    "campaign": null,
+    "code": "s48.sbom_mismatch",
+    "level": "HIGH",
+    "module": "§48",
+    "params": {
+      "mismatched": "1",
+      "missing": "1"
+    },
+    "path": "sbom.json"
+  },
+  {
+    "campaign": null,
+    "code": "s48.no_provenance",
+    "level": "MEDIUM",
+    "module": "§48",
+    "params": {},
+    "path": "."
+  },
+  {
+    "campaign": null,
+    "code": "s48.sbom_older",
+    "level": "MEDIUM",
+    "module": "§48",
+    "params": {
+      "created": "2026-01-01T00:00:00Z"
+    },
+    "path": "sbom.json"
+  }
+]

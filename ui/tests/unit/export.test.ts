@@ -1,4 +1,4 @@
-// findings.json の取り込み（敵対的な入力）と書き出し（常にスキーマ適合）の回帰テスト。
+// Regression tests for importing findings.json (hostile input) and exporting it (always schema-conformant).
 import { describe, expect, it } from 'vitest';
 import { analyzeFiles, analyzePaste, IOC } from '../../src/engine';
 import { ImportError, parseFindingsDoc, toFindingsDoc } from '../../src/engine/export';
@@ -18,8 +18,8 @@ describe('findings.json の取り込み（スキーマ検査）', () => {
   it('スキーマに合わない finding / error は除外して件数を返す', () => {
     const hostile = [
       good,
-      { ...good, id: H('c'), campaign: { $$typeof: 'x', props: {} } }, // React 子要素として描画すると #31
-      { ...good, id: H('d'), path: 42 }, // 検索の toLowerCase で落ちる
+      { ...good, id: H('c'), campaign: { $$typeof: 'x', props: {} } }, // #31 when rendered as a React child
+      { ...good, id: H('d'), path: 42 }, // breaks toLowerCase in search
       { ...good, id: 'abc' },
       { ...good, id: H('e'), module: '17' },
       { ...good, id: H('f'), module: '§50' },
@@ -27,10 +27,10 @@ describe('findings.json の取り込み（スキーマ検査）', () => {
       { ...good, id: H('2'), level: 'SEVERE' },
       { ...good, id: H('3'), path: 'relative/path' },
       { ...good, id: H('4'), extra: 1 },
-      { ...good, id: H('5'), module: '§49' }, // §49 は skillpact 必須
-      { ...good, id: H('6'), skillpact: sp }, // §49 以外は skillpact 禁止
+      { ...good, id: H('5'), module: '§49' }, // §49 requires skillpact
+      { ...good, id: H('6'), skillpact: sp }, // skillpact forbidden outside §49
       { ...good, id: H('7'), module: '§49', skillpact: { ...sp, observed_effects: ['exec', 'exec'] } },
-      { ...good, id: H('9'), module: '§49', skillpact: { ...sp, divergence: ['secrets'] } }, // SkillPact 0.8 にない効果名
+      { ...good, id: H('9'), module: '§49', skillpact: { ...sp, divergence: ['secrets'] } }, // an effect name not in SkillPact 0.8
       { ...good, id: H('8'), module: '§49', skillpact: sp },
       null, 'str', [good],
     ];
@@ -42,6 +42,8 @@ describe('findings.json の取り込み（スキーマ検査）', () => {
   });
   it('文書として不正なら ImportError', () => {
     expect(() => parseFindingsDoc('{')).toThrow(ImportError);
+    expect(() => parseFindingsDoc('{')).toThrow('Cannot parse findings.json as JSON');
+    try { parseFindingsDoc('[]'); } catch (e) { expect((e as ImportError).key).toBe('ui.import.not_findings'); }
     expect(() => parseFindingsDoc(doc([], [], { status: 'weird' }))).toThrow(ImportError);
     expect(() => parseFindingsDoc(doc([], [], { incident_bundle: 'nope' }))).toThrow(ImportError);
     expect(() => parseFindingsDoc(doc([], [], { scan_started_at: 1 }))).toThrow(ImportError);
@@ -58,7 +60,7 @@ describe('findings.json の書き出しは常にスキーマに適合', () => {
     const all = [...r.findings, ...paste, ...imported.findings];
     const out = toFindingsDoc(all, r.errors, IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z', imported);
     expect(validate(JSON.parse(JSON.stringify(out)))).toEqual([]);
-    // 取り込んだ errors[] と取り込み元の incident_bundle・status を引き継ぐ
+    // The imported errors[] and the incident_bundle and status of the source are carried over
     expect(out.errors).toContainEqual({ module: '§6', reason: 'network_timeout' });
     expect(out.errors).toContainEqual({ module: 'core', reason: 'ui:imported_incident_bundle:ZES-2026-SEP-EMERGENCY-V5.1' });
     expect(out.errors).toContainEqual({ module: 'core', reason: 'ui:import_dropped_invalid_entries:1' });
@@ -66,16 +68,17 @@ describe('findings.json の書き出しは常にスキーマに適合', () => {
     expect(out.findings.length).toBe(all.length);
   });
   it('検証器自体が違反を検出する', () => {
-    const v11 = { schema_version: '1.1' };
-    expect(validate(JSON.parse(doc([{ ...good, id: 'x' }], [], v11)))).not.toEqual([]);
-    expect(validate(JSON.parse(doc([good], [], v11)))).toEqual([]);
-    // 書き出すのは 1.1 だけ（スキーマの schema_version は "1.1" 固定）
+    const v12 = { schema_version: '1.2' };
+    expect(validate(JSON.parse(doc([{ ...good, id: 'x' }], [], v12)))).not.toEqual([]);
+    expect(validate(JSON.parse(doc([good], [], v12)))).toEqual([]);
+    // Only 1.2 is exported (schema_version in the schema is fixed to "1.2")
     expect(validate(JSON.parse(doc([good])))).not.toEqual([]);
+    expect(validate(JSON.parse(doc([good], [], { schema_version: '1.1' })))).not.toEqual([]);
   });
-  it('書き出しは schema_version 1.1 で、UI の finding に evidence と 1.1 の項目を付ける（scan_roots は出さない）', async () => {
+  it('書き出しは schema_version 1.2 で、UI の finding に evidence と 1.1 の項目を付ける（scan_roots は出さない）', async () => {
     const r = await analyzeFiles(['chaindrop', 'mcp', 'browser-ext'].flatMap((n) => loadFixture(n)));
     const out = toFindingsDoc(r.findings, r.errors, IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z');
-    expect(out.schema_version).toBe('1.1');
+    expect(out.schema_version).toBe('1.2');
     expect('scan_roots' in out).toBe(false);
     expect(out.findings.every((f) => f.evidence && ['file', 'detail'].includes(f.evidence.kind))).toBe(true);
     const mcp = out.findings.find((f) => f.module === '§17' && f.kind === 'mcp.dangerous_command');
@@ -98,6 +101,16 @@ describe('findings 1.1 / 1.0 の取り込み', () => {
     expect(out.findings[0]).toMatchObject({ kind: f11.kind, locators: f11.locators, related: f11.related, evidence: f11.evidence });
     expect(validate(JSON.parse(JSON.stringify(out)))).toEqual([]);
   });
+  it('1.2 の code / params を読み込み、書き出しで保つ（1.1 の文書では code を持つ finding を除外）', () => {
+    const f12 = { ...f11, code: 's17.dangerous_command', params: { server: 'evil' } };
+    const r = parseFindingsDoc(doc([f12, { ...f12, id: H('e'), params: { server: 1 } }, { ...f12, id: H('f'), code: 'Bad' }], [], { schema_version: '1.2' }));
+    expect(r.findings.map((f) => f.id)).toEqual([H('a')]);
+    expect(r.findings[0]).toMatchObject({ code: f12.code, params: f12.params });
+    const out = toFindingsDoc(r.findings, [], IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z', r);
+    expect(out.findings[0]).toMatchObject({ code: f12.code, params: f12.params });
+    expect(validate(JSON.parse(JSON.stringify(out)))).toEqual([]);
+    expect(parseFindingsDoc(doc([f12], [], { schema_version: '1.1' })).dropped).toBe(1);
+  });
   it('1.0 の文書は今までどおり読み込める（1.1 の項目を持つ finding は除外）', () => {
     const r = parseFindingsDoc(doc([good, { ...f11, id: H('d') }]));
     expect(r.findings.map((f) => f.id)).toEqual([H('a')]);
@@ -105,7 +118,7 @@ describe('findings 1.1 / 1.0 の取り込み', () => {
     expect(r.findings[0]!.evidence).toBeUndefined();
     const out = toFindingsDoc(r.findings, [], IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z', r);
     expect(validate(JSON.parse(JSON.stringify(out)))).toEqual([]);
-    // 1.0 の文書に scan_roots は無い
+    // A 1.0 document has no scan_roots
     expect(() => parseFindingsDoc(doc([good], [], { scan_roots: ['/x'] }))).toThrow(ImportError);
   });
   it('1.1 の項目が不正な finding は除外する', () => {
@@ -136,7 +149,7 @@ describe('書き出し → 取り込み → 書き出しで finding が重複し
     const s = { ...initialState, phase: 'done' as const, result: r, imported };
     const shown = allFindings(s);
     expect(shown.length).toBe(r.findings.length);
-    // スキャン結果を優先（取り込み側の cli-import で上書きしない）
+    // Scan results take precedence (not overwritten by the cli-import side)
     expect(shown.every((f) => f.source !== 'cli-import')).toBe(true);
     const second = toFindingsDoc(shown, r.errors, IOC.incident_bundle, t0, t1, imported);
     const ids = second.findings.map((f) => f.id);

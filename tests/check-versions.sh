@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# CHANGELOG.md の先頭の版見出し（"## X.Y.Z — YYYY-MM-DD"）、zes-scan.sh の ZES_VERSION、ui/package.json と
-# ui/package-lock.json の version が一致することを確かめる（tests/run-tests.sh と CI から呼ぶ）。
+# Checks that the first version heading of CHANGELOG.md ("## X.Y.Z — YYYY-MM-DD"), ZES_VERSION in zes-scan.sh, and the version in ui/package.json and
+# ui/package-lock.json all match (called from tests/run-tests.sh and CI).
 set -u
 export LC_ALL=C
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"

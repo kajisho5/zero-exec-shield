@@ -1,0 +1,34 @@
+[
+  {
+    "campaign": "skillpact-divergence",
+    "code": "s49.divergence.network",
+    "level": "HIGH",
+    "module": "§49",
+    "params": {},
+    "path": "noext"
+  },
+  {
+    "campaign": "skillpact-divergence",
+    "code": "s49.divergence.network",
+    "level": "HIGH",
+    "module": "§49",
+    "params": {},
+    "path": "symlinked"
+  },
+  {
+    "campaign": "skillpact-divergence",
+    "code": "s49.divergence.read_sensitive_scoped",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {},
+    "path": "noext"
+  },
+  {
+    "campaign": "skillpact-divergence",
+    "code": "s49.divergence.read_sensitive_scoped",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {},
+    "path": "symlinked"
+  }
+]

@@ -1,9 +1,9 @@
-// 5.2.2 の検知データ: 開発インフラ CVE（§3 / §4 / §16）、eMudhra（§6）、収集インテル（§7 / §15 / §22 / §30 / §38 / §42）。
-// CLI の check_s3 / check_s4 / emudhra_* / intel_* と同じ rules/ioc.json を参照する。ホスト状態（パッケージ DB 以外）は CLI のみ。
+// Detection data of 5.2.2: development infrastructure CVEs (§3 / §4 / §16), eMudhra (§6), collected intel (§7 / §15 / §22 / §30 / §38 / §42).
+// References the same rules/ioc.json as check_s3 / check_s4 / emudhra_* / intel_* of the CLI. Host state (other than package DBs) is CLI only.
 import { homeLike, push, readable, rootRel, type RuleCtx } from '../context';
 import type { InfraCve } from '../ioc';
 import type { Severity } from '../types';
-import { basename, ere, versionCmp, versionMatches } from '../util';
+import { basename, ere, versionCmp, versionMatches, type FCode } from '../util';
 import { hookLocators } from './agentConfig';
 import { workflowText } from './ciAndExtensions';
 import { collectDeps } from './supplyChain';
@@ -11,7 +11,7 @@ import { collectDeps } from './supplyChain';
 const NUM = /^\d+(\.\d+)+$/;
 const sev = (s: string | undefined, d: Severity): Severity => (s === 'CRITICAL' || s === 'HIGH' || s === 'MEDIUM' || s === 'LOW' || s === 'INFO' ? s : d);
 
-/** 系列（major.minor）ごとの修正版で判定する（CLI version_branch_vulnerable と同じ規則）。系列に修正版が無く最大修正版未満なら脆弱 */
+/** Evaluates with the fixed version per line (major.minor) (same rule as CLI version_branch_vulnerable). Vulnerable if the line has no fixed version and it is below the highest fixed version */
 export function versionBranchVulnerable(v: string, fixed: string[]): boolean {
   if (!fixed.length) return true;
   const max = fixed.reduce((a, b) => (versionCmp(a, b) < 0 ? b : a));
@@ -21,7 +21,7 @@ export function versionBranchVulnerable(v: string, fixed: string[]): boolean {
   return same ? versionCmp(v, same) < 0 : true;
 }
 
-/** compose / Dockerfile / k8s / tf / json の image タグからバージョンを取る（CLI detect_service_version と同じ） */
+/** Takes the version from image tags in compose / Dockerfile / k8s / tf / json (same as CLI detect_service_version) */
 const IMAGE_FILES = /^(docker-compose.*\.ya?ml|compose.*\.ya?ml|Dockerfile.*|.*\.dockerfile|.*\.ya?ml|.*\.tf|.*\.json)$/;
 function imageVersions(ctx: RuleCtx, pattern: string): { ver: string; path: string; sha: string | null }[] {
   const re = ere(`(${pattern}):[A-Za-z0-9._-]+`, 'g');
@@ -42,9 +42,9 @@ export function infraRules(ctx: RuleCtx): void {
   ctx.checks.add('s3-gitlab').add('s16-infra');
   for (const inf of ctx.ioc.infrastructures ?? []) {
     const pats = inf.image_patterns ?? [];
-    // PHP（§4 PHP2Shell）は php.ts が CLI check_s4 と同じ表（php2shell_distro）で判定する
+    // PHP (§4 PHP2Shell) is evaluated by php.ts with the same table as CLI check_s4 (php2shell_distro)
     if (!pats.length || inf.id === 'php') continue;
-    // GitLab は全 CVE（§3）、その他は generic 製品と追記 CVE（§16）
+    // GitLab: all CVEs (§3); others: generic products and appended CVEs (§16)
     const cves = inf.cves.filter((c) => (c.fixed ?? []).length && (inf.id === 'gitlab' || inf.generic || c.generic));
     if (!cves.length) continue;
     const module = inf.id === 'gitlab' ? '§3' : '§16';
@@ -52,23 +52,30 @@ export function infraRules(ctx: RuleCtx): void {
     for (const { ver, path, sha } of imageVersions(ctx, pats.join('|'))) {
       const v = ver.replace(/^v/, '');
       if (!NUM.test(v)) {
-        if (inf.id === 'gitlab') push(ctx, { level: 'HIGH', module, campaign: null, path, detail: `GitLab のバージョンを特定できません。${cves.map((c) => c.id).join(' / ')} の修正版を確認してください`, ruleId: `${rule}:${inf.id}:unknown`, evidenceSha: sha });
-        else if (ver === 'latest' && module === '§16') push(ctx, { level: 'MEDIUM', module, campaign: null, path, detail: `${inf.id} が浮動タグ（latest）。${cves.map((c) => c.id).join(' / ')} の修正版以上か確認`, ruleId: `${rule}:${inf.id}:latest`, evidenceSha: sha });
+        if (inf.id === 'gitlab') push(ctx, { level: 'HIGH', module, campaign: null, path, code: 's3.gitlab_version_unknown', params: { cves: cves.map((c) => c.id).join(' '), version: ver }, ruleId: `${rule}:${inf.id}:unknown`, evidenceSha: sha });
+        else if (ver === 'latest' && module === '§16') {
+          for (const c of cves) push(ctx, { level: 'MEDIUM', module, campaign: null, path, code: 'intel.infra_latest', params: { cve: c.id, fixed: (c.fixed ?? []).join(' '), product: inf.id }, ruleId: `${rule}:${inf.id}:latest:${c.id}`, evidenceSha: sha });
+        }
         continue;
       }
       for (const c of cves) {
         const fixed = c.fixed ?? [];
         if (!versionBranchVulnerable(v, fixed)) continue;
         const level: Severity = module === '§16' ? cveLevel(c) : 'CRITICAL';
-        const name = inf.id === 'gitlab' ? 'GitLab' : inf.id;
-        const what = `${c.id}${c.cvss ? `（CVSS ${c.cvss}）` : ''}`;
-        push(ctx, { level, module, campaign: null, path, detail: `${name} ${v} は ${what}の影響範囲（修正版: ${fixed.join(' ')}）`, ruleId: `${rule}:${inf.id}:${c.id}:${v}`, evidenceSha: sha, kind: 'runtime.cve' });
+        // as jq prints the ioc.json literal (10.0 stays "10.0"; every cvss there has one decimal)
+        const cvss = c.cvss ? (Number.isInteger(c.cvss) ? c.cvss.toFixed(1) : String(c.cvss)) : '';
+        const msg: { code: FCode; params: Record<string, string> } = inf.id === 'gitlab'
+          ? (cvss ? { code: 's3.gitlab_vulnerable', params: { cve: c.id, cvss, first_fixed: fixed[0] ?? '', fixed: fixed.join(' '), version: v } }
+            : { code: 's3.gitlab_vulnerable_cvss9', params: { cve: c.id, first_fixed: fixed[0] ?? '', fixed: fixed.join(' '), version: v } })
+          : (cvss ? { code: 'intel.infra_vulnerable_cvss', params: { cve: c.id, cvss, fixed: fixed.join(' '), product: inf.id, version: ver } }
+            : { code: 'intel.infra_vulnerable', params: { cve: c.id, fixed: fixed.join(' '), product: inf.id, version: ver } });
+        push(ctx, { level, module, campaign: null, path, ...msg, ruleId: `${rule}:${inf.id}:${c.id}:${v}`, evidenceSha: sha, kind: 'runtime.cve' });
       }
     }
   }
 }
 
-/** Debian 系 ca-certificates の修正判定（CLI debian_ca_fixed と同じ） */
+/** Fix evaluation of Debian-family ca-certificates (same as CLI debian_ca_fixed) */
 export function debianCaFixed(v: string): boolean {
   const date = /^\d{8}/.exec(v)?.[0];
   if (!date) return false;
@@ -87,7 +94,7 @@ export function emudhraRules(ctx: RuleCtx): void {
   const os = e.os_ca_certificates ?? {};
   for (const f of readable(ctx)) {
     if (/(^|\/)var\/lib\/dpkg\/status$/.test(f.relPath)) {
-      // 段落（パッケージ）単位で読み、Status がインストール済みのものだけ（削除済み・config-files は除く。CLI と同じ）
+      // Read per paragraph (package), only those whose Status is installed (removed and config-files excluded; same as the CLI)
       let v: string | undefined;
       for (const para of f.text.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
         const field = (k: string) => new RegExp(`^${k}: (.*)$`, 'm').exec(para)?.[1];
@@ -97,24 +104,25 @@ export function emudhraRules(ctx: RuleCtx): void {
       }
       if (!v) continue;
       const ubMin = os.ubuntu_min_upstream ?? '20260816';
-      // ベンダーは同じイメージの os-release から判定（Ubuntu の SRU 版 20260601~24.04.1 は "ubuntu" を含まない）
+      // The vendor is determined from the os-release of the same image (the Ubuntu SRU version 20260601~24.04.1 does not contain "ubuntu")
       const base = f.relPath.replace(/(^|\/)var\/lib\/dpkg\/status$/, '$1');
       const osr = ctx.byPath.get(`${base}etc/os-release`) ?? ctx.byPath.get(`${base}usr/lib/os-release`);
       const osid = /^ID=["']?([^"'\r\n]*)/m.exec(osr?.text ?? '')?.[1] ?? '';
       const bad = v.includes('ubuntu') || osid === 'ubuntu' ? Number(v.slice(0, 8)) < Number(ubMin) : !debianCaFixed(v);
-      if (bad) push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, detail: `ca-certificates ${v}（dpkg）は eMudhra 侵害 CA を含む`, ruleId: 's6-emudhra-os:dpkg', evidenceSha: f.sha256, kind: 'runtime.cve' });
+      const ub = v.includes('ubuntu') || osid === 'ubuntu';
+      if (bad) push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, ...(ub ? { code: 's6.ca_ubuntu', params: { min: ubMin, version: v } } as const : { code: 's6.ca_debian', params: { version: v } } as const), ruleId: 's6-emudhra-os:dpkg', evidenceSha: f.sha256, kind: 'runtime.cve' });
     } else if (/(^|\/)lib\/apk\/db\/installed$/.test(f.relPath)) {
       const v = /^P:ca-certificates\n(?:[^\n]+\n)*?V:(\S+)/m.exec(f.text)?.[1];
       const min = os.alpine ?? '20261020-r0';
       if (v && (v.split('-r')[0] ?? '') < (min.split('-r')[0] ?? '')) {
-        push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, detail: `ca-certificates ${v}（apk）は eMudhra 侵害 CA を含む（Alpine 修正版 ${min}）`, ruleId: 's6-emudhra-os:apk', evidenceSha: f.sha256, kind: 'runtime.cve' });
+        push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, code: 's6.ca_apk', params: { min, version: v }, ruleId: 's6-emudhra-os:apk', evidenceSha: f.sha256, kind: 'runtime.cve' });
       }
     }
   }
   const fx = e.fixed ?? {};
   const judge = (name: string, v: string, path: string, sha: string | null, fixed: string[] | undefined) => {
     if (!/^\d+\.\d+\.\d+$/.test(v) || !fixed?.length || !versionBranchVulnerable(v, fixed)) return;
-    push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path, detail: `${name} ${v} は eMudhra 侵害 CA を信頼（修正版: ${fixed.join(' ')}）`, ruleId: `s6-emudhra-runtime:${name}:${v}`, evidenceSha: sha, kind: 'runtime.cve' });
+    push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path, code: 's6.runtime_trusts', params: { fixed: fixed.join(' '), name, version: v }, ruleId: `s6-emudhra-runtime:${name}:${v}`, evidenceSha: sha, kind: 'runtime.cve' });
   };
   for (const f of readable(ctx)) {
     if (f.name === '.nvmrc' || f.name === '.node-version') judge('Node.js', (f.text.split(/\r?\n/)[0] ?? '').trim().replace(/^v/, ''), f.relPath, f.sha256, fx.node);
@@ -125,12 +133,12 @@ export function emudhraRules(ctx: RuleCtx): void {
       if (deno) judge('Deno', deno, f.relPath, f.sha256, fx.deno);
     }
   }
-  // certifi の最低版（CLI check_s6 の runtime_minimums.certifi と同じ。依存インベントリから判定）
+  // Minimum version of certifi (same as runtime_minimums.certifi of CLI check_s6; evaluated from the dependency inventory)
   const certMin = ctx.ioc.runtime_minimums?.certifi;
   if (certMin) {
     for (const d of collectDeps(ctx)) {
       if (d.eco === 'pypi' && d.name === 'certifi' && versionCmp(d.version, certMin) < 0) {
-        push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: d.path, detail: `certifi ${d.version} は ${certMin} 未満（eMudhra 失効が未反映）`, ruleId: `s6-emudhra-runtime:certifi:${d.version}`, evidenceSha: d.sha, kind: 'runtime.cve' });
+        push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: d.path, code: 's6.certifi', params: { min: certMin, version: d.version }, ruleId: `s6-emudhra-runtime:certifi:${d.version}`, evidenceSha: d.sha, kind: 'runtime.cve' });
       }
     }
   }
@@ -140,7 +148,7 @@ export function emudhraRules(ctx: RuleCtx): void {
     const v = (i.ver.split('_')[0] ?? '').split('+')[0] ?? '';
     const u8 = /^8u?(\d+)/.exec(v)?.[1];
     if (u8 !== undefined) {
-      if (Number(u8) < (fx.java8_update ?? 511)) push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: i.path, detail: `Java 8u${u8} は eMudhra 侵害 CA を信頼（修正版 8u${fx.java8_update ?? 511}）`, ruleId: `s6-emudhra-runtime:java8:${u8}`, evidenceSha: i.sha, kind: 'runtime.cve' });
+      if (Number(u8) < (fx.java8_update ?? 511)) push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: i.path, code: 's6.java8_trusts', params: { update: u8 }, ruleId: `s6-emudhra-runtime:java8:${u8}`, evidenceSha: i.sha, kind: 'runtime.cve' });
       continue;
     }
     judge('Java', v, i.path, i.sha, fx.java);
@@ -155,45 +163,45 @@ export function intelRules(ctx: RuleCtx): void {
   if (!intel) return;
   const wf = /(^|\/)(\.github\/workflows\/[^/]+\.ya?ml|\.gitlab-ci\.ya?ml|\.circleci\/config\.ya?ml|Jenkinsfile|action\.ya?ml)$/;
 
-  // §15 既知の悪性ファイル（SHA-256 は名前に依らず全ファイル、名前は完全一致）
+  // §15 Known malicious files (SHA-256 against all files regardless of name; names by exact match)
   const shaCamp = new Map<string, string>();
   for (const x of intel.files ?? []) for (const h of x.sha256 ?? []) if (!shaCamp.has(h)) shaCamp.set(h, x.campaign);
   for (const f of ctx.files) {
     const c = f.sha256 ? shaCamp.get(f.sha256) : undefined;
-    if (c) push(ctx, { level: 'CRITICAL', module: '§15', campaign: c, path: f.relPath, detail: '既知の悪性ファイル（SHA-256 一致）', ruleId: 's15-intel-files:sha', evidenceSha: f.sha256 });
+    if (c) push(ctx, { level: 'CRITICAL', module: '§15', campaign: c, path: f.relPath, code: 'intel.file_sha256', ruleId: 's15-intel-files:sha', evidenceSha: f.sha256 });
   }
   for (const x of intel.files ?? []) {
     const names = new Set(x.names ?? []);
     for (const f of ctx.files) {
-      if (names.has(f.name)) push(ctx, { level: sev(x.name_severity, 'HIGH'), module: '§15', campaign: x.campaign, path: f.relPath, detail: `既知の悪性ファイル名（${f.name}）`, ruleId: `s15-intel-files:name:${f.name}`, evidenceSha: f.sha256 });
+      if (names.has(f.name)) push(ctx, { level: sev(x.name_severity, 'HIGH'), module: '§15', campaign: x.campaign, path: f.relPath, code: 'intel.file_name', params: { name: f.name }, ruleId: `s15-intel-files:name:${f.name}`, evidenceSha: f.sha256 });
     }
   }
 
-  // §22 侵害されたアクション（bad_refs は CRITICAL、safe_refs 以外のタグ参照は severity）
+  // §22 Compromised actions (bad_refs are CRITICAL; tag references other than safe_refs get severity)
   const wfFiles = readable(ctx).filter((f) => wf.test(f.relPath));
-  // CLI intel_actions と同じく GitHub Actions のワークフローと action.yml だけを、workflowText で正規化して見る
+  // As in CLI intel_actions, only GitHub Actions workflows and action.yml are looked at, normalized with workflowText
   const ghFiles = wfFiles.filter((f) => /(^|\/)(\.github\/workflows\/[^/]+|action)\.ya?ml$/.test(f.relPath)).map((f) => ({ f, text: workflowText(f.text).join('\n') }));
   for (const a of intel.actions ?? []) {
     const re = new RegExp(`uses:\\s*["']?${escapeRe(a.action)}@([^"'\\s#,}]+)`, 'gi');
     for (const { f, text } of ghFiles) {
       for (const ref of new Set([...text.matchAll(re)].map((m) => m[1] ?? ''))) {
         if ((a.bad_refs ?? []).includes(ref)) {
-          push(ctx, { level: 'CRITICAL', module: '§22', campaign: a.campaign, path: f.relPath, detail: `侵害が報告されたアクション ${a.action}@${ref}`, ruleId: `s22-intel-actions:${a.action}@${ref}`, evidenceSha: f.sha256 });
+          push(ctx, { level: 'CRITICAL', module: '§22', campaign: a.campaign, path: f.relPath, code: 'intel.action_compromised', params: { action: a.action, ref }, ruleId: `s22-intel-actions:${a.action}@${ref}`, evidenceSha: f.sha256 });
         } else if ((a.safe_refs ?? []).length && !(a.safe_refs ?? []).includes(ref) && !/^[0-9a-f]{40}$/.test(ref)) {
-          push(ctx, { level: sev(a.severity, 'HIGH'), module: '§22', campaign: a.campaign, path: f.relPath, detail: `侵害が報告されたアクション ${a.action} を安全版（${(a.safe_refs ?? []).join(', ')}）以外のタグで参照`, ruleId: `s22-intel-actions:${a.action}@${ref}`, evidenceSha: f.sha256 });
+          push(ctx, { level: sev(a.severity, 'HIGH'), module: '§22', campaign: a.campaign, path: f.relPath, code: 'intel.action_unsafe_tag', params: { action: a.action, ref, safe: (a.safe_refs ?? []).join(',') }, ruleId: `s22-intel-actions:${a.action}@${ref}`, evidenceSha: f.sha256 });
         }
       }
     }
   }
 
-  // §38 CI 設定内の既知の悪性文字列
+  // §38 Known malicious strings in CI configs
   for (const w of intel.workflow_strings ?? []) {
     for (const f of wfFiles) {
-      if ((w.strings ?? []).some((s) => f.text.includes(s))) push(ctx, { level: sev(w.severity, 'HIGH'), module: '§38', campaign: w.campaign, path: f.relPath, detail: `CI 設定に既知の悪性パターン（${w.campaign}）`, ruleId: `s38-intel-strings:${w.campaign}`, evidenceSha: f.sha256 });
+      if ((w.strings ?? []).some((s) => f.text.includes(s))) push(ctx, { level: sev(w.severity, 'HIGH'), module: '§38', campaign: w.campaign, path: f.relPath, code: 'intel.ci_pattern', params: { campaign: w.campaign }, ruleId: `s38-intel-strings:${w.campaign}`, evidenceSha: f.sha256 });
     }
   }
 
-  // §7 / §20 AI 設定・指示ファイル内の既知の文字列（file_regex でパスを絞る）
+  // §7 / §20 Known strings in AI configs and instruction files (file_regex narrows down the paths)
   for (const s of intel.strings ?? []) {
     const rx = ere(s.file_regex ?? '.');
     if (!rx) continue;
@@ -202,17 +210,18 @@ export function intelRules(ctx: RuleCtx): void {
       const low = f.text.toLowerCase();
       const hit = strs.find((x) => low.includes(x));
       if (hit === undefined) continue;
-      // エージェントの設定ファイルのフックなら、最初に一致した文字列を含むフックの位置（CLI の intel_strings と同じ）
+      // If it is a hook in an agent config file, the location of the hook containing the first matched string (same as intel_strings in the CLI)
       const locators = /(^|\/)\.claude\/settings(\.local)?\.json$/.test(f.relPath) ? hookLocators(f.text, (c) => c.toLowerCase().includes(hit)) : undefined;
-      push(ctx, { level: sev(s.severity, 'HIGH'), module: s.module, campaign: s.campaign, path: f.relPath, detail: `既知の攻撃キャンペーンの文字列（${s.campaign}）`, ruleId: `s7-intel-strings:${s.campaign}`, evidenceSha: f.sha256, ...(locators ? { locators } : {}) });
+      push(ctx, { level: sev(s.severity, 'HIGH'), module: s.module, campaign: s.campaign, path: f.relPath, code: 'intel.campaign_string', params: { campaign: s.campaign }, ruleId: `s7-intel-strings:${s.campaign}`, evidenceSha: f.sha256, ...(locators ? { locators } : {}) });
     }
   }
 
-  // §42 悪性・侵害された拡張（Chrome: Extensions/<id>/<ver>、VS Code / Open VSX: extensions/<publisher.name>-<ver>）
+  // §42 Malicious or compromised extensions (Chrome: Extensions/<id>/<ver>, VS Code / Open VSX: extensions/<publisher.name>-<ver>)
   for (const x of intel.extensions ?? []) {
     const bads = x.bad_versions ?? [];
     for (const id of x.ids ?? []) {
-      const re = x.eco === 'chrome' || x.eco === 'edge'
+      const ide = !(x.eco === 'chrome' || x.eco === 'edge');
+      const re = !ide
         ? new RegExp(`(^|/)Extensions/${escapeRe(id)}/([^/]+)/manifest\\.json$`)
         : new RegExp(`(^|/)extensions/${escapeRe(id)}-(\\d[^/]*?)(-[a-z0-9-]+)?/package\\.json$`, 'i');
       for (const f of ctx.files) {
@@ -220,15 +229,15 @@ export function intelRules(ctx: RuleCtx): void {
         if (!m) continue;
         const ver = (m[2] ?? '').split('_')[0] ?? '';
         if (bads.length && !bads.some((b) => versionMatches(ver, b))) continue;
-        push(ctx, { level: sev(x.severity, 'HIGH'), module: '§42', campaign: x.campaign, path: f.relPath.slice(0, f.relPath.lastIndexOf('/')), detail: `悪性・侵害が報告された拡張（${id} ${ver}）`, ruleId: `s42-intel-extensions:${id}@${ver}`, evidenceSha: f.sha256 });
+        push(ctx, { level: sev(x.severity, 'HIGH'), module: '§42', campaign: x.campaign, path: f.relPath.slice(0, f.relPath.lastIndexOf('/')), ...(ide ? { code: 'intel.ide_ext', params: { id, version: ver } } as const : { code: 'intel.browser_ext_version', params: { id, version: m[2] ?? '' } } as const), ruleId: `s42-intel-extensions:${id}@${ver}`, evidenceSha: f.sha256 });
       }
     }
   }
 
-  // §30 ホストの痕跡（CLI intel_host_files と同じく、パスの種類ごとに照合先を分ける）
-  //   ~/… / $HOME/… … 投入フォルダが HOME と見なせるとき（homeLike）に限り、その直下からの相対パスと完全一致
-  //   /… / $TMPDIR/… … ホストの実パス。ブラウザは読めないため照合しない（CLI のホスト検査）
-  //   それ以外（site-packages/cook.pth 等）… 投入フォルダ内のサフィックス一致
+  // §30 Host traces (as in CLI intel_host_files, match against a different place per kind of path)
+  //   ~/… / $HOME/… … only when the loaded folder can be regarded as HOME (homeLike), exact match with the path relative to it
+  //   /… / $TMPDIR/… … real host paths. The browser cannot read them, so they are not matched (CLI host checks)
+  //   anything else (site-packages/cook.pth etc.) … suffix match inside the loaded folder
   const asHome = homeLike(ctx);
   for (const h of intel.host ?? []) {
     const level = sev(h.severity, 'HIGH');
@@ -239,22 +248,22 @@ export function intelRules(ctx: RuleCtx): void {
       const rel = home ? p.slice(home[0].length) : p;
       for (const f of ctx.files) {
         if (home ? rootRel(ctx, f) !== rel : !('/' + f.relPath).endsWith('/' + rel)) continue;
-        push(ctx, { level, module: '§30', campaign: h.campaign, path: f.relPath, detail: home ? '既知のマルウェア痕跡パス' : '既知のマルウェア痕跡パス（検査ルート内）', ruleId: `s30-intel-host:path:${rel}`, evidenceSha: f.sha256 });
+        push(ctx, { level, module: '§30', campaign: h.campaign, path: f.relPath, code: home ? 'intel.host_path' : 'intel.host_path_in_root', ruleId: `s30-intel-host:path:${rel}`, evidenceSha: f.sha256 });
       }
     }
     const fileNames = new Set(h.file_names ?? []);
     for (const f of ctx.files) {
-      if (fileNames.has(f.name)) push(ctx, { level, module: '§30', campaign: h.campaign, path: f.relPath, detail: `既知のマルウェアのファイル名（${f.name}）`, ruleId: `s30-intel-host:file:${f.name}`, evidenceSha: f.sha256 });
+      if (fileNames.has(f.name)) push(ctx, { level, module: '§30', campaign: h.campaign, path: f.relPath, code: 'intel.host_file_name', params: { name: f.name }, ruleId: `s30-intel-host:file:${f.name}`, evidenceSha: f.sha256 });
     }
     const labels = new Set(h.launch_labels ?? []);
     for (const f of readable(ctx).filter((x) => /(^|\/)Launch(Agents|Daemons)\/[^/]+\.plist$/.test(x.relPath))) {
       const label = /<key>Label<\/key>\s*<string>([^<]+)<\/string>/.exec(f.text)?.[1];
-      if (label && labels.has(label)) push(ctx, { level: 'CRITICAL', module: '§30', campaign: h.campaign, path: f.relPath, detail: `既知のマルウェアの LaunchAgent/Daemon（${label}）`, ruleId: `s30-intel-host:launch:${label}`, evidenceSha: f.sha256 });
+      if (label && labels.has(label)) push(ctx, { level: 'CRITICAL', module: '§30', campaign: h.campaign, path: f.relPath, code: 'intel.launchd', params: { label }, ruleId: `s30-intel-host:launch:${label}`, evidenceSha: f.sha256 });
     }
     const units = new Set(h.systemd_units ?? []);
     for (const f of ctx.files) {
       if (/(^|\/)systemd\/(user|system)\/[^/]+$/.test(f.relPath) && units.has(basename(f.relPath))) {
-        push(ctx, { level: 'CRITICAL', module: '§30', campaign: h.campaign, path: f.relPath, detail: `既知のマルウェアの systemd ユニット（${f.name}）`, ruleId: `s30-intel-host:systemd:${f.name}`, evidenceSha: f.sha256 });
+        push(ctx, { level: 'CRITICAL', module: '§30', campaign: h.campaign, path: f.relPath, code: 'intel.systemd_unit', params: { unit: f.name }, ruleId: `s30-intel-host:systemd:${f.name}`, evidenceSha: f.sha256 });
       }
     }
   }

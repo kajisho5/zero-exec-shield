@@ -1,0 +1,12 @@
+[
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s18.network_ioc",
+    "level": "CRITICAL",
+    "module": "§18",
+    "params": {
+      "iocs": "npm-cache.com"
+    },
+    "path": "upper/p.js"
+  }
+]

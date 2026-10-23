@@ -1,0 +1,52 @@
+[
+  {
+    "campaign": null,
+    "code": "s28.from_digest",
+    "level": "MEDIUM",
+    "module": "§28",
+    "params": {},
+    "path": "Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s4.auto_prepend",
+    "level": "HIGH",
+    "module": "§4",
+    "params": {},
+    "path": "php.ini"
+  },
+  {
+    "campaign": null,
+    "code": "s4.php_image_floating",
+    "level": "MEDIUM",
+    "module": "§4",
+    "params": {},
+    "path": "Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s4.disable_functions_empty",
+    "level": "MEDIUM",
+    "module": "§4",
+    "params": {},
+    "path": "php.ini"
+  },
+  {
+    "campaign": null,
+    "code": "s8.floating_image",
+    "level": "MEDIUM",
+    "module": "§8",
+    "params": {
+      "image": "php:latest"
+    },
+    "path": "Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s8.user_root",
+    "level": "MEDIUM",
+    "module": "§8",
+    "params": {},
+    "path": "Dockerfile"
+  }
+]

@@ -1,4 +1,4 @@
-// §2 / §15 / §25 / §36 / §41: ファイル名・ハッシュ・package.json・ロックファイル照合
+// §2 / §15 / §25 / §36 / §41: matching of file names, hashes, package.json and lockfiles
 import { atRoot, push, readable, type RuleCtx } from '../context';
 import type { IocPackage } from '../ioc';
 import { basename, dirname, parseJsonc, versionMatches } from '../util';
@@ -11,38 +11,38 @@ export function filenameRules(ctx: RuleCtx): void {
   for (const f of ctx.files) {
     const n = f.name;
     if (n === 'cook.pth' || n === 'cook.py') {
-      push(ctx, { level: 'CRITICAL', module: '§2', campaign: camp[n] ?? null, path: f.relPath, detail: `悪性フックファイル（${n}）を検出`, ruleId: 's2-malicious-files', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§2', campaign: camp[n] ?? null, path: f.relPath, code: 's2.hook_file', params: { name: n }, ruleId: 's2-malicious-files', evidenceSha: f.sha256 });
     } else if (n === 'sitecustomize.py' || n === 'usercustomize.py') {
-      push(ctx, { level: 'HIGH', module: '§2', campaign: camp[n] ?? null, path: f.relPath, detail: `Python 起動時自動実行フック（${n}）`, ruleId: 's2-malicious-files', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§2', campaign: camp[n] ?? null, path: f.relPath, code: 's2.startup_hook', params: { name: n }, ruleId: 's2-malicious-files', evidenceSha: f.sha256 });
     } else if (ctx.ioc.malicious_files.includes(n) && /\.m?js$/.test(n)) {
       const known = hashes[n] ?? [];
       if (f.sha256 && known.includes(f.sha256)) {
-        push(ctx, { level: 'CRITICAL', module: '§15', campaign: camp[n] ?? null, path: f.relPath, detail: `既知の悪性ハッシュと一致（${n}）`, ruleId: 's15-worm-files', evidenceSha: f.sha256 });
+        push(ctx, { level: 'CRITICAL', module: '§15', campaign: camp[n] ?? null, path: f.relPath, code: 's15.worm_hash', params: { name: n }, ruleId: 's15-worm-files', evidenceSha: f.sha256 });
       } else if (n === 'setup.mjs') {
         const pj = ctx.byPath.get(`${dirname(f.relPath)}/package.json`);
         if (pj?.text && /setup\.mjs/.test(pj.text)) {
-          push(ctx, { level: 'HIGH', module: '§15', campaign: camp[n] ?? null, path: f.relPath, detail: 'package.json から参照される setup.mjs（ChainDrop 型ドロッパー疑い）', ruleId: 's15-worm-files', evidenceSha: f.sha256 });
+          push(ctx, { level: 'HIGH', module: '§15', campaign: camp[n] ?? null, path: f.relPath, code: 's15.worm_setup', ruleId: 's15-worm-files', evidenceSha: f.sha256 });
         }
       } else {
-        push(ctx, { level: 'HIGH', module: '§15', campaign: camp[n] ?? null, path: f.relPath, detail: `ワーム関連ファイル名（${n}）`, ruleId: 's15-worm-files', evidenceSha: f.sha256 });
+        push(ctx, { level: 'HIGH', module: '§15', campaign: camp[n] ?? null, path: f.relPath, code: 's15.worm_file', params: { name: n }, ruleId: 's15-worm-files', evidenceSha: f.sha256 });
       }
     }
     if (ctx.ioc.worm_iocs.post_shaihulud.binaries.includes(n)) {
-      push(ctx, { level: 'CRITICAL', module: '§25', campaign: 'post-shaihulud', path: f.relPath, detail: `後続ワームのバイナリ名（${n}）`, ruleId: 's25-binaries', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§25', campaign: 'post-shaihulud', path: f.relPath, code: 's25.worm_binary', params: { name: n }, ruleId: 's25-binaries', evidenceSha: f.sha256 });
     }
     if (n === 'cargo-install' || n === 'cargo-install.exe') {
-      push(ctx, { level: 'HIGH', module: '§25', campaign: 'post-shaihulud', path: f.relPath, detail: 'cargo-install を名乗るファイル（偽装）', ruleId: 's25-binaries', evidenceSha: f.sha256 });
+      push(ctx, { level: 'HIGH', module: '§25', campaign: 'post-shaihulud', path: f.relPath, code: 's25.cargo_install_file', ruleId: 's25-binaries', evidenceSha: f.sha256 });
     }
     if (n === 'transformers.pyz') {
-      push(ctx, { level: 'CRITICAL', module: '§36', campaign: 'hf-supply-chain', path: f.relPath, detail: 'transformers.pyz（正規配布物ではない偽装アーカイブ）', ruleId: 's36-pyz', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§36', campaign: 'hf-supply-chain', path: f.relPath, code: 's36.transformers_pyz', ruleId: 's36-pyz', evidenceSha: f.sha256 });
     }
     if (n.toLowerCase() === 'git.exe' && atRoot(ctx, f)) {
-      push(ctx, { level: 'CRITICAL', module: '§41', campaign: null, path: f.relPath, detail: 'リポジトリルートの git.exe（IDE/エージェントが自動実行する未パッチ zero-day）', ruleId: 's41-gitexe', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§41', campaign: null, path: f.relPath, code: 's41.git_exe', ruleId: 's41-gitexe', evidenceSha: f.sha256 });
     }
   }
 }
 
-/** 標準の .pth の import 行（CLI PTH_SAFE_RE と同じ。行全体で一致したものだけを許可） */
+/** Standard import lines in .pth (same as CLI PTH_SAFE_RE; only those matching the whole line are allowed) */
 const PTH_SAFE = [
   /^\s*import\s+_virtualenv\s*$/,
   /^import os; var = 'SETUPTOOLS_USE_DISTUTILS'; enabled = os\.environ\.get\(var, '(local|stdlib)'\) == 'local'; enabled and __import__\('_distutils_hack'\)\.add_shim\(\); *$/,
@@ -50,7 +50,7 @@ const PTH_SAFE = [
 ];
 const PTH_DANGER = /(^|[^A-Za-z0-9_])(exec|eval|compile|getattr|popen|system|__import__)\s*\(|b64decode|subprocess|urllib|socket|fromhex|marshal|zlib|codecs|pickle|ctypes|requests/;
 
-/** §2 .pth の import 行（Python 起動のたびに exec される。CLI check_s2 と同じ）。標準形以外は MEDIUM、実行・通信を伴うものは HIGH */
+/** §2 Import lines in .pth (exec-ed on every Python start; same as CLI check_s2). Non-standard forms are MEDIUM, those involving execution or network access HIGH */
 export function pthRules(ctx: RuleCtx): void {
   ctx.checks.add('s2-pth');
   for (const f of readable(ctx).filter((x) => x.name.endsWith('.pth'))) {
@@ -59,7 +59,7 @@ export function pthRules(ctx: RuleCtx): void {
     const bad = imports.some((l) => PTH_DANGER.test(l));
     push(ctx, {
       level: bad ? 'HIGH' : 'MEDIUM', module: '§2', campaign: 'litellm-oct2026', path: f.relPath,
-      detail: bad ? '.pth ファイルに起動時実行コード（import + exec/eval/system/通信）' : '.pth ファイルに起動時に実行される import 行（標準の virtualenv / editable 形式以外。内容を確認）',
+      code: bad ? 's2.pth_exec' : 's2.pth_import',
       ruleId: bad ? 's2-pth:high' : 's2-pth:medium', evidenceSha: f.sha256,
     });
   }
@@ -74,7 +74,7 @@ function normPypi(n: string): string {
 const noBom = (t: string) => (t.charCodeAt(0) === 0xfeff ? t.slice(1) : t);
 const lines = (t: string) => noBom(t).split(/\r?\n/);
 
-/** package-lock v2/v3 の packages と、v1 の入れ子の dependencies（CLI build_deps の jq と同じ）。 */
+/** packages of package-lock v2/v3 and the nested dependencies of v1 (same as the jq of CLI build_deps). */
 function npmLockDeps(j: unknown, path: string, sha: string | null, out: Dep[]): void {
   const o = j as { packages?: Record<string, { version?: unknown; name?: unknown }> };
   if (o && typeof o.packages === 'object' && o.packages) {
@@ -98,10 +98,10 @@ function npmLockDeps(j: unknown, path: string, sha: string | null, out: Dep[]): 
   walk(j);
 }
 
-/** "name" / "@scope/name" に続く "@" の位置（無ければ -1）。 */
+/** Position of the "@" that follows "name" / "@scope/name" (-1 if none). */
 const nameEnd = (spec: string) => (spec.startsWith('@') ? spec.indexOf('@', 1) : spec.indexOf('@'));
 
-/** yarn の指定子（"name@range"）から実パッケージ名を取る。"alias@npm:real@range" のエイリアスは npm: の後ろの実名。 */
+/** Takes the real package name from a yarn specifier ("name@range"). For an "alias@npm:real@range" alias, the real name after npm:. */
 function yarnSpecName(spec: string): string {
   const at = nameEnd(spec);
   if (at <= 0) return '';
@@ -114,8 +114,8 @@ function yarnSpecName(spec: string): string {
   return spec.slice(0, at);
 }
 
-/** yarn.lock（v1: `  version "1.2.3"` / Berry: `  version: 1.2.3`）。名前は Berry の resolution、無ければ見出し行の先頭の指定子から取る
- *  （npm: エイリアスは実名に解決する）。 */
+/** yarn.lock (v1: `  version "1.2.3"` / Berry: `  version: 1.2.3`). The name is taken from the Berry resolution, otherwise from the first specifier of the header line
+ *  (npm: aliases are resolved to the real name). */
 export function yarnLockDeps(text: string): { name: string; version: string }[] {
   const out: { name: string; version: string }[] = [];
   let n = '';
@@ -139,8 +139,8 @@ export function yarnLockDeps(text: string): { name: string; version: string }[] 
   return out;
 }
 
-/** pnpm-lock.yaml のパッケージキー。v6+ の "/name@1.2.3:" / "name@1.2.3(peer):" / "'@scope/name@1.2.3':" と、
- *  v5.x の "/name/1.2.3:" / "/@scope/name/1.2.3_peer@1.0.0:"（"_" 以降は peer 接尾辞）。 */
+/** Package keys of pnpm-lock.yaml. v6+ "/name@1.2.3:" / "name@1.2.3(peer):" / "'@scope/name@1.2.3':" and
+ *  v5.x "/name/1.2.3:" / "/@scope/name/1.2.3_peer@1.0.0:" (from "_" on is the peer suffix). */
 export function pnpmLockDeps(text: string): { name: string; version: string }[] {
   const out: { name: string; version: string }[] = [];
   for (const l of lines(text)) {
@@ -153,7 +153,7 @@ export function pnpmLockDeps(text: string): { name: string; version: string }[] 
   return out;
 }
 
-/** poetry.lock / uv.lock / pdm.lock の [[package]] ブロック（name の直後の version）。名前は PEP 503 で正規化。 */
+/** [[package]] blocks of poetry.lock / uv.lock / pdm.lock (the version right after name). Names are normalized per PEP 503. */
 export function tomlLockDeps(text: string): { name: string; version: string }[] {
   const out: { name: string; version: string }[] = [];
   let n = '';
@@ -167,7 +167,7 @@ export function tomlLockDeps(text: string): { name: string; version: string }[] 
   return out;
 }
 
-/** METADATA / PKG-INFO のヘッダ（最初の空行まで）の Name / Version（CLI pkg_info_name_version と同じ）。 */
+/** Name / Version from the headers of METADATA / PKG-INFO (up to the first empty line) (same as CLI pkg_info_name_version). */
 function pkgInfoNameVersion(text: string): { name: string; version: string } {
   let name = '';
   let version = '';
@@ -181,7 +181,7 @@ function pkgInfoNameVersion(text: string): { name: string; version: string } {
 
 const depsCache = new WeakMap<RuleCtx, Dep[]>();
 
-/** 依存関係インベントリ（CLI build_deps の DEPS_TSV 相当）。1 回のスキャンで 1 度だけ作る。 */
+/** Dependency inventory (equivalent to DEPS_TSV of CLI build_deps). Built only once per scan. */
 export function collectDeps(ctx: RuleCtx): Dep[] {
   const cached = depsCache.get(ctx);
   if (cached) return cached;
@@ -197,7 +197,7 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
     } else if (f.name === 'pnpm-lock.yaml') {
       add('npm', pnpmLockDeps(f.text));
     } else if (f.name === 'package.json' && /\/node_modules\/(@[^/]+\/)?[^/]+\/package\.json$/.test('/' + f.relPath)) {
-      // CLI と同じく名前はパス（最後の node_modules/ 以降）から、版はトップレベルの "version"（無ければ空。any_version 等の照合に使う）
+      // As in the CLI, the name comes from the path (after the last node_modules/) and the version from the top-level "version" (empty if none; used for any_version etc.)
       const name = /.*\/node_modules\/((@[^/]+\/)?[^/]+)\/package\.json$/.exec('/' + f.relPath)?.[1] ?? '';
       let version = '';
       try {
@@ -207,7 +207,7 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
       } catch { parseFailed(f.relPath); }
       out.push({ eco: 'npm', name, version, path: f.relPath, sha: f.sha256 });
     } else if (f.name === 'Cargo.lock') {
-      // [[package]] ブロックの name / version（CLI build_deps と同じ）
+      // name / version of [[package]] blocks (same as CLI build_deps)
       for (const b of noBom(f.text).split(/^\[\[package\]\]\s*$/m).slice(1)) {
         const n = /^name\s*=\s*"([^"]+)"/m.exec(b)?.[1];
         const v = /^version\s*=\s*"([^"]+)"/m.exec(b)?.[1];
@@ -226,7 +226,7 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
         if (mod && ver) out.push({ eco: 'go', name: mod, version: ver.replace(/\/go\.mod$/, ''), path: f.relPath, sha: f.sha256 });
       }
     } else if (f.name === 'Gemfile.lock') {
-      // プラットフォーム付き（nokogiri (1.16.0-x86_64-linux)）はバージョン部分のみで比較する
+      // With a platform suffix (nokogiri (1.16.0-x86_64-linux)), only the version part is compared
       for (const m of lines(f.text).join('\n').matchAll(/^ {4}([A-Za-z0-9._-]+) \(([0-9][^)]*)\)$/gm)) {
         if (m[1] && m[2]) out.push({ eco: 'gem', name: m[1], version: m[2].replace(/-[A-Za-z].*$/, ''), path: f.relPath, sha: f.sha256 });
       }
@@ -238,7 +238,7 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
     } else if (f.name === 'poetry.lock' || f.name === 'uv.lock' || f.name === 'pdm.lock') {
       add('pypi', tomlLockDeps(f.text));
     } else if (f.name === 'bun.lock') {
-      // bun.lock（JSONC。"packages": { "<名前>": ["<実名>@<版>", …] }。CLI build_deps と同じく npm エイリアスは実名で照合）
+      // bun.lock (JSONC. "packages": { "<name>": ["<real name>@<version>", …] }. As in CLI build_deps, npm aliases are matched by the real name)
       try {
         const j = parseJsonc(f.text) as { packages?: unknown };
         const pk = j && typeof j === 'object' ? j.packages : undefined;
@@ -251,7 +251,7 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
         }
       } catch { parseFailed(f.relPath); }
     } else if (f.name === 'deno.lock') {
-      // deno.lock（v3: packages.npm、v4 以降: npm。キーは "<名前>@<版>"、"_" 以降は peer 接尾辞）
+      // deno.lock (v3: packages.npm, v4 and later: npm. Keys are "<name>@<version>"; from "_" on is the peer suffix)
       try {
         const j = JSON.parse(noBom(f.text)) as { npm?: unknown; packages?: { npm?: unknown } };
         const secs = [j?.npm, j?.packages && typeof j.packages === 'object' ? j.packages.npm : undefined];
@@ -276,9 +276,9 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
       } catch { parseFailed(f.relPath); }
     }
   }
-  // site-packages の *.dist-info / *.egg-info（インストール実体。CLI build_deps と同じ）
-  //   Name / Version は METADATA・PKG-INFO のヘッダを正とし、ディレクトリ名（name-1.0-py3.11.egg-info 等）はヘッダが無い場合の代替のみ。
-  //   egg-info は単一ファイル（PKG-INFO と同形式）の場合もある
+  // *.dist-info / *.egg-info in site-packages (what is actually installed; same as CLI build_deps)
+  //   Name / Version are taken from the METADATA / PKG-INFO headers; the directory name (name-1.0-py3.11.egg-info etc.) is only a fallback when there is no header.
+  //   egg-info may also be a single file (same format as PKG-INFO)
   for (const f of ctx.files) {
     const single = /\.egg-info$/.test(f.relPath);
     if (!single && !/\/[^/]+\.(dist-info|egg-info)\/(METADATA|PKG-INFO)$/.test('/' + f.relPath)) continue;
@@ -298,12 +298,12 @@ export function packageRules(ctx: RuleCtx): void {
   ctx.checks.add('s2-install-scripts').add('s15-preinstall').add('s15-lockfile').add('s15-tanstack-git');
   const pre = ctx.ioc.worm_iocs.chaindrop.preinstall;
   for (const f of readable(ctx).filter((x) => x.name === 'package.json')) {
-    // CLI check_s15 と同じく、package.json のどこか（任意の scripts を含む）に "node setup.mjs" があれば検出（JSON の妥当性に依らない）
+    // As in CLI check_s15, detected if "node setup.mjs" appears anywhere in package.json (including arbitrary scripts), regardless of JSON validity
     if (pre && f.text.includes(pre)) {
-      push(ctx, { level: 'CRITICAL', module: '§15', campaign: 'chaindrop-keyv', path: f.relPath, detail: `ChainDrop の preinstall フック（${pre}）`, ruleId: 's15-preinstall', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§15', campaign: 'chaindrop-keyv', path: f.relPath, code: 's15.preinstall', params: { hook: pre }, ruleId: 's15-preinstall', evidenceSha: f.sha256 });
     }
-    // install 系と prepare 系（CLI PKG_HOOK_RE と同じ）。厳密な JSON として読めなければ JSONC（BOM・末尾カンマ）として、
-    // それでも駄目なら該当キーの行をそのまま見る（CLI の grep フォールバックと同じ）
+    // install-type and prepare-type (same as CLI PKG_HOOK_RE). If it cannot be read as strict JSON, read as JSONC (BOM, trailing comma);
+    // if that fails too, look at the lines of the relevant keys as is (same as the grep fallback of the CLI)
     const HOOK = /^(pre|post)?(install|prepare)$/;
     let hooks: string[];
     try {
@@ -317,15 +317,15 @@ export function packageRules(ctx: RuleCtx): void {
     }
     if (hooks.length) {
       if (hooks.some((h) => /(curl|wget|bash|sh -c|base64|eval|node -e|\.mjs|https?:\/\/)/.test(h))) {
-        push(ctx, { level: 'HIGH', module: '§2', campaign: null, path: f.relPath, detail: 'install / prepare ライフサイクルスクリプトに不審なコマンド', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
+        push(ctx, { level: 'HIGH', module: '§2', campaign: null, path: f.relPath, code: 's2.lifecycle_suspicious', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
       } else if (!f.relPath.includes('node_modules/')) {
-        push(ctx, { level: 'MEDIUM', module: '§2', campaign: null, path: f.relPath, detail: 'install / prepare ライフサイクルスクリプトが定義されています（ignore-scripts 推奨）', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
+        push(ctx, { level: 'MEDIUM', module: '§2', campaign: null, path: f.relPath, code: 's2.lifecycle_defined', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
       }
     }
   }
   for (const f of readable(ctx).filter((x) => /^(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(x.name))) {
     if (f.text.includes('github:tanstack/router#79ac49ee')) {
-      push(ctx, { level: 'CRITICAL', module: '§15', campaign: 'teampcp-mini-shai-hulud', path: f.relPath, detail: 'TanStack の不正 Git 依存（github:tanstack/router#79ac49ee）', ruleId: 's15-tanstack-git', evidenceSha: f.sha256 });
+      push(ctx, { level: 'CRITICAL', module: '§15', campaign: 'teampcp-mini-shai-hulud', path: f.relPath, code: 's15.tanstack_git', ruleId: 's15-tanstack-git', evidenceSha: f.sha256 });
     }
   }
   const deps = collectDeps(ctx);
@@ -341,12 +341,12 @@ export function packageRules(ctx: RuleCtx): void {
   }
 }
 
-/** CLI の pkg_kind と同じ: インストール実体は pkg.compromised、ロックファイル・依存の宣言は pkg.lockfile_compromised */
+/** Same as pkg_kind of the CLI: what is actually installed is pkg.compromised; lockfiles and dependency declarations are pkg.lockfile_compromised */
 function pkgKind(path: string): string {
   return /\/node_modules\/.+\/package\.json$/.test('/' + path) || /\.(dist-info|egg-info)$/.test(path) ? 'pkg.compromised' : 'pkg.lockfile_compromised';
 }
 
-/** CLI の pkg_related と同じ: npm のロックファイルの隣にインストールされた実体 <dir>/node_modules/<name> */
+/** Same as pkg_related of the CLI: what is installed next to an npm lockfile, <dir>/node_modules/<name> */
 function pkgRelated(ctx: RuleCtx, eco: string, name: string, src: string): FindingRelated[] | undefined {
   if (eco !== 'npm' || !/^(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lock)$/.test(basename(src))) return undefined;
   if (!name || name.startsWith('.') || name.includes('..') || name.split('/').length > 2 || (name.includes('/') && !name.startsWith('@'))) return undefined;
@@ -363,18 +363,19 @@ function emitPackage(ctx: RuleCtx, p: IocPackage, d: Dep): void {
     : { kind: pkgKind(d.path), subject: { ecosystem: d.eco, package: d.name, version: d.version || null, safe_version: safe, fixed_versions: [] } };
   const related = pkgRelated(ctx, d.eco, d.name, d.path);
   const base = { ...x, ...(related ? { related } : {}), directory: /\.(dist-info|egg-info)$/.test(d.path) && !ctx.byPath.has(d.path) };
-  // 版が分からない依存（version なしの node_modules/*/package.json 等）は版指定の IoC に一致させない（CLI と同じ）
+  const pk = { ecosystem: d.eco, package: d.name, version: d.version || '?' };
+  // Dependencies with an unknown version (node_modules/*/package.json without version etc.) never match version-specific IoCs (same as the CLI)
   const hit = match === 'any_version' || ((match === 'versions' || match === 'vulnerable_versions') && d.version !== '' && (p.bad_versions ?? []).some((s) => s !== '' && versionMatches(d.version, s)));
   if (hit && match === 'vulnerable_versions') {
-    push(ctx, { level: 'HIGH', module: '§15', campaign: p.campaign, path: d.path, detail: `脆弱なバージョン ${d.name}@${d.version || '?'}（${d.eco}、悪性ではなく CVE の影響範囲）${p.safe_version ? `。修正版: ${p.safe_version} 以上` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
+    push(ctx, { level: 'HIGH', module: '§15', campaign: p.campaign, path: d.path, ...(p.safe_version ? { code: 's15.pkg_vulnerable_fixed', params: { ...pk, fixed_version: p.safe_version } } : { code: 's15.pkg_vulnerable', params: pk }), ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
   } else if (hit) {
-    push(ctx, { level: 'CRITICAL', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害パッケージ ${d.name}@${d.version || '?'} を検出（${d.eco}）${p.safe_version ? `。安全版: ${p.safe_version}` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
+    push(ctx, { level: 'CRITICAL', module: '§15', campaign: p.campaign, path: d.path, ...(p.safe_version ? { code: 's15.pkg_compromised_safe', params: { ...pk, safe_version: p.safe_version } } : { code: 's15.pkg_compromised', params: pk }), ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
   } else if (match === 'unknown_versions') {
-    push(ctx, { level: 'MEDIUM', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害報告のあるパッケージ ${d.name}@${d.version || '?'}（侵害版の特定バージョン未定義のため要確認）`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
+    push(ctx, { level: 'MEDIUM', module: '§15', campaign: p.campaign, path: d.path, code: 's15.pkg_reported', params: { package: d.name, version: d.version || '?' }, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha, ...base });
   }
 }
 
-/** §14 / §19 Blast Radius: シークレット保管場所の存在のみ（内容は読まない・表示しない）。 */
+/** §14 / §19 Blast Radius: only the existence of secret stores (content are never read or displayed). */
 const BLAST: [RegExp, string][] = [
   [/(^|\/)\.ssh\/[^/]+$/, 'ssh'], [/(^|\/)(id_rsa|id_dsa|id_ecdsa|id_ed25519)$/, 'private-key'],
   [/(^|\/)\.aws\/(credentials|config)$/, 'aws'], [/(^|\/)\.config\/gcloud\//, 'gcloud'],

@@ -1,0 +1,13 @@
+[
+  {
+    "campaign": "emudhra-ca-oct2026",
+    "code": "s6.ca_ubuntu",
+    "level": "HIGH",
+    "module": "§6",
+    "params": {
+      "min": "20260816",
+      "version": "20260601~24.04.1"
+    },
+    "path": "ubuntu/var/lib/dpkg/status"
+  }
+]

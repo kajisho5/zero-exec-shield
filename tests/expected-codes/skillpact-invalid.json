@@ -1,0 +1,22 @@
+[
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.partial_check_errors",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "errors": "INTEGRITY_MISMATCH"
+    },
+    "path": "integrity-mismatch/skill.contract.json"
+  },
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.partial_check_errors",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "errors": "UNDECLARED_EFFECT"
+    },
+    "path": "undeclared-effect/skill.contract.json"
+  }
+]

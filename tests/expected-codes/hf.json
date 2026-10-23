@@ -1,0 +1,40 @@
+[
+  {
+    "campaign": "hf-lerobot-rce",
+    "code": "s15.pkg_vulnerable",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {
+      "ecosystem": "pypi",
+      "package": "lerobot",
+      "version": "0.5.0"
+    },
+    "path": "requirements.txt"
+  },
+  {
+    "campaign": "hf-dataset-poisoning",
+    "code": "s36.dataset_loader",
+    "level": "HIGH",
+    "module": "§36",
+    "params": {},
+    "path": "dataset.py"
+  },
+  {
+    "campaign": "hf-lerobot-rce",
+    "code": "s36.lerobot",
+    "level": "HIGH",
+    "module": "§36",
+    "params": {
+      "version": "0.5.0"
+    },
+    "path": "requirements.txt"
+  },
+  {
+    "campaign": "hf-supply-chain",
+    "code": "s36.trust_remote_code",
+    "level": "HIGH",
+    "module": "§36",
+    "params": {},
+    "path": "dataset.py"
+  }
+]

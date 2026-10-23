@@ -1,9 +1,10 @@
-// 欄外（設計書 §10.3 の右の列）。カードにせず、作業台の上に置いて罫で区切る注記。見出しの前にアイコンは置かない。
-// テキスト貼り付け判定 / Blast Radius / ホスト検査は CLI で / 未判定の内訳。
+// Side notes (the right column of design doc §10.3). Not cards: notes placed on the bench, separated by rules. No icon before the headings.
+// Pasted-text result / Blast Radius / host checks are in the CLI / breakdown of not scanned.
 import { useState, type ReactNode } from 'react';
 import { CircleDashed, Copy } from 'lucide-react';
 import type { BlastRadiusItem } from '@/engine';
 import { CLI_COMMAND } from '@/tabs/definitions';
+import { useLang, type MsgKey } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { visiblePath } from '@/lib/visiblePath';
 import { Tag } from '@/components/severity/Tag';
@@ -21,22 +22,23 @@ const H = ({ children }: { children: ReactNode }) => <h2 className="text-[15px] 
 
 export function PasteCheck({ onPaste, inSheet }: { onPaste(text: string): void; inSheet?: boolean }) {
   const [text, setText] = useState('');
+  const { t, fmt } = useLang();
   return (
-    <Note aria-label="テキスト貼り付け判定" className={inSheet ? 'px-4 pt-3' : undefined}>
-      {!inSheet && <H>テキスト貼り付け判定</H>}
-      <p className="text-xs text-muted-foreground">C2 ドメイン/IP・base64・exec(・curl</p>
+    <Note aria-label={t('ui.paste.title')} className={inSheet ? 'px-4 pt-3' : undefined}>
+      {!inSheet && <H>{t('ui.paste.title')}</H>}
+      <p className="text-xs text-muted-foreground">{t('ui.paste.hint')}</p>
       <Textarea
         value={text}
         maxLength={PASTE_MAX}
         onChange={(e) => setText(e.target.value)}
-        aria-label="判定するテキスト"
+        aria-label={t('ui.paste.aria')}
         data-testid="paste"
-        placeholder={'ログ・コマンド履歴・設定断片を貼り付け\n（貼り付け内容は再表示しません）'}
+        placeholder={`${t('ui.paste.placeholder1')}\n${t('ui.paste.placeholder2')}`}
         className="mt-2.5 h-[84px]"
       />
       <div className="mt-2.5 flex items-center justify-between gap-3">
-        <span className="text-xs text-muted-foreground tabular-nums">{text.length.toLocaleString()} / {PASTE_MAX.toLocaleString()} 文字</span>
-        <Button variant="outline" size="sm" disabled={!text.trim()} onClick={() => { onPaste(text); setText(''); }} data-testid="paste-submit" className="w-[92px]">判定する</Button>
+        <span className="text-xs text-muted-foreground tabular-nums">{t('ui.paste.counter', { n: fmt(text.length), max: fmt(PASTE_MAX) })}</span>
+        <Button variant="outline" size="sm" disabled={!text.trim()} onClick={() => { onPaste(text); setText(''); }} data-testid="paste-submit" className="w-[92px]">{t('ui.paste.submit')}</Button>
       </div>
     </Note>
   );
@@ -44,14 +46,15 @@ export function PasteCheck({ onPaste, inSheet }: { onPaste(text: string): void; 
 
 export function BlastRadius({ items }: { items: BlastRadiusItem[] }) {
   const copy = useCopy();
+  const { lang, t } = useLang();
   const size = (n: number) => (n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`);
   return (
     <Note data-testid="blast-radius">
-      <div className="flex flex-wrap items-center gap-2.5"><H>Blast Radius</H><Tag>存在のみ・内容非表示</Tag></div>
-      <p className="mt-2 text-[12.5px] leading-[1.45] text-muted-foreground">ローテーション対象のシークレットのパス一覧<br />（§14 / §19 / §9.5）</p>
+      <div className="flex flex-wrap items-center gap-2.5"><H>{t('ui.blast.title')}</H><Tag>{t('ui.blast.tag')}</Tag></div>
+      <p className="mt-2 text-[12.5px] leading-[1.45] text-muted-foreground">{t('ui.blast.desc')}{lang === 'ja' ? <br /> : ' '}{t('ui.blast.refs')}</p>
       {items.length === 0 ? (
         <div className="mt-3 flex h-11 items-center gap-2.5 rounded-md border border-dashed border-input px-3.5 text-[13px] text-muted-foreground">
-          <CircleDashed aria-hidden="true" className="size-4 shrink-0" />該当なし（投入フォルダ内のみ判定）
+          <CircleDashed aria-hidden="true" className="size-4 shrink-0" />{t('ui.blast.none')}
         </div>
       ) : (
         <ul className="mt-3 max-h-[260px] overflow-y-auto border-y border-border">
@@ -63,10 +66,11 @@ export function BlastRadius({ items }: { items: BlastRadiusItem[] }) {
           ))}
         </ul>
       )}
-      <p className="mt-3.5 text-xs text-muted-foreground">{items.length} 件・内容は読み取り・表示しません</p>
-      <div className="mt-2 flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-        <p className="max-w-[13.5em] min-w-[12.5em] flex-1 text-xs leading-normal text-muted-foreground">手順: 検出 → 一覧提示 → ローテーション → 再構築</p>
-        <Button size="sm" disabled={!items.length} onClick={() => copy(items.map((b) => b.path).join('\n'), 'パス一覧') /* コピーは元の値のまま */} className="shrink-0"><Copy />パス一覧をコピー</Button>
+      <p className="mt-3.5 text-xs text-muted-foreground">{t('ui.blast.count', { n: items.length })}</p>
+      {/* English: the steps line does not fit beside the button (225 px vs 196 px), so it gets its own row (i18n mockup) */}
+      <div className={cn('mt-2 flex flex-wrap items-start justify-between gap-x-3 gap-y-2', lang === 'en' && 'flex-col')}>
+        <p className={cn('text-xs leading-normal text-muted-foreground', lang === 'ja' && 'max-w-[13.5em] min-w-[12.5em] flex-1')}>{t('ui.blast.steps')}</p>
+        <Button size="sm" disabled={!items.length} onClick={() => copy(items.map((b) => b.path).join('\n'), t('ui.copy.paths')) /* copy keeps the original values */} className="shrink-0"><Copy />{t('ui.blast.copy')}</Button>
       </div>
     </Note>
   );
@@ -74,43 +78,46 @@ export function BlastRadius({ items }: { items: BlastRadiusItem[] }) {
 
 function Command({ label }: { label?: string }) {
   const copy = useCopy();
+  const { t } = useLang();
   return (
     <div className="flex h-10 min-w-0 items-center justify-between gap-2 rounded-md border border-border bg-muted pr-1 pl-3">
       <code className="min-w-0 truncate font-mono text-[13px]">{CLI_COMMAND}</code>
-      <Tip label="コマンドをコピー" side="left">
-        <Button variant="ghost" size="icon-sm" aria-label={label ?? 'コマンドをコピー'} onClick={() => copy(CLI_COMMAND, 'コマンド')}><Copy /></Button>
+      <Tip label={t('ui.cli.copy')} side="left">
+        <Button variant="ghost" size="icon-sm" aria-label={label ?? t('ui.cli.copy')} onClick={() => copy(CLI_COMMAND, t('ui.copy.command'))}><Copy /></Button>
       </Tip>
     </div>
   );
 }
 
-export function CliOnlyNotice({ note, compact }: { note?: string; compact?: boolean }) {
+export function CliOnlyNotice({ note, compact }: { note?: MsgKey; compact?: boolean }) {
+  const { t } = useLang();
   if (compact) {
     return (
       <Note data-testid="cli-only" className="gap-2 border-y border-border py-3 sm:flex-row sm:items-center sm:gap-4">
-        <p className="min-w-0 flex-1 text-[13px] text-muted-foreground"><span className="font-semibold text-foreground">CLI で確認: </span>{note}</p>
+        <p className="min-w-0 flex-1 text-[13px] text-muted-foreground"><span className="font-semibold text-foreground">{t('ui.cli.compact_prefix')}</span>{note && t(note)}</p>
         <div className="sm:w-[300px]"><Command /></div>
       </Note>
     );
   }
   return (
     <Note data-testid="cli-only">
-      <H>ホスト検査は CLI で実施</H>
-      <p className="mt-2 text-[13px] leading-[1.55] text-muted-foreground">{note ?? 'プロセス・ネットワーク接続・カーネル・eBPF・マウント状態はブラウザから確認できないため、0 件 ＝ 安全と表示しません。'}</p>
+      <H>{t('ui.cli.title')}</H>
+      <p className="mt-2 text-[13px] leading-[1.55] text-muted-foreground">{t(note ?? 'ui.cli.body')}</p>
       <div className="mt-3"><Command /></div>
     </Note>
   );
 }
 
 export function Undetermined({ skippedSize, skippedBinary, decoys, errors }: { skippedSize: number; skippedBinary: number; decoys: number; errors: number }) {
-  const rows: [string, number][] = [['サイズ超過（2 MiB 超）', skippedSize], ['バイナリ（判定対象外）', skippedBinary], ['シンボリックリンク先不明（0 バイトのデコイ）', decoys], ['読み取り失敗', errors]];
+  const { t } = useLang();
+  const rows: [MsgKey, number][] = [['ui.und.size', skippedSize], ['ui.und.binary', skippedBinary], ['ui.und.decoy', decoys], ['ui.und.errors', errors]];
   return (
     <Note data-testid="undetermined">
-      <H>未判定（0 件扱いしない）</H>
+      <H>{t('ui.und.title')}</H>
       <dl className="mt-1.5">
         {rows.map(([k, v]) => (
           <div key={k} className="flex items-baseline justify-between gap-3 border-b border-dotted border-border py-[7px] text-[13px] last:border-0">
-            <dt className="min-w-0">{k}</dt><dd className="font-medium tabular-nums">{v}</dd>
+            <dt className="min-w-0">{t(k)}</dt><dd className="font-medium tabular-nums">{v}</dd>
           </div>
         ))}
       </dl>

@@ -1,4 +1,4 @@
-// ブラウザでのファイル取得。内容は判定用に一時的に読むだけで、エンジンの戻り値・State には残らない。
+// Fetching files in the browser. Contents are only read temporarily for evaluation and never remain in the return value of the engine or in the State.
 import { sha256Hex } from './engine/util';
 import type { FileInput } from './engine';
 
@@ -6,14 +6,14 @@ export const MAX_READ_BYTES = 2 * 1024 * 1024;
 
 export interface PickedFile { file: File; relPath: string }
 
-/** <input webkitdirectory> の FileList（webkitRelativePath 付き）。 */
+/** FileList of <input webkitdirectory> (with webkitRelativePath). */
 export function fromFileList(list: FileList | File[]): PickedFile[] {
   return [...list].map((file) => ({ file, relPath: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name }));
 }
 
-/** D&D された DataTransfer からディレクトリを再帰的にたどる（FileSystemEntry API）。 */
+/** Walks directories recursively from a drag-and-dropped DataTransfer (FileSystemEntry API). */
 export async function fromDataTransfer(dt: DataTransfer): Promise<PickedFile[]> {
-  // DataTransfer はドロップのイベントの中でしか読めないので、平らなファイル一覧も先に控えておく
+  // DataTransfer can only be read inside the drop event, so also keep the flat file list up front
   const flat = [...dt.files];
   const entries = [...dt.items].map((i) => i.webkitGetAsEntry?.()).filter((e): e is FileSystemEntry => !!e);
   if (!entries.length) return fromFileList(flat);
@@ -34,7 +34,7 @@ export async function fromDataTransfer(dt: DataTransfer): Promise<PickedFile[]> 
   try {
     for (const e of entries) await walk(e, '');
   } catch (err) {
-    // エントリを読めない（WebKit で合成した DataTransfer は NotFoundError になる）ときは、ファイルだけでも判定する
+    // When the entries cannot be read (a DataTransfer synthesized in WebKit gives NotFoundError), evaluate at least the files
     if (!flat.length) throw err;
     return fromFileList(flat);
   }
@@ -43,8 +43,8 @@ export async function fromDataTransfer(dt: DataTransfer): Promise<PickedFile[]> 
 
 const yieldToUi = () => new Promise<void>((r) => setTimeout(r, 0));
 
-/** 同時に読むファイル数の上限。1 件ずつ await すると、file.arrayBuffer() と SHA-256 の待ちが直列になり大きなフォルダで遅い。
- *  多すぎるとメモリ（2 MiB × 同時数）とファイルハンドルを食うので 8 に抑える。 */
+/** Upper limit on files read concurrently. Awaiting one at a time serializes the waits for file.arrayBuffer() and SHA-256, which is slow for large folders.
+ *  Too many eat memory (2 MiB × concurrency) and file handles, so it is capped at 8. */
 export const READ_CONCURRENCY = 8;
 
 async function readOne({ file, relPath }: PickedFile, dec: TextDecoder): Promise<FileInput> {
@@ -53,16 +53,16 @@ async function readOne({ file, relPath }: PickedFile, dec: TextDecoder): Promise
   try {
     const buf = new Uint8Array(await file.arrayBuffer());
     const sha = await sha256Hex(buf);
-    // NUL を含むファイルも文字列として判定する（CLI の grep -a と同じ。NUL を 1 つ入れるだけで検査を逃れられないように）
+    // Files containing NUL are also evaluated as strings (same as grep -a in the CLI; so that inserting a single NUL cannot evade the checks)
     return { ...base, text: dec.decode(buf), sha256: sha, readState: 'read' };
   } catch {
     return { ...base, text: null, sha256: null, readState: 'error' };
   }
 }
 
-/** 最大 READ_CONCURRENCY 件ずつ並行に読み、結果は picked と同じ順に返す（判定結果を読み終わりの順に左右させない）。
- *  50 件読み終わるごとに進捗を通知して UI へ制御を返す（N-06）。2 MiB 超は未判定として数える（N-07）。
- *  signal が中断されたら（クリア・次のスキャン開始）、次のファイルを読む前に AbortError で止める。 */
+/** Reads up to READ_CONCURRENCY files in parallel and returns the results in the same order as picked (the result never depends on the order reads finish).
+ *  After every 50 files read, reports progress and yields control to the UI (N-06). Files over 2 MiB are counted as not scanned (N-07).
+ *  When signal is aborted (clear, start of the next scan), stops with AbortError before reading the next file. */
 export async function readFiles(picked: PickedFile[], onProgress: (n: number) => void, signal?: AbortSignal, concurrency = READ_CONCURRENCY): Promise<FileInput[]> {
   const out = new Array<FileInput>(picked.length);
   const dec = new TextDecoder('utf-8', { fatal: false });

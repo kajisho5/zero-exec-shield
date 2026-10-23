@@ -1,14 +1,14 @@
-// Codex CLI の .codex/config.toml から MCP サーバーの command / args を読む TOML 字句解析器。
-// CLI（zes-scan.sh の codex_toml_mcp_commands）と同じ規則で動く移植版。
-//   1 段目: ファイル全体を字句解析し、全ての値を { 種別, キーパス, 値 } として集める。
-//     対応: テーブル見出し [a . "b" . 'c'] / [[配列テーブル]]、ドット区切りキー、基本文字列（エスケープ復号）、
-//           リテラル文字列、複数行文字列（""" / '''）、入れ子の配列（複数行・コメント・末尾カンマ可）、
-//           インラインテーブル（入れ子可）、その他のスカラー（数値・真偽値・日時）
-//     値の中の制御文字（復号後の改行・タブ等）は空白に置き換える（1 行の command 行として照合するため）
-//   2 段目: mcp_servers.<name>.command / .args / .url を集め、サーバーごとにまとめる。
-//   構文エラー・command が文字列でない・command も url も無いサーバーは problems に理由を入れる
-//   （呼び出し側が errors[] に記録する。読めなかった設定を 0 件扱いしない）。
-//   構文エラーの場合も、エラー位置より前に読めた値は CLI と同じく使う。
+// A TOML tokenizer that reads the command / args of MCP servers from the .codex/config.toml of Codex CLI.
+// A port that works by the same rules as the CLI (codex_toml_mcp_commands in zes-scan.sh).
+//   Stage 1: tokenizes the whole file and collects every value as { type, key path, value }.
+//     Supports: table headers [a . "b" . 'c'] / [[array tables]], dotted keys, basic strings (escapes decoded),
+//           literal strings, multi-line strings (""" / '''), nested arrays (multi-line, comments and trailing commas allowed),
+//           inline tables (may nest), other scalars (numbers, booleans, dates/times)
+//     Control characters in values (newlines, tabs etc. after decoding) are replaced by spaces (to match them as a single command line)
+//   Stage 2: collects mcp_servers.<name>.command / .args / .url and groups them per server.
+//   Syntax errors and servers whose command is not a string or that have neither command nor url put a reason into problems
+//   (the caller records them in errors[]; unreadable configs are not treated as 0 hits).
+//   On a syntax error, values read before the error position are still used, as in the CLI.
 
 export interface CodexServer { name: string; command: string; args: string[] }
 export interface CodexTomlResult { servers: CodexServer[]; problems: string[] }
@@ -18,7 +18,7 @@ type Rec = { t: 's' | 'a' | 't' | 'o'; p: string[]; v: string };
 class TomlError extends Error {}
 
 function tokenize(src: string, recs: Rec[]): void {
-  // text_lines 相当: 先頭 BOM と各行末の CR を落とす
+  // Equivalent of text_lines: drop a leading BOM and the CR at the end of each line
   const S = src.replace(/^﻿/, '').replace(/\r(?=\n|$)/g, '');
   const n = S.length;
   let i = 0;
@@ -43,7 +43,7 @@ function tokenize(src: string, recs: Rec[]): void {
     line++; i++;
   };
   const cpChar = (cp: number) => (cp < 32 || cp === 127 ? ' ' : String.fromCodePoint(cp));
-  // バックスラッシュの直後（i はエスケープ文字）から 1 文字分を復号する
+  // Decode one character starting right after the backslash (i is the escape character)
   const esc = (): string => {
     const c = ch(); i++;
     if (c === '"' || c === '\\') return c;
@@ -81,7 +81,7 @@ function tokenize(src: string, recs: Rec[]): void {
       out += strch(c); i++;
     }
   };
-  // 複数行文字列。閉じ区切りの直前には区切り文字を 2 個まで含められる
+  // Multi-line string. Up to 2 delimiter characters may appear right before the closing delimiter
   const mlstr = (q: string) => {
     i += 3;
     if (ch() === '\n') { line++; i++; }
@@ -108,7 +108,7 @@ function tokenize(src: string, recs: Rec[]): void {
       out += strch(c); i++;
     }
   };
-  // キー（ドット区切り・引用キー可）
+  // Key (dotted, quoted keys allowed)
   const key = (): string[] => {
     const ks: string[] = [];
     for (;;) {
@@ -211,7 +211,7 @@ export function parseCodexToml(text: string): CodexTomlResult {
     if (p.length === 2) { if (t !== 't') problems.push(`unexpected_value:${nm}`); continue; }
     if (p[2] === 'command' && p.length === 3) { if (t === 's') cmd.set(nm, v); else bad.set(nm, 'unparsed_command'); continue; }
     if (p[2] === 'args') {
-      // args は配列（要素ごと）と文字列（1 引数）の両方を受け付ける
+      // args accepts both an array (per element) and a string (one argument)
       if (t === 's' && (p.length === 3 || p.length === 4)) args.set(nm, [...(args.get(nm) ?? []), v]);
       else if (!(p.length === 3 && t === 'a')) bad.set(nm, 'unparsed_args');
       continue;

@@ -1,5 +1,5 @@
-// shadcn/ui new-york-v4 の toggle-group を手で取り込み、「検疫台」の集計（重大度フィルタ）用に書き換えたもの
-// （MIT。NOTICE を参照）。変更点: toggleVariants とスペーシングの仕組みを外し、見た目は呼び出し側（Tally）が持つ。
+// The shadcn/ui new-york-v4 toggle-group, imported by hand and rewritten for the "quarantine bench" tally (severity filter)
+// (MIT; see NOTICE). Changes: toggleVariants and the spacing mechanism are removed; the caller (Tally) owns the look.
 import type * as React from 'react';
 import * as ToggleGroupPrimitive from '@radix-ui/react-toggle-group';
 import { cn } from '@/lib/utils';

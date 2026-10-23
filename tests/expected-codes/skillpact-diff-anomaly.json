@@ -1,0 +1,14 @@
+[
+  {
+    "campaign": "skillpact-account-compromise",
+    "code": "s49.account_compromise.same",
+    "level": "HIGH",
+    "module": "§49",
+    "params": {
+      "changes": "network: none→scoped",
+      "prev_path": "v1/skill.contract.json",
+      "prev_version": "1.0.0"
+    },
+    "path": "v2/skill.contract.json"
+  }
+]

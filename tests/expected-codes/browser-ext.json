@@ -1,0 +1,40 @@
+[
+  {
+    "campaign": null,
+    "code": "s24.perms_all_urls",
+    "level": "HIGH",
+    "module": "§24",
+    "params": {
+      "permissions": "webRequest cookies"
+    },
+    "path": "Extensions/abcd/manifest.json"
+  },
+  {
+    "campaign": null,
+    "code": "s24.update_url",
+    "level": "HIGH",
+    "module": "§24",
+    "params": {},
+    "path": "Extensions/abcd/manifest.json"
+  },
+  {
+    "campaign": null,
+    "code": "s24.perms",
+    "level": "MEDIUM",
+    "module": "§24",
+    "params": {
+      "permissions": "debugger nativeMessaging"
+    },
+    "path": "Extensions/efgh/2.0.0/manifest.json"
+  },
+  {
+    "campaign": null,
+    "code": "s42.perms_added",
+    "level": "HIGH",
+    "module": "§42",
+    "params": {
+      "permissions": "debugger nativeMessaging"
+    },
+    "path": "Extensions/efgh/2.0.0/manifest.json"
+  }
+]

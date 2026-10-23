@@ -1,4 +1,4 @@
-// スキャンのキャンセル（クリア・次のスキャン開始）と画面状態の回帰テスト。
+// Regression tests for scan cancellation (clear, start of the next scan) and screen state.
 import { describe, expect, it } from 'vitest';
 import type { EngineResult } from '../../src/engine';
 import { readFiles } from '../../src/fileReader';

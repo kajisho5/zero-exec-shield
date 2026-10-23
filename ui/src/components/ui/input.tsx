@@ -1,5 +1,5 @@
-// shadcn/ui new-york-v4 の input を手で取り込み、「検疫台」に書き換えたもの（MIT。NOTICE を参照）。
-// 凹みの地、縁（3:1 以上）の枠、角丸 6。左にアイコンを置ける。フォーカスは全体共通の墨の輪郭。
+// The shadcn/ui new-york-v4 input, imported by hand and rewritten for the "quarantine bench" (MIT; see NOTICE).
+// Well ground, edge border (3:1 or more), radius 6. An icon can be placed on the left. Focus uses the global ink outline.
 import type * as React from 'react';
 import { cn } from '@/lib/utils';
 

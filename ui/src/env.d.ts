@@ -1,9 +1,9 @@
-// Vite がビルド時に処理する CSS のサイドエフェクト import
+// Side-effect imports of CSS that Vite processes at build time
 declare module '*.css';
-// Vite がビルド時に data: URI へ変換する画像
+// Images that Vite converts to data: URIs at build time
 declare module '*.png' {
   const src: string;
   export default src;
 }
-// vite.config.ts の define が ui/package.json の version で置き換える
+// Replaced with the version in ui/package.json by define in vite.config.ts
 declare const __ZES_UI_VERSION__: string;

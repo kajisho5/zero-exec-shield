@@ -1,0 +1,12 @@
+[
+  {
+    "campaign": "skillpact-undeclared",
+    "code": "s49.undeclared",
+    "level": "INFO",
+    "module": "§49",
+    "params": {
+      "effects": "network,exec"
+    },
+    "path": "standalone"
+  }
+]

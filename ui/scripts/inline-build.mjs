@@ -1,5 +1,5 @@
-// vite build の成果物（ui/dist）を 1 ファイルの ../index.html にまとめ、CSP をスクリプト / スタイルの SHA-256 で書き込む。
-// ランタイムで外部リソースを一切取得しない（CDN 禁止・file:// 動作）。
+// Bundles the vite build output (ui/dist) into the single file ../index.html and writes the CSP with the SHA-256 of the script / style.
+// Never fetches any external resource at runtime (no CDN, works on file://).
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -9,15 +9,15 @@ const dist = here('../dist/');
 let html = readFileSync(dist + 'index.html', 'utf8');
 const js = readFileSync(dist + 'app.js', 'utf8');
 const css = readFileSync(dist + 'app.css', 'utf8');
-// ファビコンは brand/ の生成物を data: URI で埋め込む（CSP img-src data: の範囲内。外部取得なし）
+// The favicon embeds the generated file from brand/ as a data: URI (within CSP img-src data:; no external fetch)
 const icon = readFileSync(here('../../brand/web/favicon-64.png')).toString('base64');
 
-// </script> / </style> の終端を本文中に含まないことを確認（含むとインライン化で HTML が壊れる）
+// Check that the body contains no </script> / </style> terminator (if it did, inlining would break the HTML)
 if (/<\/script/i.test(js)) throw new Error('app.js に </script が含まれるためインライン化できません');
 if (/<\/style/i.test(css)) throw new Error('app.css に </style が含まれるためインライン化できません');
 
-// 実行時に <style> を差し込むライブラリが紛れ込んでいないこと（ハッシュ方式の CSP でブロックされる。設計書 §4.2、R-1）。
-// react-remove-scroll は vite.config.ts の alias で CSSOM 版に差し替えている。差し替えが外れると次の文字列が入る。
+// No library that injects <style> at runtime has slipped in (it would be blocked by the hash-based CSP. design doc §4.2, R-1).
+// react-remove-scroll is replaced with the CSSOM version by the alias in vite.config.ts. If the replacement is lost, the following strings get in.
 for (const marker of ['block-interactivity-', 'with-scroll-bars-hidden', 'data-sonner-toaster', 'data-radix-scroll-area-viewport', 'data-radix-select-viewport']) {
   if (js.includes(marker)) throw new Error(`app.js に実行時に <style> を差し込むライブラリの痕跡があります: ${marker}`);
 }
@@ -40,7 +40,7 @@ const csp = [
   "form-action 'none'",
 ].join('; ');
 
-// 置換文字列中の $ を特殊扱いさせないため関数で置換する
+// Replace with a function so that $ in the replacement string is not treated specially
 html = html
   .replace(scriptTag, () => '')
   .replace(styleTag, () => `<style>${css}</style>`)
@@ -48,7 +48,7 @@ html = html
   .replace('<!--ZES-ICON-->', () => `<link rel="icon" type="image/png" sizes="64x64" href="data:image/png;base64,${icon}" />`)
   .replace('</body>', () => `<script type="module">${js}</script>\n  </body>`);
 
-// 成果物の <style> はビルド時の CSS の 1 つだけ（CSP の style-src はそのハッシュ 1 つだけを許可する）
+// The output has exactly one <style>, the CSS from the build (the CSP style-src allows only that one hash)
 if ((html.match(/<style[\s>]/g) ?? []).length !== 1) throw new Error('成果物の <style> が 1 つではありません');
 
 const banner = '<!-- Zero-Exec Shield v5.2 Web Scanner UI。ui/ から生成（cd ui && npm ci && npm run build）。直接編集しないこと。 -->\n';

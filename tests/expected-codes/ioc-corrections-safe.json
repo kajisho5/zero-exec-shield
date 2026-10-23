@@ -1,0 +1,37 @@
+[
+  {
+    "campaign": "mcp-python-sdk-jul-2026",
+    "code": "s15.pkg_vulnerable_fixed",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {
+      "ecosystem": "pypi",
+      "fixed_version": "1.28.1",
+      "package": "mcp",
+      "version": "1.27.2"
+    },
+    "path": "requirements.txt"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s37.mcp_dependency",
+    "level": "MEDIUM",
+    "module": "§37",
+    "params": {
+      "package": "appium-mcp",
+      "version": "1.85.10"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s37.mcp_dependency",
+    "level": "MEDIUM",
+    "module": "§37",
+    "params": {
+      "package": "mcp",
+      "version": "1.27.2"
+    },
+    "path": "requirements.txt"
+  }
+]

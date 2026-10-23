@@ -1,0 +1,108 @@
+[
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s21.pwn_request",
+    "level": "CRITICAL",
+    "module": "§21",
+    "params": {},
+    "path": ".github/workflows/flow-ref.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s21.pwn_request",
+    "level": "CRITICAL",
+    "module": "§21",
+    "params": {},
+    "path": ".github/workflows/flow-step-ref.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s21.pwn_request",
+    "level": "CRITICAL",
+    "module": "§21",
+    "params": {},
+    "path": ".github/workflows/folded-ref.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s21.pwn_request",
+    "level": "CRITICAL",
+    "module": "§21",
+    "params": {},
+    "path": ".github/workflows/next-line-uses.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s21.cache_pr_key",
+    "level": "HIGH",
+    "module": "§21",
+    "params": {},
+    "path": ".github/workflows/pr-target.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s21.prt_checkout_base",
+    "level": "HIGH",
+    "module": "§21",
+    "params": {},
+    "path": ".github/workflows/pr-target.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s21.write_all",
+    "level": "HIGH",
+    "module": "§21",
+    "params": {},
+    "path": ".github/workflows/pr-target.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s22.risky_publisher_tag",
+    "level": "CRITICAL",
+    "module": "§22",
+    "params": {
+      "ref": "TJ-Actions/changed-files@v45"
+    },
+    "path": ".github/workflows/case-variant.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s22.poisoned_tag",
+    "level": "CRITICAL",
+    "module": "§22",
+    "params": {
+      "ref": "aquasecurity/trivy-action@0.28.0"
+    },
+    "path": ".github/workflows/flow-mapping.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s22.poisoned_tag",
+    "level": "CRITICAL",
+    "module": "§22",
+    "params": {
+      "ref": "aquasecurity/trivy-action@v0.69.4"
+    },
+    "path": ".github/workflows/tag-ref.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s22.unpinned",
+    "level": "HIGH",
+    "module": "§22",
+    "params": {
+      "ref": "actions/checkout@v4"
+    },
+    "path": ".github/workflows/next-line-uses.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s22.unpinned",
+    "level": "HIGH",
+    "module": "§22",
+    "params": {
+      "ref": "actions/checkout@v4"
+    },
+    "path": ".github/workflows/tag-ref.yml"
+  }
+]

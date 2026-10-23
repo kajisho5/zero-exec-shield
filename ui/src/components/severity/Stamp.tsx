@@ -1,5 +1,5 @@
-// 押印（紫インク）: 外枠 1.5px＋内枠 0.75px の二重枠、角丸 2。署名ファイルが「ある」ことだけを示す印。
-// 緑・ティール・墨・チェック形のアイコンは使わない（設計書 §5.3 の L3 の規則、C-10）。
+// Stamp (violet ink): a double border of 1.5px outer + 0.75px inner, radius 2. A mark that only shows that a signature file exists.
+// No green, teal, ink or check-shaped icons (the L3 rule of design doc §5.3, C-10).
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 

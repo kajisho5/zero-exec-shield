@@ -1,5 +1,5 @@
-// shadcn/ui new-york-v4 の dropdown-menu を手で取り込み、「検疫台」に書き換えたもの（MIT。NOTICE を参照）。
-// 変更点: 浮きの地、罫、角丸 6、項目は選択行の地。ズームなし（120ms のフェード）。使う部品だけを残した。
+// The shadcn/ui new-york-v4 dropdown-menu, imported by hand and rewritten for the "quarantine bench" (MIT; see NOTICE).
+// Changes: raised ground, rule, radius 6, items use the selected-row ground. No zoom (120ms fade). Only the parts in use are kept.
 import type * as React from 'react';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import { Check } from 'lucide-react';

@@ -1,4 +1,4 @@
-// 無彩色のタグ: 罫の枠、鉛筆色の文字、角丸 3。重大度ではない付帯情報（「存在のみ・内容非表示」など）に使う。
+// Neutral tag: rule border, pencil-colored text, radius 3. For accompanying information that is not a severity ("existence only, content hidden" etc.).
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 

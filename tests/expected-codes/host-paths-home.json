@@ -1,0 +1,68 @@
+[
+  {
+    "campaign": null,
+    "code": "s10.launch_agent",
+    "level": "INFO",
+    "module": "§10",
+    "params": {},
+    "path": "Library/LaunchAgents/com.zoom.plist"
+  },
+  {
+    "campaign": null,
+    "code": "s12.pip_require_virtualenv",
+    "level": "MEDIUM",
+    "module": "§12",
+    "params": {},
+    "path": null
+  },
+  {
+    "campaign": null,
+    "code": "s12.pythonnousersite",
+    "level": "MEDIUM",
+    "module": "§12",
+    "params": {},
+    "path": null
+  },
+  {
+    "campaign": null,
+    "code": "s12.npm_ignore_scripts",
+    "level": "MEDIUM",
+    "module": "§12",
+    "params": {},
+    "path": ".npmrc"
+  },
+  {
+    "campaign": "redc2-redshell-npm-streak",
+    "code": "intel.file_name",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {
+      "name": ".rsvc"
+    },
+    "path": ".config/.rsvc"
+  },
+  {
+    "campaign": "amnesiastealer-clickfix-github",
+    "code": "intel.host_path",
+    "level": "CRITICAL",
+    "module": "§30",
+    "params": {},
+    "path": ".pwd"
+  },
+  {
+    "campaign": "redc2-redshell-npm-streak",
+    "code": "intel.host_path",
+    "level": "CRITICAL",
+    "module": "§30",
+    "params": {},
+    "path": ".config/.rsvc"
+  },
+  {
+    "campaign": "overlord-fake-zoom-dotnet",
+    "code": "intel.host_path",
+    "level": "HIGH",
+    "module": "§30",
+    "params": {},
+    "path": "Library/LaunchAgents/com.zoom.plist"
+  }
+]

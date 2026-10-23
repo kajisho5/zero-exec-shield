@@ -1,0 +1,20 @@
+[
+  {
+    "campaign": null,
+    "code": "s30.random_label",
+    "level": "HIGH",
+    "module": "§30",
+    "params": {
+      "label": "xk3j9q2m"
+    },
+    "path": "LaunchAgents/com.xyz.plist"
+  },
+  {
+    "campaign": null,
+    "code": "s30.tmp_program",
+    "level": "HIGH",
+    "module": "§30",
+    "params": {},
+    "path": "LaunchAgents/com.xyz.plist"
+  }
+]

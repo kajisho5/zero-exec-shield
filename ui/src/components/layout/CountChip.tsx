@@ -1,4 +1,4 @@
-// タブの件数: 最大の重大度の淡色地に、その文字色の数字（12px の 600、角丸 3）。0 件なら出さない（§10.2）。
+// Tab count: the number in the text color of the highest severity on its tint (12px, 600, radius 3). Not shown for 0 (§10.2).
 import { cn } from '@/lib/utils';
 import { SEV } from '@/components/severity/severity';
 import type { TabCount } from './tabCounts';

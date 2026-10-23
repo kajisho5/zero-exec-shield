@@ -1,4 +1,4 @@
-// rules/ioc.json をビルド時にバンドルへ取り込む（単一の真実の源。再ビルドで最新の IoC が反映される）。
+// Bundles rules/ioc.json at build time (the single source of truth; a rebuild picks up the latest IoCs).
 import raw from '../../../rules/ioc.json';
 import type { Effect } from './types';
 
@@ -40,7 +40,7 @@ export interface InfraCve {
   fixed?: string[];
   severity?: string;
   kev?: boolean;
-  /** 個別判定のある製品に追記した CVE を汎用判定の対象にする */
+  /** Makes CVEs appended to a product with its own evaluation subject to the generic evaluation */
   generic?: boolean;
 }
 
@@ -52,7 +52,7 @@ export interface Infrastructure {
   cves: InfraCve[];
 }
 
-/** 収集インテル（5.2.2）。CLI の intel_* 関数と同じデータ */
+/** Collected intel (5.2.2). The same data as the intel_* functions of the CLI */
 export interface IntelDb {
   files?: { campaign: string; severity?: string; sha256?: string[]; names?: string[]; name_severity?: string }[];
   network?: { campaign: string; domains?: string[]; ips?: string[]; urls?: string[]; legit_infra?: string[] }[];
@@ -70,7 +70,7 @@ export interface EmudhraRules {
   [k: string]: unknown;
 }
 
-/** PHP2Shell の upstream 修正版・旧ブランチ・ベンダーのパッケージ修正版（CLI php_status / php_distro_packages と同じ表） */
+/** PHP2Shell upstream fixed versions, old branches and vendor package fixed versions (the same tables as CLI php_status / php_distro_packages) */
 export interface Php2ShellDistro {
   upstream_fixed?: string[];
   older_branches?: string[];

@@ -1,17 +1,17 @@
-// 重大度の表示の対応表（設計書 §5.3）。形（lucide）＋語＋色を必ず併記し、色だけで区別しない。
-// クラス名は Tailwind が静的に拾えるよう、すべて文字列のまま書く。
+// Mapping table for severity display (design doc §5.3). Always shows shape (lucide) + word + color together; never distinguishes by color alone.
+// Class names are all written as literal strings so Tailwind can pick them up statically.
 import { CircleAlert, CircleCheck, Diamond, Info, OctagonAlert, TriangleAlert, type LucideIcon } from 'lucide-react';
 import type { DisplaySeverity } from '@/engine';
 
 export interface SevStyle {
   icon: LucideIcon;
-  /** 文字・アイコン・帯の色 */
+  /** Color of text, icon and band */
   fg: string;
-  /** 淡色地 */
+  /** Tint ground */
   tint: string;
-  /** 左端の帯 */
+  /** Band on the left edge */
   bar: string;
-  /** 塗り（SkillPact の未宣言のピル） */
+  /** Fill (the SkillPact undeclared pill) */
   solid: string;
 }
 

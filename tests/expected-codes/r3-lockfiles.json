@@ -1,0 +1,28 @@
+[
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.pkg_compromised_safe",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "keyv",
+      "safe_version": "latest 5.x",
+      "version": "6.0.0"
+    },
+    "path": "bun/bun.lock"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.pkg_compromised_safe",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "keyv",
+      "safe_version": "latest 5.x",
+      "version": "6.0.0"
+    },
+    "path": "deno/deno.lock"
+  }
+]

