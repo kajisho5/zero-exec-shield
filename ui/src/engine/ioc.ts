@@ -55,7 +55,7 @@ export interface IntelDb {
   workflow_strings?: { campaign: string; severity?: string; strings?: string[] }[];
   strings?: { campaign: string; module: string; severity?: string; file_regex?: string; strings?: string[] }[];
   extensions?: { campaign: string; eco: string; severity?: string; ids?: string[]; bad_versions?: string[] }[];
-  host?: { campaign: string; severity?: string; paths?: string[]; launch_labels?: string[]; systemd_units?: string[]; process_names?: string[] }[];
+  host?: { campaign: string; severity?: string; paths?: string[]; modified_files?: string[]; launch_labels?: string[]; systemd_units?: string[]; process_names?: string[] }[];
   apps?: { campaign: string; bundle: string; cve: string; severity?: string; fixed: string }[];
 }
 
@@ -71,6 +71,7 @@ export interface IocDb {
   infrastructures?: Infrastructure[];
   intel?: IntelDb;
   emudhra?: EmudhraRules;
+  runtime_minimums?: { certifi?: string; [k: string]: unknown };
   worm_iocs: {
     chaindrop: { files: string[]; preinstall: string; hashes: { sha256: Record<string, string[]> }; domains: string[]; eth_contracts?: string[]; legit_infra?: string[] };
     teampcp: { c2_ip: string[]; c2_domains: string[]; legit_infra?: string[] };

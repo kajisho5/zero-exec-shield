@@ -2,6 +2,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { validate } from '../unit/schema';
 
 const INDEX = 'file://' + fileURLToPath(new URL('../../../index.html', import.meta.url));
 const FIX = fileURLToPath(new URL('../../../tests/fixtures/', import.meta.url));
@@ -133,4 +134,65 @@ test('隠しファイルだけのフォルダでも無反応にならない（�
   const none = page.getByRole('status').getByText('ファイルが 0 件でした');
   await expect(done.or(none)).toBeVisible();
   info.annotations.push({ type: 'dotfiles', description: (await none.isVisible()) ? '隠しファイルを渡さない' : '隠しファイルを渡す' });
+});
+
+test('敵対的な findings.json の取り込みで画面が消えない・書き出しはスキーマ適合', async ({ page }) => {
+  const { errors } = await open(page);
+  const H = (c: string) => 'sha256:' + c.repeat(64);
+  const good = { id: H('a'), level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: '/home/u/.mcp.json', detail: '取り込み確認', evidence_hash: H('b') };
+  const doc = {
+    schema_version: '1.0', incident_bundle: 'ZES-2026-SEP-EMERGENCY-V5.1', scan_started_at: '2026-10-01T00:00:00Z', scan_finished_at: '2026-10-01T00:00:05Z', scan_mode: 'full', status: 'ok',
+    findings: [good, { ...good, id: H('c'), campaign: { a: 1 } }, { ...good, id: H('d'), path: 42 }, { ...good, id: 'x', module: 'bad', evidence_hash: '' }],
+    errors: [{ module: '§6', reason: 'network_timeout' }],
+  };
+  await page.getByTestId('import-input').setInputFiles({ name: 'findings.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(doc)) });
+  await expect(page.getByTestId('import-status')).toContainText('除外 3 件');
+  await expect(page.getByRole('status')).toContainText('3 件を除外');
+  await expect(page.getByTestId('findings-table')).toContainText('/home/u/.mcp.json');
+  await page.getByTestId('search').fill('mcp');
+  await expect(page.getByTestId('finding-row')).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'Zero-Exec Shield' })).toBeVisible();
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export').click()]);
+  const out = JSON.parse(readFileSync(await dl.path(), 'utf8'));
+  expect(validate(out)).toEqual([]);
+  expect(out.errors).toContainEqual({ module: '§6', reason: 'network_timeout' });
+  expect(errors).toEqual([]);
+});
+
+test('375px 幅でページ全体が横スクロールしない', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
+  await open(page);
+  await scan(page, 'chaindrop');
+  await expect(page.getByTestId('finding-row').first()).toBeVisible();
+  for (const tab of [/^総合/, /^SkillPact/, /^MCP/]) {
+    await page.getByRole('tab', { name: tab }).click();
+    const { sw, cw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
+    expect(sw, `${tab}`).toBeLessThanOrEqual(cw);
+  }
+});
+
+test('「すべてのタブ」メニュー: Escape・外側クリックで閉じ、フォーカスを戻す', async ({ page }) => {
+  await open(page);
+  const btn = page.getByTestId('all-tabs');
+  const menu = page.getByRole('menu', { name: 'すべてのタブ' });
+  await btn.click();
+  await expect(menu).toBeVisible();
+  await expect(btn).toHaveAttribute('aria-expanded', 'true');
+  await expect(btn).toHaveAttribute('aria-controls', await menu.getAttribute('id') ?? 'missing');
+  await expect(page.getByRole('menuitem').first()).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(btn).toHaveAttribute('aria-expanded', 'false');
+  await expect(btn).toBeFocused();
+  await btn.click();
+  await expect(menu).toBeVisible();
+  await page.getByRole('heading', { name: 'Zero-Exec Shield' }).click();
+  await expect(menu).toBeHidden();
+  // 矢印キーで移動して選択すると、そのタブが選択されフォーカスされる
+  await btn.click();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeHidden();
+  await expect(page.getByRole('tab', { name: /^SkillPact/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: /^SkillPact/ })).toBeFocused();
 });

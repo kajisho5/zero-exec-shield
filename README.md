@@ -42,7 +42,7 @@
 ## 動作要件
 
 - Bash 4 以上（macOS 標準の Bash 3.2 は不可。`brew install bash`）
-- `jq`（推奨。無い場合は grep フォールバック。§48 SBOM と §49 SkillPact は jq 必須で、無い場合は `errors[]` に `jq_unavailable` を記録）
+- `jq`（推奨。無い場合は grep フォールバック。§48 SBOM と §49 SkillPact は jq 必須。収集脅威インテリジェンス（`rules/ioc.json` の `intel`）を使う照合 — §1（ホスト検査時）/ §7 / §15 / §16 / §20 / §22 / §23 / §30 / §38 / §42 — と §15 の Pipfile.lock / composer.lock 解析も jq が必要です。いずれも jq が無い場合は `errors[]` に `jq_unavailable` を記録し、0 件扱いしません）
 - macOS / Linux。`readlink -f` が無い環境は `realpath` → `cd/pwd` にフォールバック
 
 ## クイックスタート
@@ -270,7 +270,7 @@ SkillPact v0.8 の公式スキーマは一次情報で確認できていませ�
 ## テスト
 
 ```bash
-tests/run-tests.sh            # IoC DB 検証・campaign 同期・29 フィクスチャ照合・横断チェック
+tests/run-tests.sh            # IoC DB 検証・campaign 同期・32 フィクスチャ照合・横断チェック
 tests/run-tests.sh --update   # 期待値の再生成（差分は必ず目視レビュー）
 tests/run-tests.sh --sync-campaigns   # rules/campaigns/*.json を ioc.json から再生成
 tests/zero-exec.sh            # strace で execve を監視し、フィクスチャ・対象ランタイムの実行ゼロを確認（Linux）

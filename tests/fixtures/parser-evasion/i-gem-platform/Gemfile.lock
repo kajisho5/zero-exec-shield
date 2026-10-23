@@ -1,0 +1,7 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    git_credential_manager (2.8.1-x86_64-linux)
+
+PLATFORMS
+  x86_64-linux

@@ -22,6 +22,8 @@
 set -u
 set -o pipefail
 umask 077
+# CDPATH が export されていると相対パスの cd が別ディレクトリへ解決され、パスも標準出力へ出るため無効化
+unset CDPATH
 
 ZES_VERSION="0.1.0"      # ソフトウェアの版
 ZES_SPEC_VERSION="5.2"   # 準拠する Master Specification の版
@@ -34,7 +36,7 @@ if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
 fi
 
 export LC_ALL=C
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 IOC_FILE="${ZES_IOC:-$SCRIPT_DIR/rules/ioc.json}"
 HOME_DIR="${ZES_HOME:-${HOME:-}}"
 HOST_CHECKS="${ZES_HOST_CHECKS:-1}"
@@ -95,7 +97,12 @@ if [ ! -d "$ROOT" ]; then
   echo "ZES: --root がディレクトリではありません: $ROOT" >&2
   exit 64
 fi
-ROOT="$(cd "$ROOT" && pwd -P)"
+case "$ROOT" in -*) ROOT="./$ROOT" ;; esac  # "-" や "-dash" を cd のオプション/OLDPWD と解釈させない
+ROOT="$(cd -- "$ROOT" 2>/dev/null && pwd -P)"
+if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
+  echo "ZES: --root を解決できません" >&2
+  exit 64
+fi
 
 if [ -n "$TARGET_URL" ]; then
   case "$TARGET_URL" in
@@ -212,15 +219,15 @@ resolve_path() {
   local p="$1" r=""
   r="$(readlink -f -- "$p" 2>/dev/null)" && [ -n "$r" ] && { printf '%s' "$r"; return 0; }
   r="$(realpath -- "$p" 2>/dev/null)" && [ -n "$r" ] && { printf '%s' "$r"; return 0; }
-  if [ -d "$p" ]; then (cd "$p" 2>/dev/null && pwd -P); else
-    local d; d="$(cd "$(dirname -- "$p")" 2>/dev/null && pwd -P)" || return 1
+  if [ -d "$p" ]; then (cd -- "$p" 2>/dev/null && pwd -P); else
+    local d; d="$(cd -- "$(dirname -- "$p")" 2>/dev/null && pwd -P)" || return 1
     printf '%s/%s' "$d" "$(basename -- "$p")"
   fi
 }
 
 expand_home() {
   local p="$1"
-  case "$p" in "~/"*) printf '%s/%s' "$HOME_DIR" "${p#\~/}" ;; "~") printf '%s' "$HOME_DIR" ;; *) printf '%s' "$p" ;; esac
+  case "$p" in "~/"*) printf '%s/%s' "$HOME_DIR" "${p#\~/}" ;; '$HOME/'*) printf '%s/%s' "$HOME_DIR" "${p#\$HOME/}" ;; "~") printf '%s' "$HOME_DIR" ;; *) printf '%s' "$p" ;; esac
 }
 
 stat_mtime() { if [ "$OS_NAME" = "Darwin" ]; then stat -f %m -- "$1" 2>/dev/null; else stat -c %Y -- "$1" 2>/dev/null; fi; }
@@ -294,14 +301,23 @@ safe_probe() {
   ( cd / && GOTOOLCHAIN=local GOFLAGS='' PYTHONSTARTUP='' PYTHONPATH='' "$rp" "$@" </dev/null 2>/dev/null )
 }
 
-# git は検査対象リポジトリの設定経由でコマンドを起動しうるため、危険な設定を無効化して呼ぶ
+# git は検査対象リポジトリの設定（.git/config）経由でコマンドを起動しうるため、危険な設定を無効化して呼ぶ
+#   コマンドライン -c はリポジトリ設定より優先される。プログラムを値に取る設定は全て無害化する:
+#   署名検証（gpg.program / gpg.openpgp.program / gpg.x509.program / gpg.ssh.program / gpg.ssh.defaultKeyCommand）、
+#   ssh・プロキシ（core.sshCommand / core.gitProxy）、エディタ・ページャ・認証（core.editor / sequence.editor /
+#   core.pager / core.askPass / credential.helper）、diff（diff.external、textconv は --no-textconv を呼び出し側で指定）
+#   ※ 署名の有無は検証させずに生のコミットオブジェクトのヘッダから判定する（§46）
 safe_git() {
   command -v git >/dev/null 2>&1 || return 127
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat GIT_EXTERNAL_DIFF='' \
-  GIT_SSH_COMMAND=/bin/false GIT_ASKPASS=/bin/false \
+  GIT_SSH_COMMAND=/bin/false GIT_SSH=/bin/false GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false GIT_EDITOR=/bin/false \
+  GIT_SEQUENCE_EDITOR=/bin/false GIT_PROXY_COMMAND=/bin/false GIT_OPTIONAL_LOCKS=0 \
     git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.pager=cat -c log.showSignature=false \
-        -c gpg.program=/bin/false -c gpg.ssh.program=/bin/false -c diff.external= -c core.sshCommand=/bin/false \
-        -c protocol.allow=never -C "$ROOT" --no-pager "$@" </dev/null 2>/dev/null
+        -c gpg.program=/bin/false -c gpg.openpgp.program=/bin/false -c gpg.x509.program=/bin/false \
+        -c gpg.ssh.program=/bin/false -c gpg.ssh.defaultKeyCommand=/bin/false \
+        -c diff.external= -c core.sshCommand=/bin/false -c core.gitProxy=/bin/false \
+        -c core.editor=/bin/false -c sequence.editor=/bin/false -c core.askPass=/bin/false -c credential.helper= \
+        -c core.alternateRefsCommand=/bin/false -c protocol.allow=never -C "$ROOT" --no-pager "$@" </dev/null 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -396,6 +412,10 @@ grep_lF() {
 }
 # 1ファイルに対する存在判定
 fgrep_q() { grep -q -I -E "$@" 2>/dev/null; }
+# TSV を空欄を保ったまま read するための変換。IFS=$'\t' はタブを空白類として扱い連続タブを 1 区切りに潰す
+# （空欄で後続の列がずれる）ため、空白類でない US（0x1f）に置き換えて IFS="$US" で読む
+US=$'\037'
+tsv_us() { tr '\t' '\037'; }
 
 # ---------------------------------------------------------------------------
 # 依存関係インベントリ（check_lockfile_versions の入力）
@@ -404,6 +424,37 @@ fgrep_q() { grep -q -I -E "$@" 2>/dev/null; }
 DEPS_TSV="$TMP_DIR/deps.tsv"
 DEPS_BUILT=0
 norm_pypi() { printf '%s' "$1" | tr 'A-Z_.' 'a-z--' | tr -s '-'; }
+# 行ベースのパーサへ渡す前の正規化: 行末 CR（CRLF）と先頭の UTF-8 BOM を除去（検出回避の防止）
+text_lines() { awk '{ sub(/\r$/, "") } NR == 1 { sub(/^\357\273\277/, "") } { print }' "$1" 2>/dev/null; }
+# package.json のトップレベル "version"（jq 不在時）。文字列外の波括弧の深さを数え、深さ 1 のキーだけを見る
+json_top_version() {
+  awk 'BEGIN { RS = "\001" }
+    { n = length($0); depth = 0; ins = 0; esc = 0; tok = ""; key = ""; expect = 0
+      for (i = 1; i <= n; i++) {
+        ch = substr($0, i, 1)
+        if (ins) {
+          if (esc) { esc = 0; tok = tok ch; continue }
+          if (ch == "\\") { esc = 1; continue }
+          if (ch == "\"") { ins = 0
+            if (expect && depth == 1) { print tok; exit }
+            last = tok; continue }
+          tok = tok ch; continue }
+        if (ch == "\"") { ins = 1; tok = ""; continue }
+        if (ch == "{" || ch == "[") { depth++; expect = 0; continue }
+        if (ch == "}" || ch == "]") { depth--; expect = 0; continue }
+        if (ch == ":") { expect = (depth == 1 && last == "version"); continue }
+        if (ch == ",") { expect = 0; last = ""; continue }
+        if (ch !~ /[ \t\r\n]/) expect = 0
+      } }' "$1" 2>/dev/null
+}
+# PKG-INFO / METADATA（RFC 822 形式）の先頭ヘッダから Name<TAB>Version を読む
+pkg_info_name_version() {
+  text_lines "$1" | awk '
+    /^$/ { exit }
+    tolower($0) ~ /^name:/ && n == "" { n = $0; sub(/^[^:]*:[ \t]*/, "", n); sub(/[ \t]+$/, "", n) }
+    tolower($0) ~ /^version:/ && v == "" { v = $0; sub(/^[^:]*:[ \t]*/, "", v); sub(/[ \t]+$/, "", v) }
+    END { if (n != "") print n "\t" v }'
+}
 build_deps() {
   [ "$DEPS_BUILT" -eq 1 ] && return 0
   DEPS_BUILT=1
@@ -430,44 +481,51 @@ build_deps() {
   # npm: yarn.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '
+    text_lines "$f" | awk -v src="$f" '
       /^[^ #].*:$/ { h=$0; sub(/:$/,"",h); split(h,parts,/, */); n=parts[1]; gsub(/"/,"",n);
                      if (n ~ /^@/) { sub(/^@/,"",n); sub(/@.*/,"",n); n="@" n } else { sub(/@.*/,"",n) } ; next }
-      /^  version:? / { v=$0; sub(/^  version:? +/,"",v); gsub(/"/,"",v); if (n!="") print "npm\t" n "\t" v "\t" src; n="" }' "$f" >>"$DEPS_TSV"
+      /^  version:? / { v=$0; sub(/^  version:? +/,"",v); gsub(/"/,"",v); if (n!="") print "npm\t" n "\t" v "\t" src; n="" }' >>"$DEPS_TSV"
   done < <(files_named '^yarn\.lock$')
   # npm: pnpm-lock.yaml（"/name@1.2.3:" / "name@1.2.3:" 形式）
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '
+    text_lines "$f" | awk -v src="$f" '
       /^  ['"'"'\/]?@?[^ @]+@[0-9][^:]*:/ {
         s=$0; sub(/^  /,"",s); gsub(/'"'"'/,"",s); sub(/^\//,"",s); sub(/:.*$/,"",s); sub(/\(.*$/,"",s)
         if (s ~ /^@/) { at=index(substr(s,2),"@")+1 } else { at=index(s,"@") }
-        if (at>1) print "npm\t" substr(s,1,at-1) "\t" substr(s,at+1) "\t" src }' "$f" >>"$DEPS_TSV"
+        if (at>1) print "npm\t" substr(s,1,at-1) "\t" substr(s,at+1) "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^pnpm-lock\.yaml$')
   # npm: node_modules/<pkg>/package.json（実体のバージョン）
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     local n v
     n="$(printf '%s' "$f" | sed -E 's#.*/node_modules/((@[^/]+/)?[^/]+)/package\.json$#\1#')"
-    v="$(grep -m1 -E '^\s*"version"\s*:' "$f" 2>/dev/null | sed -E 's/.*"version"\s*:\s*"([^"]*)".*/\1/')"
+    # トップレベルの .version のみ（最小化 JSON・入れ子の "version" に対応）
+    if [ "$HAVE_JQ" -eq 1 ]; then
+      v="$(jq -r 'if type == "object" and (.version | type) == "string" then .version else "" end' "$f" 2>/dev/null)" \
+        || { record_error "§15" "lockfile_parse_failed:$f"; v=""; }
+    else
+      v="$(json_top_version "$f")"
+    fi
+    v="$(printf '%s' "$v" | tr -d '\t\r\n')"
     printf 'npm\t%s\t%s\t%s\n' "$n" "$v" "$f" >>"$DEPS_TSV"
   done < <(files_path '/node_modules/(@[^/]+/)?[^/]+/package\.json$')
   # pypi: requirements*.txt / constraints*.txt
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '
+    text_lines "$f" | awk -v src="$f" '
       { line=$0; sub(/#.*/,"",line); gsub(/[ \t]/,"",line) }
       line ~ /^[A-Za-z0-9][A-Za-z0-9._-]*(\[[^]]*\])?===?[^;,]+/ {
         n=line; sub(/(\[[^]]*\])?===?.*/,"",n); v=line; sub(/^[^=]*===?/,"",v); sub(/[;,].*/,"",v)
-        n=tolower(n); gsub(/[-_.]+/,"-",n); print "pypi\t" n "\t" v "\t" src }' "$f" >>"$DEPS_TSV"
+        n=tolower(n); gsub(/[-_.]+/,"-",n); print "pypi\t" n "\t" v "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^(requirements.*|constraints.*)\.txt$')
   # pypi: poetry.lock / uv.lock / pdm.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '
+    text_lines "$f" | awk -v src="$f" '
       /^\[\[package\]\]/ { n=""; next }
       /^name = "/ { n=$0; sub(/^name = "/,"",n); sub(/".*/,"",n); n=tolower(n); gsub(/[-_.]+/,"-",n); next }
-      /^version = "/ && n!="" { v=$0; sub(/^version = "/,"",v); sub(/".*/,"",v); print "pypi\t" n "\t" v "\t" src; n="" }' "$f" >>"$DEPS_TSV"
+      /^version = "/ && n!="" { v=$0; sub(/^version = "/,"",v); sub(/".*/,"",v); print "pypi\t" n "\t" v "\t" src; n="" }' >>"$DEPS_TSV"
   done < <(files_named '^(poetry\.lock|uv\.lock|pdm\.lock)$')
   # pypi: Pipfile.lock
   while IFS= read -r f; do
@@ -480,32 +538,43 @@ build_deps() {
     fi
   done < <(files_named '^Pipfile\.lock$')
   # pypi: site-packages の *.dist-info / *.egg-info（インストール実体）
+  #   Name / Version は METADATA・PKG-INFO のヘッダを正とする（name-1.0-py3.11.egg-info や
+  #   バージョンを含まない name.egg-info もあるため、ディレクトリ名はヘッダが無い場合の代替のみ）
+  #   egg-info は単一ファイル（PKG-INFO と同形式）の場合もある
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    local d n v
-    d="$(basename -- "$(dirname -- "$f")")"
-    d="${d%.dist-info}"; d="${d%.egg-info}"
-    n="${d%-*}"; v="${d##*-}"
-    [ "$n" != "$d" ] || continue
-    printf 'pypi\t%s\t%s\t%s\n' "$(norm_pypi "$n")" "$v" "$(dirname -- "$f")" >>"$DEPS_TSV"
-  done < <(files_path '/[^/]+-[^/-]+\.(dist-info|egg-info)/(METADATA|PKG-INFO)$')
+    local d n v src nv
+    if [ -d "$f" ]; then continue; fi
+    case "$f" in *.egg-info) src="$f"; d="$(basename -- "$f")" ;; *) src="$(dirname -- "$f")"; d="$(basename -- "$src")" ;; esac
+    nv="$(pkg_info_name_version "$f")"
+    n="${nv%%$'\t'*}"; v=""; [[ "$nv" == *$'\t'* ]] && v="${nv#*$'\t'}"
+    if [ -z "$n" ]; then
+      d="${d%.dist-info}"; d="${d%.egg-info}"
+      d="$(printf '%s' "$d" | sed -E 's/-py[0-9]+(\.[0-9]+)*(-[^-]+)?$//')"
+      n="${d%-*}"; v="${d##*-}"
+      [ "$n" != "$d" ] || { n="$d"; v=""; }
+    fi
+    [ -n "$n" ] || continue
+    printf 'pypi\t%s\t%s\t%s\n' "$(norm_pypi "$n")" "$v" "$src" >>"$DEPS_TSV"
+  done < <(files_path '/[^/]+\.(dist-info|egg-info)/(METADATA|PKG-INFO)$|\.egg-info$')
   # cargo: Cargo.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '
+    text_lines "$f" | awk -v src="$f" '
       /^\[\[package\]\]/ { n=""; next }
       /^name = "/ { n=$0; sub(/^name = "/,"",n); sub(/".*/,"",n); next }
-      /^version = "/ && n!="" { v=$0; sub(/^version = "/,"",v); sub(/".*/,"",v); print "cargo\t" n "\t" v "\t" src; n="" }' "$f" >>"$DEPS_TSV"
+      /^version = "/ && n!="" { v=$0; sub(/^version = "/,"",v); sub(/".*/,"",v); print "cargo\t" n "\t" v "\t" src; n="" }' >>"$DEPS_TSV"
   done < <(files_named '^Cargo\.lock$')
   # go: go.sum
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '{ v=$2; sub(/\/go\.mod$/,"",v); print "go\t" $1 "\t" v "\t" src }' "$f" >>"$DEPS_TSV"
+    text_lines "$f" | awk -v src="$f" 'NF >= 2 { v=$2; sub(/\/go\.mod$/,"",v); print "go\t" $1 "\t" v "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^go\.sum$')
   # ruby: Gemfile.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    awk -v src="$f" '/^    [A-Za-z0-9_.-]+ \([0-9][^)]*\)$/ { n=$1; v=$2; gsub(/[()]/,"",v); print "gem\t" n "\t" v "\t" src }' "$f" >>"$DEPS_TSV"
+    # プラットフォーム付き（nokogiri (1.16.0-x86_64-linux)）はバージョン部分のみで比較する
+    text_lines "$f" | awk -v src="$f" '/^    [A-Za-z0-9_.-]+ \([0-9][^)]*\)$/ { n=$1; v=$2; gsub(/[()]/,"",v); sub(/-[A-Za-z].*$/,"",v); print "gem\t" n "\t" v "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^Gemfile\.lock$')
   # packagist: composer.lock
   while IFS= read -r f; do
@@ -525,13 +594,13 @@ check_lockfile_versions() {
   build_deps
   local camp eco name match bads safev
   read_packages_tsv >"$TMP_DIR/packages.tsv"
-  while IFS=$'\t' read -r camp eco name match bads safev; do
+  while IFS="$US" read -r camp eco name match bads safev; do
     case "$eco" in npm|pypi|cargo|go|gem|packagist) ;; *) continue ;; esac
     case "$match" in versions|vulnerable_versions|any_version|unknown_versions) ;; *) continue ;; esac
     local qname="$name"
     [ "$eco" = "pypi" ] && qname="$(norm_pypi "$name")"
     local deco dname dver dsrc
-    while IFS=$'\t' read -r deco dname dver dsrc; do
+    while IFS="$US" read -r deco dname dver dsrc; do
       [ "$deco" = "$eco" ] || continue
       case "$qname" in
         *'/*') [[ "$dname" == "${qname%\*}"* ]] || continue ;;
@@ -553,8 +622,8 @@ check_lockfile_versions() {
       elif [ "$match" = "unknown_versions" ]; then
         medium "$camp" "$dsrc" "侵害報告のあるパッケージ ${dname}@${dver:-?}（侵害版の特定バージョン未定義のため要確認）"
       fi
-    done <"$DEPS_TSV"
-  done <"$TMP_DIR/packages.tsv"
+    done < <(tsv_us <"$DEPS_TSV")
+  done < <(tsv_us <"$TMP_DIR/packages.tsv")
 }
 
 # detect_service_version IMAGE_PATTERN … compose/k8s/Dockerfile の image タグからバージョンを抽出
@@ -585,7 +654,13 @@ infra_fixed() {
 #   各関数は対応する § から呼ばれる。データを足すだけで検出対象が増える。
 #   intel は jq 必須（無い場合は errors[] に記録し、0 件扱いしない）
 # =============================================================================
-intel_jq() { jq -r "$1" "$IOC_FILE" 2>/dev/null; }
+# jq が失敗（フィルタのコンパイルエラー・データ不正）した場合は errors[] に記録する（0 件扱いしない / fail-closed）
+intel_jq() {
+  local rc
+  jq -r "$1" "$IOC_FILE" 2>/dev/null; rc=$?
+  [ "$rc" -eq 0 ] || record_error "$CURRENT_MODULE" "intel_jq_failed:$(printf '%s' "$1" | tr -s '\n\t ' '   ' | cut -c1-60)"
+  return "$rc"
+}
 intel_ready() {
   [ "$HAVE_JQ" -eq 1 ] || { record_error "$CURRENT_MODULE" "jq_unavailable:intel"; return 1; }
   return 0
@@ -631,11 +706,11 @@ intel_network_iocs() {
 intel_actions() {
   intel_ready || return 0
   local camp act sev bad safe f line ref
-  while IFS=$'\t' read -r camp act sev bad safe; do
+  while IFS="$US" read -r camp act sev bad safe; do
     [ -n "$act" ] || continue
     while IFS= read -r f; do
       [ -n "$f" ] || continue
-      grep -i -E -o "uses:[[:space:]]*[\"']?$(printf '%s' "$act" | sed 's/[.[\*^$+?(){}|]/\\&/g')@[^\"'[:space:]#,}]+" "$f" 2>/dev/null | sed -E 's/.*@//' | sort -u | while IFS= read -r ref; do
+      workflow_text "$f" | grep -i -E -o "uses:[[:space:]]*[\"']?$(printf '%s' "$act" | sed 's/[.[\*^$+?(){}|]/\\&/g')@[^\"'[:space:]#,}]+" 2>/dev/null | sed -E 's/.*@//' | sort -u | while IFS= read -r ref; do
         if printf '%s\n' "$bad" | tr ',' '\n' | grep -q -x -F -- "$ref"; then
           critical "$camp" "$f" "侵害が報告されたアクション ${act}@${ref}"
         elif [ -n "$safe" ] && ! printf '%s\n' "$safe" | tr ',' '\n' | grep -q -x -F -- "$ref" && ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
@@ -643,7 +718,7 @@ intel_actions() {
         fi
       done
     done < <(workflow_files; files_path '/action\.ya?ml$')
-  done < <(intel_jq '.intel.actions[]? | [.campaign, .action, (.severity // "HIGH"), ((.bad_refs // []) | join(",")), ((.safe_refs // []) | join(","))] | @tsv')
+  done < <(intel_jq '.intel.actions[]? | [.campaign, .action, (.severity // "HIGH"), ((.bad_refs // []) | join(",")), ((.safe_refs // []) | join(","))] | @tsv' | tsv_us)
 }
 
 # ワークフロー・スクリプト内の悪性文字列（§38）
@@ -698,8 +773,15 @@ intel_host_files() {
     case "$kind" in
       path)
         e="$(expand_home "$val")"
-        for f in $e; do [ -e "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス"; done
-        local rel="${val#\~/}"; rel="${rel#/}"
+        # ホーム外の絶対パス（/tmp・/etc 等）はホスト状態のため ZES_HOST_CHECKS=0 では見ない
+        case "$val" in "~/"*|'$HOME/'*) ;; /*) host_enabled || e="" ;; *) e="" ;; esac
+        if [ -n "$e" ]; then
+          # 空白を含むパス（Application Support 等）を分割せず、グロブ文字のみ展開する
+          local IFS=$'\n'
+          for f in $e; do [ -e "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス"; done
+          unset IFS
+        fi
+        local rel="${val#\~/}"; rel="${rel#\$HOME/}"; rel="${rel#/}"
         while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス（検査ルート内）"; done < <(files_path "/$(printf '%s' "$rel" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
         ;;
       file_name)
@@ -720,7 +802,7 @@ intel_host_files() {
     esac
   done < <(intel_jq '.intel.host[]? | .campaign as $c | (.severity // "HIGH") as $s |
             (((.paths // [])[] | [$c,$s,"path",.]), ((.file_names // [])[] | [$c,$s,"file_name",.]),
-             ((.launch_labels // [])[] | [$c,$s,"launch_label",.]), ((.systemd_units // [])[] | [$c,$s,"systemd_unit",.]))) | @tsv')
+             ((.launch_labels // [])[] | [$c,$s,"launch_label",.]), ((.systemd_units // [])[] | [$c,$s,"systemd_unit",.])) | @tsv')
 }
 intel_host_processes() {
   intel_ready || return 0
@@ -739,7 +821,7 @@ intel_infra() {
   intel_ready || return 0
   # 製品全体が generic、または個別判定のある製品に追記した CVE（cves[].generic）を対象にする
   local iid pat cve fixed sev cvss ver f
-  while IFS=$'\t' read -r iid pat cve fixed sev cvss; do
+  while IFS="$US" read -r iid pat cve fixed sev cvss; do
     [ -n "$pat" ] && [ -n "$fixed" ] || continue
     pat="${pat//\\\\/\\}"  # @tsv のエスケープを戻す
     local -a fx; IFS=',' read -r -a fx <<<"$fixed"
@@ -749,7 +831,7 @@ intel_infra() {
       version_branch_vulnerable "${ver#v}" "${fx[@]}" && lvl_emit "$sev" "" "$f" "${iid} ${ver} は ${cve}${cvss:+（CVSS ${cvss}）}の影響範囲（修正版: ${fixed//,/ }）"
     done < <(detect_service_version "$pat")
   done < <(intel_jq '.infrastructures[] | (.generic == true) as $g | .id as $i | (.image_patterns // []) as $p | .cves[] | select($g or .generic == true) | select((.fixed // []) | length > 0) |
-            [$i, ($p | join("|")), .id, (.fixed | join(",")), (.severity // (if (.cvss // 0) >= 9 or .kev then "CRITICAL" else "HIGH" end)), ((.cvss // "") | tostring)] | @tsv')
+            [$i, ($p | join("|")), .id, (.fixed | join(",")), (.severity // (if (.cvss // 0) >= 9 or .kev then "CRITICAL" else "HIGH" end)), ((.cvss // "") | tostring)] | @tsv' | tsv_us)
 }
 
 # ローカルツールのバージョン（§23）。起動してよいのはここに列挙したツールとバージョン引数だけ（データから任意コマンドを起動させない）
@@ -785,13 +867,13 @@ intel_apps() {
   intel_ready || return 0
   host_enabled || return 0
   local camp bundle cve sev fixed f v
-  while IFS=$'\t' read -r camp bundle cve sev fixed; do
+  while IFS="$US" read -r camp bundle cve sev fixed; do
     for f in "/Applications/$bundle/Contents/Info.plist" "$HOME_DIR/Applications/$bundle/Contents/Info.plist"; do
       [ -f "$f" ] || continue
       v="$(grep -A1 'CFBundleShortVersionString' "$f" | grep -o -E '[0-9]+(\.[0-9]+)+' | head -n1)"
       [ -n "$v" ] && version_lt "$v" "$fixed" && lvl_emit "$sev" "$camp" "$f" "${bundle%.app} ${v} は ${cve} の影響範囲（修正版 ${fixed}）"
     done
-  done < <(intel_jq '.intel.apps[]? | [.campaign, .bundle, .cve, (.severity // "HIGH"), .fixed] | @tsv')
+  done < <(intel_jq '.intel.apps[]? | [.campaign, .bundle, .cve, (.severity // "HIGH"), .fixed] | @tsv' | tsv_us)
 }
 
 # 任意ファイルの悪性文字列（§7 AI 指示ファイル・§20 MCP 定義など）。file_regex でファイルパスを絞る
@@ -1075,7 +1157,7 @@ check_s6() {
   done
   min="$(read_ioc '.runtime_minimums.certifi')"
   build_deps
-  awk -F'\t' '$1=="pypi" && $2=="certifi" {print $3"\t"$4}' "$DEPS_TSV" | while IFS=$'\t' read -r v d; do
+  awk -F'\t' '$1=="pypi" && $2=="certifi" {print $3"\t"$4}' "$DEPS_TSV" | tsv_us | while IFS="$US" read -r v d; do
     version_lt "$v" "$min" && high "$camp" "$d" "certifi ${v} は ${min} 未満（eMudhra 失効が未反映）"
   done
   local -a gmins; mapfile -t gmins < <(read_ioc '.runtime_minimums.go')
@@ -1452,24 +1534,104 @@ check_s16() {
 
 # §17 MCP 静的ポイズニング（command/args、SymJack、エージェントフック、setup.mjs 参照）
 mcp_config_files() {
-  files_path '(/\.mcp\.json|/mcp\.json|/\.cursor/mcp\.json|/\.vscode/mcp\.json|/\.claude/settings(\.local)?\.json|/\.gemini/settings\.json|/claude_desktop_config\.json)$'
+  files_path '(/\.mcp\.json|/mcp\.json|/\.cursor/mcp\.json|/\.vscode/mcp\.json|/\.claude/settings(\.local)?\.json|/\.gemini/settings\.json|/claude_desktop_config\.json|/\.codex/config\.toml)$'
   local p e
   while IFS= read -r p; do
     e="$(expand_home "$p")"; e="${e%/}"
     [ -f "$e" ] && printf '%s\n' "$e"
   done < <(read_ioc '.mcp_poisoning.config_paths')
-  for e in "$HOME_DIR/.claude.json" "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.gemini/settings.json" "$HOME_DIR/.codeium/windsurf/mcp_config.json"; do
+  for e in "$HOME_DIR/.claude.json" "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.gemini/settings.json" "$HOME_DIR/.codeium/windsurf/mcp_config.json" "$HOME_DIR/.codex/config.toml"; do
     [ -f "$e" ] && printf '%s\n' "$e"
   done
   return 0
 }
+# JSONC（.vscode/mcp.json 等はコメント・末尾カンマを公式に許容）を JSON に変換する
+#   文字列の外側にある // 行コメント・/* */ ブロックコメント・閉じ括弧直前のカンマを除去する（文字列内はそのまま）
+jsonc_to_json() {
+  awk 'BEGIN { RS = "\001" }
+    { n = length($0); ins = 0; esc = 0; pc = 0
+      for (i = 1; i <= n; i++) {
+        ch = substr($0, i, 1)
+        if (ins) {
+          if (esc) esc = 0; else if (ch == "\\") esc = 1; else if (ch == "\"") ins = 0
+          printf "%s", ch; continue }
+        if (ch == "/" && substr($0, i + 1, 1) == "/") {
+          j = index(substr($0, i), "\n"); if (j == 0) i = n; else i = i + j - 2
+          continue }
+        if (ch == "/" && substr($0, i + 1, 1) == "*") {
+          j = index(substr($0, i + 2), "*/"); if (j == 0) { printf "%s", substr($0, i); i = n; continue }
+          i = i + j + 2; printf " "; continue }
+        if (ch ~ /[ \t\r\n]/) { printf "%s", ch; continue }
+        if (pc) { if (ch != "}" && ch != "]") printf ","; pc = 0 }
+        if (ch == ",") { pc = 1; continue }
+        if (ch == "\"") ins = 1
+        printf "%s", ch
+      }
+      if (pc) printf "," }' "$1" 2>/dev/null
+}
+
+# Codex CLI の .codex/config.toml から MCP サーバーの command/args を 1 行ずつ出力する最小パーサ（依存なし）
+#   対応: [mcp_servers.<name>] テーブルの command = "…" / '…'、args = [ … ]（複数行可）、
+#         [mcp_servers] 直下のインラインテーブル（name = { command = "…", args = […] }、1 行）
+#   未対応の構文（複数行文字列・解釈できない command 行・command も url も無いサーバー）は
+#   "?<理由>" 行で知らせ、呼び出し側が errors[] に記録する（読めなかった設定を 0 件扱いしない）
+codex_toml_mcp_commands() {
+  text_lines "$1" | awk '
+    function strs(t,   out, v) {
+      out = ""
+      while (match(t, /"([^"\\]|\\.)*"|\047[^\047]*\047/)) {
+        v = substr(t, RSTART + 1, RLENGTH - 2); out = out (out == "" ? "" : " ") v
+        t = substr(t, RSTART + RLENGTH) }
+      return out }
+    function flush() {
+      if (cur != "" && cmd != "") print cmd (args != "" ? " " args : "")
+      else if (cur != "" && !hasurl) print "?no_command:" cur
+      cur = ""; cmd = ""; args = ""; hasurl = 0; inargs = 0 }
+    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
+    inargs { t = strs(line); if (t != "") args = args (args == "" ? "" : " ") t; if (line ~ /\]/) inargs = 0; next }
+    line ~ /"""|\047\047\047/ { if (cur != "" || intable) print "?multiline_string"; next }
+    line ~ /^[[:space:]]*\[/ {
+      h = line; sub(/^[[:space:]]*\[+[[:space:]]*/, "", h); sub(/[[:space:]]*\]+[[:space:]]*(#.*)?$/, "", h)
+      if (h ~ /^mcp_servers\./) {
+        nm = substr(h, 13)
+        if (nm ~ /^"/) { nm = substr(nm, 2); q = index(nm, "\""); rest = substr(nm, q + 1); nm = substr(nm, 1, q - 1) }
+        else { rest = nm; sub(/^[^.]*/, "", rest); sub(/\..*$/, "", nm) }
+        if (rest != "") next   # [mcp_servers.<name>.env] 等のサブテーブルは同じサーバーの続き
+        flush(); cur = nm; intable = 0; next }
+      flush(); intable = (h == "mcp_servers"); next }
+    cur != "" && line ~ /^[[:space:]]*command[[:space:]]*=/ {
+      v = line; sub(/^[[:space:]]*command[[:space:]]*=[[:space:]]*/, "", v); c = strs(v)
+      if (c == "") print "?unparsed_command:" cur; else cmd = c
+      next }
+    cur != "" && line ~ /^[[:space:]]*url[[:space:]]*=/ { hasurl = 1; next }
+    cur != "" && line ~ /^[[:space:]]*args[[:space:]]*=/ {
+      v = line; sub(/^[[:space:]]*args[[:space:]]*=[[:space:]]*/, "", v); args = strs(v)
+      if (v !~ /\]/) inargs = 1
+      next }
+    intable && line ~ /command[[:space:]]*=/ {
+      c = line; sub(/.*command[[:space:]]*=[[:space:]]*/, "", c); sub(/,.*$/, "", c); c = strs(c)
+      a = ""; if (match(line, /args[[:space:]]*=[[:space:]]*\[[^]]*\]/)) a = strs(substr(line, RSTART, RLENGTH))
+      if (c == "") print "?unparsed_inline"; else print c (a != "" ? " " a : "")
+      next }
+    END { flush() }'
+}
+
 check_s17() {
   log_section "§17" "MCP静的ポイズニング"
   local f cmdline
+  local mcpq='[.. | objects | select(has("command")) | ((.command | tostring) + " " + ((.args // []) | map(tostring) | join(" ")))] | .[]'
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if [ "$HAVE_JQ" -eq 1 ]; then
-      jq -r '[.. | objects | select(has("command")) | ((.command | tostring) + " " + ((.args // []) | map(tostring) | join(" ")))] | .[]' "$f" 2>/dev/null
+    if [[ "$f" == *.toml ]]; then
+      codex_toml_mcp_commands "$f" | while IFS= read -r cmdline; do
+        case "$cmdline" in "?"*) record_error "§17" "codex_toml_unparsed:${cmdline#\?}:$f"; continue ;; esac
+        printf '%s\n' "$cmdline"
+      done
+    elif [ "$HAVE_JQ" -eq 1 ]; then
+      # 厳密な JSON として読めなければ JSONC（コメント・末尾カンマ）として読み直し、それでも失敗したら errors[]
+      jq -r "$mcpq" "$f" 2>/dev/null \
+        || jsonc_to_json "$f" | jq -r "$mcpq" 2>/dev/null \
+        || record_error "§17" "mcp_config_parse_failed:$f"
     else
       grep -E -o '"(command|args)"[[:space:]]*:[[:space:]]*("[^"]*"|\[[^]]*\])' "$f" 2>/dev/null
     fi | while IFS= read -r cmdline; do
@@ -1592,6 +1754,25 @@ check_s20() {
 
 # GitHub Actions ワークフロー一覧
 workflow_files() { files_path '/\.github/workflows/[^/]+\.ya?ml$'; }
+# ワークフロー本文の正規化（CRLF・BOM 除去、"uses: >-" / "uses: |" のブロックスカラーを 1 行に畳む）
+#   uses: >-
+#     actions/checkout@v4      →   uses: actions/checkout@v4
+workflow_text() {
+  text_lines "$1" | awk '
+    pend != "" {
+      if ($0 ~ /^[[:space:]]*$/) next
+      match($0, /^[[:space:]]*/)
+      if (RLENGTH > pind) { v = $0; sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+#.*$/, "", v); sub(/[[:space:]]+$/, "", v); print pend v; pend = ""; next }
+      print pend; pend = ""
+    }
+    /uses:[[:space:]]*[>|][-+0-9]*[[:space:]]*(#.*)?$/ {
+      match($0, /^[[:space:]]*/); pind = RLENGTH
+      if ($0 ~ /^[[:space:]]*-[[:space:]]/) { t = $0; sub(/^[[:space:]]*-[[:space:]]+/, "", t); pind = length($0) - length(t) - 1 }
+      pend = $0; sub(/[>|][-+0-9]*[[:space:]]*(#.*)?$/, "", pend); next
+    }
+    { print }
+    END { if (pend != "") print pend }'
+}
 
 # §21 GitHub Actions 危険パターン
 check_s21() {
@@ -1599,19 +1780,19 @@ check_s21() {
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if fgrep_q '(^|[^A-Za-z0-9_])pull_request_target([^A-Za-z0-9_]|$)' "$f" && fgrep_q 'actions/checkout@' "$f" && fgrep_q '\$\{\{[[:space:]]*secrets\.' "$f"; then
+    if fgrep_q '(^|[^A-Za-z0-9_])pull_request_target([^A-Za-z0-9_]|$)' "$f" && fgrep_q -i 'actions/checkout@' "$f" && fgrep_q '\$\{\{[[:space:]]*secrets\.' "$f"; then
       # actions/checkout ステップごとに ref の有無と参照先を判定
       local refs
       refs="$(awk '
         function flush(){ if (inchk) { print (ref=="" ? "noref" : ref) } inchk=0; ref="" }
-        /uses:[[:space:]]*actions\/checkout@/ { flush(); inchk=1; match($0,/^[[:space:]]*/); ind=RLENGTH; next }
+        tolower($0) ~ /uses:[[:space:]]*["'"'"']?actions\/checkout@/ { flush(); inchk=1; match($0,/^[[:space:]]*/); ind=RLENGTH; next }
         inchk {
           match($0,/^[[:space:]]*/)
           if ($0 ~ /^[[:space:]]*-[[:space:]]/ && RLENGTH <= ind) { flush(); next }
           if ($0 ~ /^[[:space:]]*ref:/) { r=$0; sub(/^[[:space:]]*ref:[[:space:]]*/,"",r)
             ref = (r ~ /github\.(event\.pull_request\.head|head_ref)/) ? "prhead" : "otherref" }
         }
-        END{ flush() }' "$f")"
+        END{ flush() }' < <(workflow_text "$f"))"
       if printf '%s\n' "$refs" | grep -q -x 'prhead'; then
         critical "ghostaction-oct2026" "$f" "pull_request_target + PR head の checkout + secrets 参照（pwn request）"
       fi
@@ -1631,7 +1812,7 @@ check_s22() {
   local f line act ref
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -E -o '^[[:space:]-]*(\{([^}#]*,)?[[:space:]]*)?uses:[[:space:]]*["'"'"']?[^"'"'"'[:space:]#,}]+' "$f" 2>/dev/null | sed -E 's/.*uses:[[:space:]]*["'"'"']?//' | sort -u | while IFS= read -r line; do
+    workflow_text "$f" | grep -E -o '^[[:space:]-]*(\{([^}#]*,)?[[:space:]]*)?uses:[[:space:]]*["'"'"']?[^"'"'"'[:space:]#,}]+' 2>/dev/null | sed -E 's/.*uses:[[:space:]]*["'"'"']?//' | sort -u | while IFS= read -r line; do
       case "$line" in ./*|docker://*) continue ;; esac
       act="${line%@*}"; ref="${line##*@}"; act="${act,,}"
       [ "$act" != "$line" ] || { high "ghostaction-oct2026" "$f" "uses: ${line} がバージョン未指定"; continue; }
@@ -2062,7 +2243,7 @@ check_s36() {
     [ -n "$f" ] && high "hf-dataset-poisoning" "$f" "データセット設定にテンプレートインジェクション様の式"
   done
   build_deps
-  awk -F'\t' '$1=="pypi" && $2=="lerobot" {print $3"\t"$4}' "$DEPS_TSV" | while IFS=$'\t' read -r v f; do
+  awk -F'\t' '$1=="pypi" && $2=="lerobot" {print $3"\t"$4}' "$DEPS_TSV" | tsv_us | while IFS="$US" read -r v f; do
     high "hf-lerobot-rce" "$f" "lerobot ${v}: CVE-2026-25874（CVSS 9.8）の修正版を確認してください（ioc に修正版未定義）"
   done
   while IFS= read -r f; do [ -n "$f" ] && critical "hf-supply-chain" "$f" "transformers.pyz（正規配布物ではない偽装アーカイブ）"; done < <(files_named '^transformers\.pyz$')
@@ -2084,16 +2265,16 @@ check_s37() {
   build_deps
   if [ "$HAVE_JQ" -eq 1 ]; then
     local ce cp cf cid
-    while IFS=$'\t' read -r cid ce cp cf; do
-      awk -F'\t' -v e="$ce" -v n="$cp" '$1==e && $2==n {print $3"\t"$4}' "$DEPS_TSV" | sort -u | while IFS=$'\t' read -r v f; do
+    while IFS="$US" read -r cid ce cp cf; do
+      awk -F'\t' -v e="$ce" -v n="$cp" '$1==e && $2==n {print $3"\t"$4}' "$DEPS_TSV" | sort -u | tsv_us | while IFS="$US" read -r v f; do
         [ -n "$v" ] && version_lt "$v" "$cf" && high "mcp-poisoning" "$f" "${cp}@${v} は ${cid} の影響範囲（修正版 ${cf}）"
       done
-    done < <(jq -r '.mcp_poisoning.mcp_cves[] | select(.package and .fixed) | [.id, .eco, .package, .fixed] | @tsv' "$IOC_FILE")
+    done < <(jq -r '.mcp_poisoning.mcp_cves[] | select(.package and .fixed) | [.id, .eco, .package, .fixed] | @tsv' "$IOC_FILE" | tsv_us)
   fi
   awk -F'\t' '
     ($1=="npm" && ($2=="@modelcontextprotocol/sdk" || $2 ~ /appium.*mcp|mcp.*appium/ || $2=="@modelcontextprotocol/server-everything" || $2 ~ /gitlab-mcp/)) ||
     ($1=="pypi" && ($2=="mcp" || $2=="mcp-server-fetch" || $2=="fastmcp")) ||
-    ($1=="go" && $2 ~ /stacklok\/toolhive/) {print $2"\t"$3"\t"$4}' "$DEPS_TSV" | sort -u | while IFS=$'\t' read -r n v f; do
+    ($1=="go" && $2 ~ /stacklok\/toolhive/) {print $2"\t"$3"\t"$4}' "$DEPS_TSV" | sort -u | tsv_us | while IFS="$US" read -r n v f; do
     medium "mcp-poisoning" "$f" "MCP 関連依存 ${n}@${v}: CVE-2026-104850/104120/111767/59951/61559/52869/58500, GO-2026-5996/6002 の該当可否を確認（ioc に修正版未定義）"
   done
   return 0
@@ -2107,7 +2288,7 @@ check_s38() {
   if [ -d "$ROOT/.git" ]; then
     local since; since="$(( $(now_epoch) - 30*86400 ))"
     local out
-    if out="$(safe_git log --diff-filter=A --since="@$since" --name-only --format='' -- .github/workflows)"; then
+    if out="$(safe_git log --no-textconv --no-ext-diff --diff-filter=A --since="@$since" --name-only --format='' -- .github/workflows)"; then
       printf '%s\n' "$out" | sort -u | while IFS= read -r n; do
         [ -n "$n" ] && medium "ghostaction-oct2026" "$ROOT/$n" "直近30日に新規追加されたワークフロー（作成者・目的を監査）"
       done
@@ -2327,7 +2508,7 @@ check_s43() {
   local ver
   while IFS=$'\t' read -r ver f; do [ -n "$ver" ] && version_lt "${ver#v}" "1.8.5" && high "" "$f" "Fulcio ${ver} は CVE-2026-22772（metaRegex SSRF）の影響範囲（<1.8.5）"; done < <(detect_service_version 'projectsigstore/fulcio')
   build_deps
-  awk -F'\t' '$1=="gem" && $2=="sigstore" {print $3"\t"$4}' "$DEPS_TSV" | while IFS=$'\t' read -r v f; do
+  awk -F'\t' '$1=="gem" && $2=="sigstore" {print $3"\t"$4}' "$DEPS_TSV" | tsv_us | while IFS="$US" read -r v f; do
     version_lt "$v" "0.2.3" && high "" "$f" "sigstore-ruby ${v} は CVE-2026-31830（検証バイパス）の影響範囲（<0.2.3）"
   done
   return 0
@@ -2393,15 +2574,24 @@ check_s46() {
   log_section "§46" "Git来歴"
   [ -d "$ROOT/.git" ] || { log_info "Git リポジトリではありません"; return 0; }
   local out n
-  out="$(safe_git log -n 200 --format='%at%x09%ae%x09%G?')" || { record_error "§46" "git_log_failed"; return 0; }
+  # %G? は署名を検証する（gpg.*.program を起動しうる）ため使わない。署名の有無は生のヘッダ（gpgsig）で判定
+  out="$(safe_git log -n 200 --no-textconv --no-ext-diff --format='%at%x09%ae%x09%H')" || { record_error "§46" "git_log_failed"; return 0; }
   [ -n "$out" ] || return 0
+  local raw
+  raw="$(safe_git log -n 200 --no-textconv --no-ext-diff --pretty=raw)" || { record_error "§46" "git_log_failed"; return 0; }
   local now; now="$(now_epoch)"
   printf '%s\n' "$out" | awk -F'\t' -v now="$now" '$1 >= now-86400 {c[$2]++} END {for (a in c) if (c[a] > 50) print a "\t" c[a]}' | while IFS=$'\t' read -r _ n; do
     medium "" "$ROOT/.git" "直近24時間に同一作者で ${n} コミット（短時間大量コミット）"
   done
   local total unsigned
   total="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
-  unsigned="$(printf '%s\n' "$out" | awk -F'\t' '$3=="N"' | wc -l | tr -d ' ')"
+  # pretty=raw: "commit <sha>" で区切られ、ヘッダは行頭から、本文は 4 字下げ（本文中の偽ヘッダとは区別できる）
+  local signed_list
+  signed_list="$(printf '%s\n' "$raw" | awk '
+      /^commit [0-9a-f]+/ { c=$2; inhdr=1; next }
+      inhdr && /^$/ { inhdr=0; next }
+      inhdr && /^gpgsig(-sha256)? / { print c }' | sort -u)"
+  unsigned="$(printf '%s\n' "$out" | ZES_SL="$signed_list" awk -F'\t' 'BEGIN { n=split(ENVIRON["ZES_SL"], a, "\n"); for (i=1; i<=n; i++) s[a[i]]=1 } !($3 in s)' | wc -l | tr -d ' ')"
   [ "$total" -gt 0 ] && info "" "$ROOT/.git" "直近 ${total} コミット中 ${unsigned} 件が署名なし"
   safe_git for-each-ref --format='%(refname)' refs/notes | while IFS= read -r n; do
     [ -n "$n" ] && medium "" "$ROOT/.git" "Git notes（${n}）が存在（来歴情報の書き換えに注意）"
@@ -2728,11 +2918,11 @@ check_skillpact() {
     local diff_anomaly=false diff_reason="" prev_path=""
     if [ -n "$author" ] && [ -n "$cname" ] && [ -n "$cversion" ]; then
       local pa pn pv pp best=""
-      while IFS=$'\t' read -r pa pn pv pp; do
+      while IFS="$US" read -r pa pn pv pp; do
         [ "$pa" = "$author" ] && [ "$pn" = "$cname" ] && [ "$pp" != "$cpath" ] && [ -n "$pv" ] || continue
         version_lt "$pv" "$cversion" || continue
         if [ -z "$best" ] || version_lt "$best" "$pv"; then best="$pv"; prev_path="$pp"; fi
-      done <"$TMP_DIR/sp_index.tsv"
+      done < <(tsv_us <"$TMP_DIR/sp_index.tsv")
       if [ -n "$prev_path" ]; then
         local prev_tokens
         prev_tokens="$(jq -c "$SP_EFFECTS_NORM"' [(.effects // [])[] | norm] + [(.operations // [])[] | (.effects // [])[] | norm] | map(select(length>0)) | unique' "$prev_path" 2>/dev/null)"

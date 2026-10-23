@@ -12,7 +12,8 @@ export function checkoutRefs(yaml: string): ('noref' | 'prhead' | 'otherref')[] 
   const flush = () => { if (inChk) out.push(ref === '' ? 'noref' : ref); inChk = false; ref = ''; };
   for (const line of yaml.split(/\r?\n/)) {
     const lead = (/^\s*/.exec(line)?.[0] ?? '').length;
-    if (/uses:\s*actions\/checkout@/.test(line)) { flush(); inChk = true; ind = lead; continue; }
+    // 引用符付き（uses: "actions/checkout@v4"）と所有者名の大文字小文字違いも対象
+    if (/uses:\s*["']?actions\/checkout@/i.test(line)) { flush(); inChk = true; ind = lead; continue; }
     if (!inChk) continue;
     if (/^\s*-\s/.test(line) && lead <= ind) { flush(); continue; }
     const m = /^\s*ref:\s*(.*)$/.exec(line);
@@ -29,7 +30,7 @@ export function actionsRules(ctx: RuleCtx): void {
     const y = f.text;
     const isWorkflow = /\.github\/workflows\//.test(f.relPath);
     const prTarget = /(^|[^A-Za-z0-9_])pull_request_target([^A-Za-z0-9_]|$)/.test(y);
-    if (isWorkflow && prTarget && /actions\/checkout@/.test(y) && /\$\{\{\s*secrets\./.test(y)) {
+    if (isWorkflow && prTarget && /actions\/checkout@/i.test(y) && /\$\{\{\s*secrets\./.test(y)) {
       const refs = checkoutRefs(y);
       if (refs.includes('prhead')) {
         push(ctx, { level: 'CRITICAL', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + PR head の checkout + secrets 参照（pwn request）', ruleId: 's21-prtarget:prhead', evidenceSha: f.sha256 });
