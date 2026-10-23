@@ -4,6 +4,7 @@
 import type { ReactNode } from 'react';
 import type { DisplaySeverity, ExtensionView, McpConfigView, WorkflowView } from '@/engine';
 import { cn } from '@/lib/utils';
+import { visibleOpt, visiblePath } from '@/lib/visiblePath';
 import { PathText } from '@/components/PathText';
 import { SeverityTag } from '@/components/severity/SeverityTag';
 import { Tag } from '@/components/severity/Tag';
@@ -37,9 +38,9 @@ export function McpViewer({ configs }: { configs: McpConfigView[] }) {
           <Rows>
             {c.servers.map((s, i) => (
               <li key={i} className="grid grid-cols-1 gap-1.5 py-2.5 sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:items-center sm:gap-3" data-risk={s.risk}>
-                <span className="truncate text-sm font-medium">{s.name || '—'}</span>
-                <Code className={s.risk === 'high' ? 'text-critical' : s.risk === 'medium' ? 'text-medium' : undefined}>{s.command} {s.args}</Code>
-                <span className="flex flex-wrap gap-1">{s.tokens.map((t) => <SeverityTag key={t} level={s.risk === 'high' ? 'CRITICAL' : 'MEDIUM'} className="font-mono">{t}</SeverityTag>)}</span>
+                <span className="truncate text-sm font-medium">{visiblePath(s.name) || '—'}</span>
+                <Code className={s.risk === 'high' ? 'text-critical' : s.risk === 'medium' ? 'text-medium' : undefined}>{visiblePath(`${s.command} ${s.args}`)}</Code>
+                <span className="flex flex-wrap gap-1">{s.tokens.map((t) => <SeverityTag key={t} level={s.risk === 'high' ? 'CRITICAL' : 'MEDIUM'} className="font-mono">{visiblePath(t)}</SeverityTag>)}</span>
               </li>
             ))}
             {!c.servers.length && <li className="py-2.5 text-[13px] text-muted-foreground">サーバー定義なし</li>}
@@ -72,7 +73,7 @@ export function ActionsViewer({ workflows }: { workflows: WorkflowView[] }) {
               const k = KIND[u.kind];
               return (
                 <li key={u.ref} className="flex items-center justify-between gap-3 py-2" data-kind={u.kind}>
-                  <Code className="w-fit max-w-full">{u.ref}</Code>
+                  <Code className="w-fit max-w-full">{visiblePath(u.ref)}</Code>
                   {k.level ? <SeverityTag level={k.level}>{k.label}</SeverityTag> : <Tag>{k.label}</Tag>}
                 </li>
               );
@@ -92,10 +93,10 @@ export function ExtensionViewer({ manifests }: { manifests: ExtensionView[] }) {
         {manifests.map((m) => (
           <li key={m.path} className="flex flex-wrap items-center gap-2 py-2.5">
             <span className="min-w-0 flex-1 basis-48">
-              <span className="block truncate text-sm font-medium">{m.name || '（名前なし）'}</span>
+              <span className="block truncate text-sm font-medium">{visibleOpt(m.name) || '（名前なし）'}</span>
               <PathText path={m.path} className="text-xs" />
             </span>
-            {m.dangerous.map((p) => <SeverityTag key={p} level="HIGH" className="font-mono">{p}</SeverityTag>)}
+            {m.dangerous.map((p) => <SeverityTag key={p} level="HIGH" className="font-mono">{visiblePath(p)}</SeverityTag>)}
             {m.allUrls && <SeverityTag level="HIGH" className="font-mono">&lt;all_urls&gt;</SeverityTag>}
             {m.unofficialUpdate && <SeverityTag level="CRITICAL">update_url: 公式ストア以外</SeverityTag>}
             {!m.dangerous.length && !m.allUrls && !m.unofficialUpdate && <span className="text-xs text-muted-foreground">危険な設定なし</span>}

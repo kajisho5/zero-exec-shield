@@ -6,6 +6,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { CircleDashed, GitCompare, Search } from 'lucide-react';
 import { EFFECTS, IOC, type Severity, type SkillPactAnalysis } from '@/engine';
 import { cn } from '@/lib/utils';
+import { visibleOpt, visiblePath } from '@/lib/visiblePath';
 import { SEV } from '@/components/severity/severity';
 import { SeverityMark } from '@/components/severity/SeverityMark';
 import { SeverityTag } from '@/components/severity/SeverityTag';
@@ -60,8 +61,8 @@ function SkillList({ skills, selected, onSelect }: { skills: SkillPactAnalysis[]
               <button type="button" aria-pressed={sel} onClick={() => onSelect(s.skillId)} data-testid="skill-item"
                 className={cn('relative w-full overflow-hidden rounded-md border px-4 py-3 text-left', sel ? 'border-border bg-card' : 'border-transparent hover:bg-accent')}>
                 {sel && <span aria-hidden="true" className="absolute inset-y-0 left-0 w-[3px] bg-foreground" />}
-                <span className="block truncate text-sm font-semibold" title={s.name}>{s.name}</span>
-                <span className="block truncate font-mono text-xs text-muted-foreground">{s.skillId}/</span>
+                <span className="block truncate text-sm font-semibold" title={visiblePath(s.name)}>{visiblePath(s.name)}</span>
+                <bdi dir="ltr" className="block truncate font-mono text-xs text-muted-foreground">{visiblePath(s.skillId)}/</bdi>
                 <span className="mt-2 flex flex-wrap items-center gap-2">
                   <SignedStamp signed={s.signed} size="sm" />
                   <Counts a={s} />
@@ -193,18 +194,18 @@ function Report({ a }: { a: SkillPactAnalysis }) {
       <div className="px-7 pt-6 pb-6 max-sm:px-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-[22px] leading-[1.35] font-semibold break-words">{a.skillName ?? a.name}</h2>
-            <p className="mt-1 font-mono text-[12.5px] text-muted-foreground wrap-anywhere">{a.contract.path ?? `${a.skillId}/（skill.contract.json なし）`}</p>
+            <h2 className="text-[22px] leading-[1.35] font-semibold break-words">{visiblePath(a.skillName ?? a.name)}</h2>
+            <p className="mt-1 font-mono text-[12.5px] text-muted-foreground wrap-anywhere"><bdi dir="ltr">{visiblePath(a.contract.path ?? `${a.skillId}/`)}</bdi>{a.contract.path ? '' : '（skill.contract.json なし）'}</p>
           </div>
           <Counts a={a} />
         </div>
         <dl className="mt-5 flex flex-wrap gap-x-10 gap-y-3">
-          <Fact k="author">{a.author ?? '—'}</Fact>
-          <Fact k="version">{a.skillVersion ?? '—'}</Fact>
+          <Fact k="author">{visibleOpt(a.author) ?? '—'}</Fact>
+          <Fact k="version">{visibleOpt(a.skillVersion) ?? '—'}</Fact>
           <Fact k="署名ファイル">{a.signed ? 'あり（検証は未実行）' : 'なし'}</Fact>
           <Fact k="契約">{contract.tone ? <Tag className="border-0 bg-medium-tint text-medium">{contract.text}</Tag> : contract.text}</Fact>
           <Fact k="ZES の判定">{a.level ? 'L1 相当（部分検査）' : '—'}</Fact>
-          {a.signers.length > 0 && <Fact k="署名者（自己申告）">{a.signers.join(', ')}</Fact>}
+          {a.signers.length > 0 && <Fact k="署名者（自己申告）">{visiblePath(a.signers.join(', '))}</Fact>}
         </dl>
         {a.contract.errors.length > 0 && <p className="mt-3 text-xs break-words text-medium">ZES の部分検査で不合格: <span className="font-mono">{a.contract.errors.join(', ')}</span></p>}
         {a.contract.problem && <p className="mt-3 text-xs break-words text-medium">JSON の問題: {a.contract.problem}</p>}
