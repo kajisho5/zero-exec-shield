@@ -101,12 +101,6 @@
       "level": "CRITICAL",
       "module": "§30",
       "path": "b-host/Library/LaunchAgents/com.zoom.plist"
-    },
-    {
-      "campaign": "overlord-fake-zoom-dotnet",
-      "level": "HIGH",
-      "module": "§30",
-      "path": "b-host/Library/LaunchAgents/com.zoom.plist"
     }
   ],
   "home": "_home",

@@ -856,17 +856,25 @@ intel_host_files() {
     [ -n "$val" ] || continue
     case "$kind" in
       path)
-        e="$(expand_home "$val")"
-        # ホーム外の絶対パス（/tmp・/etc 等）はホスト状態のため ZES_HOST_CHECKS=0 では見ない
-        case "$val" in "~/"*|'$HOME/'*) ;; /*) host_enabled || e="" ;; *) e="" ;; esac
+        # パスの種類ごとに照合先を分ける（検査ルート内の同名サフィックスを一律に照合すると誤検知になるため）
+        #   ~/… / $HOME/…   … 検査対象 HOME（ZES_HOME）配下の実パスのみ
+        #   /… / $TMPDIR/…  … ホストの実パスのみ（ZES_HOST_CHECKS=0 では見ない）
+        #   それ以外（site-packages/cook.pth 等の相対パス）… 検査ルート内のサフィックス一致
+        e=""
+        case "$val" in
+          "~/"*|'$HOME/'*) e="$(expand_home "$val")" ;;
+          '$TMPDIR/'*) host_enabled && e="${TMPDIR:-/tmp}/${val#\$TMPDIR/}" ;;
+          /*) host_enabled && e="$val" ;;
+          *)
+            while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス（検査ルート内）"; done < <(files_path "/$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
+            ;;
+        esac
         if [ -n "$e" ]; then
           # 空白を含むパス（Application Support 等）を分割せず、グロブ文字のみ展開する
           local IFS=$'\n'
-          for f in $e; do [ -e "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス"; done
+          for f in $e; do [ -e "$f" ] || [ -L "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス"; done
           unset IFS
         fi
-        local rel="${val#\~/}"; rel="${rel#\$HOME/}"; rel="${rel#/}"
-        while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス（検査ルート内）"; done < <(files_path "/$(printf '%s' "$rel" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
         ;;
       file_name)
         while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェアのファイル名（${val}）"; done < <(files_named "^$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
