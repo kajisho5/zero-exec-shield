@@ -196,3 +196,18 @@ test('「すべてのタブ」メニュー: Escape・外側クリックで閉じ
   await expect(page.getByRole('tab', { name: /^SkillPact/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: /^SkillPact/ })).toBeFocused();
 });
+
+test('書き出した findings.json を取り込み直しても件数が増えず、再書き出しの id は一意', async ({ page }) => {
+  await open(page);
+  await scan(page, 'chaindrop');
+  const n = await page.getByTestId('finding-row').count();
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export').click()]);
+  const first = readFileSync(await dl.path(), 'utf8');
+  await page.getByTestId('import-input').setInputFiles({ name: 'findings.json', mimeType: 'application/json', buffer: Buffer.from(first) });
+  await expect(page.getByTestId('import-status')).toBeVisible();
+  await expect(page.getByTestId('finding-row')).toHaveCount(n);
+  const [dl2] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export').click()]);
+  const ids = JSON.parse(readFileSync(await dl2.path(), 'utf8')).findings.map((f: { id: string }) => f.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(ids.length).toBe(JSON.parse(first).findings.length);
+});

@@ -87,7 +87,9 @@ export function reducer(s: ScanState, a: Action): ScanState {
   }
 }
 
-/** 画面に出す全 finding（フォルダ判定 + 貼り付け + CLI 取り込み）。 */
+/** 画面に出す全 finding（フォルダ判定 + 貼り付け + CLI 取り込み）。id で重複を除き、先に出たもの（フォルダ判定 > 貼り付け > 取り込み）を残す
+ *  （自分が書き出した findings.json を取り込み直しても二重に数えない）。 */
 export function allFindings(s: ScanState): Finding[] {
-  return [...(s.result?.findings ?? []), ...s.pasteFindings, ...(s.imported?.findings ?? [])];
+  const seen = new Set<string>();
+  return [...(s.result?.findings ?? []), ...s.pasteFindings, ...(s.imported?.findings ?? [])].filter((f) => (seen.has(f.id) ? false : (seen.add(f.id), true)));
 }
