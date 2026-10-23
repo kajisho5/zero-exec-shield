@@ -61,6 +61,24 @@
       "path": "h-egg-nover/site-packages/mistralai.egg-info"
     },
     {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "e-jsonc/.vscode/mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "n-codex/.codex/config.toml"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "MEDIUM",
+      "module": "§17",
+      "path": "n-codex/.codex/config.toml"
+    },
+    {
       "campaign": "ghostaction-oct2026",
       "level": "CRITICAL",
       "module": "§21",

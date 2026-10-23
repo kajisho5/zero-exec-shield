@@ -1534,24 +1534,104 @@ check_s16() {
 
 # §17 MCP 静的ポイズニング（command/args、SymJack、エージェントフック、setup.mjs 参照）
 mcp_config_files() {
-  files_path '(/\.mcp\.json|/mcp\.json|/\.cursor/mcp\.json|/\.vscode/mcp\.json|/\.claude/settings(\.local)?\.json|/\.gemini/settings\.json|/claude_desktop_config\.json)$'
+  files_path '(/\.mcp\.json|/mcp\.json|/\.cursor/mcp\.json|/\.vscode/mcp\.json|/\.claude/settings(\.local)?\.json|/\.gemini/settings\.json|/claude_desktop_config\.json|/\.codex/config\.toml)$'
   local p e
   while IFS= read -r p; do
     e="$(expand_home "$p")"; e="${e%/}"
     [ -f "$e" ] && printf '%s\n' "$e"
   done < <(read_ioc '.mcp_poisoning.config_paths')
-  for e in "$HOME_DIR/.claude.json" "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.gemini/settings.json" "$HOME_DIR/.codeium/windsurf/mcp_config.json"; do
+  for e in "$HOME_DIR/.claude.json" "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.gemini/settings.json" "$HOME_DIR/.codeium/windsurf/mcp_config.json" "$HOME_DIR/.codex/config.toml"; do
     [ -f "$e" ] && printf '%s\n' "$e"
   done
   return 0
 }
+# JSONC（.vscode/mcp.json 等はコメント・末尾カンマを公式に許容）を JSON に変換する
+#   文字列の外側にある // 行コメント・/* */ ブロックコメント・閉じ括弧直前のカンマを除去する（文字列内はそのまま）
+jsonc_to_json() {
+  awk 'BEGIN { RS = "\001" }
+    { n = length($0); ins = 0; esc = 0; pc = 0
+      for (i = 1; i <= n; i++) {
+        ch = substr($0, i, 1)
+        if (ins) {
+          if (esc) esc = 0; else if (ch == "\\") esc = 1; else if (ch == "\"") ins = 0
+          printf "%s", ch; continue }
+        if (ch == "/" && substr($0, i + 1, 1) == "/") {
+          j = index(substr($0, i), "\n"); if (j == 0) i = n; else i = i + j - 2
+          continue }
+        if (ch == "/" && substr($0, i + 1, 1) == "*") {
+          j = index(substr($0, i + 2), "*/"); if (j == 0) { printf "%s", substr($0, i); i = n; continue }
+          i = i + j + 2; printf " "; continue }
+        if (ch ~ /[ \t\r\n]/) { printf "%s", ch; continue }
+        if (pc) { if (ch != "}" && ch != "]") printf ","; pc = 0 }
+        if (ch == ",") { pc = 1; continue }
+        if (ch == "\"") ins = 1
+        printf "%s", ch
+      }
+      if (pc) printf "," }' "$1" 2>/dev/null
+}
+
+# Codex CLI の .codex/config.toml から MCP サーバーの command/args を 1 行ずつ出力する最小パーサ（依存なし）
+#   対応: [mcp_servers.<name>] テーブルの command = "…" / '…'、args = [ … ]（複数行可）、
+#         [mcp_servers] 直下のインラインテーブル（name = { command = "…", args = […] }、1 行）
+#   未対応の構文（複数行文字列・解釈できない command 行・command も url も無いサーバー）は
+#   "?<理由>" 行で知らせ、呼び出し側が errors[] に記録する（読めなかった設定を 0 件扱いしない）
+codex_toml_mcp_commands() {
+  text_lines "$1" | awk '
+    function strs(t,   out, v) {
+      out = ""
+      while (match(t, /"([^"\\]|\\.)*"|\047[^\047]*\047/)) {
+        v = substr(t, RSTART + 1, RLENGTH - 2); out = out (out == "" ? "" : " ") v
+        t = substr(t, RSTART + RLENGTH) }
+      return out }
+    function flush() {
+      if (cur != "" && cmd != "") print cmd (args != "" ? " " args : "")
+      else if (cur != "" && !hasurl) print "?no_command:" cur
+      cur = ""; cmd = ""; args = ""; hasurl = 0; inargs = 0 }
+    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
+    inargs { t = strs(line); if (t != "") args = args (args == "" ? "" : " ") t; if (line ~ /\]/) inargs = 0; next }
+    line ~ /"""|\047\047\047/ { if (cur != "" || intable) print "?multiline_string"; next }
+    line ~ /^[[:space:]]*\[/ {
+      h = line; sub(/^[[:space:]]*\[+[[:space:]]*/, "", h); sub(/[[:space:]]*\]+[[:space:]]*(#.*)?$/, "", h)
+      if (h ~ /^mcp_servers\./) {
+        nm = substr(h, 13)
+        if (nm ~ /^"/) { nm = substr(nm, 2); q = index(nm, "\""); rest = substr(nm, q + 1); nm = substr(nm, 1, q - 1) }
+        else { rest = nm; sub(/^[^.]*/, "", rest); sub(/\..*$/, "", nm) }
+        if (rest != "") next   # [mcp_servers.<name>.env] 等のサブテーブルは同じサーバーの続き
+        flush(); cur = nm; intable = 0; next }
+      flush(); intable = (h == "mcp_servers"); next }
+    cur != "" && line ~ /^[[:space:]]*command[[:space:]]*=/ {
+      v = line; sub(/^[[:space:]]*command[[:space:]]*=[[:space:]]*/, "", v); c = strs(v)
+      if (c == "") print "?unparsed_command:" cur; else cmd = c
+      next }
+    cur != "" && line ~ /^[[:space:]]*url[[:space:]]*=/ { hasurl = 1; next }
+    cur != "" && line ~ /^[[:space:]]*args[[:space:]]*=/ {
+      v = line; sub(/^[[:space:]]*args[[:space:]]*=[[:space:]]*/, "", v); args = strs(v)
+      if (v !~ /\]/) inargs = 1
+      next }
+    intable && line ~ /command[[:space:]]*=/ {
+      c = line; sub(/.*command[[:space:]]*=[[:space:]]*/, "", c); sub(/,.*$/, "", c); c = strs(c)
+      a = ""; if (match(line, /args[[:space:]]*=[[:space:]]*\[[^]]*\]/)) a = strs(substr(line, RSTART, RLENGTH))
+      if (c == "") print "?unparsed_inline"; else print c (a != "" ? " " a : "")
+      next }
+    END { flush() }'
+}
+
 check_s17() {
   log_section "§17" "MCP静的ポイズニング"
   local f cmdline
+  local mcpq='[.. | objects | select(has("command")) | ((.command | tostring) + " " + ((.args // []) | map(tostring) | join(" ")))] | .[]'
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if [ "$HAVE_JQ" -eq 1 ]; then
-      jq -r '[.. | objects | select(has("command")) | ((.command | tostring) + " " + ((.args // []) | map(tostring) | join(" ")))] | .[]' "$f" 2>/dev/null
+    if [[ "$f" == *.toml ]]; then
+      codex_toml_mcp_commands "$f" | while IFS= read -r cmdline; do
+        case "$cmdline" in "?"*) record_error "§17" "codex_toml_unparsed:${cmdline#\?}:$f"; continue ;; esac
+        printf '%s\n' "$cmdline"
+      done
+    elif [ "$HAVE_JQ" -eq 1 ]; then
+      # 厳密な JSON として読めなければ JSONC（コメント・末尾カンマ）として読み直し、それでも失敗したら errors[]
+      jq -r "$mcpq" "$f" 2>/dev/null \
+        || jsonc_to_json "$f" | jq -r "$mcpq" 2>/dev/null \
+        || record_error "§17" "mcp_config_parse_failed:$f"
     else
       grep -E -o '"(command|args)"[[:space:]]*:[[:space:]]*("[^"]*"|\[[^]]*\])' "$f" 2>/dev/null
     fi | while IFS= read -r cmdline; do

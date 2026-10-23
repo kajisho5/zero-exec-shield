@@ -192,6 +192,10 @@ mkdir -p "$TMP/outer-root" && mv "$TMP/outer" "$TMP/outer-root/zes"
 n="$(ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$TMP/outer-root/zes/zes-scan.sh" --quick --root "$TMP/outer-root" --json 2>/dev/null | jq --arg r "$TMP/outer-root/zes/" '[.findings[] | select((.path // "") | startswith($r))] | length' 2>/dev/null)"
 [ "${n:-x}" = "0" ] && ok "ZES 自身（rules/tests/docs）を外側から走査した場合は除外" || ng "ZES 自身のファイルを検出しています（$n 件）"
 
+# 読めない MCP 設定（JSONC として読み直しても不正）は errors[] に記録する（fail-closed）
+mkdir -p "$TMP/badmcp" && printf '{ "mcpServers": { "x": { "command": "bash" ' >"$TMP/badmcp/.mcp.json"
+run_scan "$TMP/badmcp" quick "$FIX/_home" | jq -e '[.errors[] | select(.module == "§17" and (.reason | startswith("mcp_config_parse_failed:")))] | length == 1' >/dev/null \
+  && ok "不正な MCP 設定を errors[] に記録（0件扱いしない）" || ng "不正な MCP 設定が errors[] に記録されていません"
 # intel の jq フィルタが失敗した場合は errors[] に記録する（ホスト IoC 等が黙って無効化されない）
 jq '.intel.host = [{"campaign": "zes-test", "paths": 5}]' "$IOC" >"$TMP/ioc-broken-intel.json"
 mkdir -p "$TMP/empty-root"
