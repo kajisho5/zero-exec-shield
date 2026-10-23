@@ -13,8 +13,10 @@ export function fromFileList(list: FileList | File[]): PickedFile[] {
 
 /** D&D された DataTransfer からディレクトリを再帰的にたどる（FileSystemEntry API）。 */
 export async function fromDataTransfer(dt: DataTransfer): Promise<PickedFile[]> {
+  // DataTransfer はドロップのイベントの中でしか読めないので、平らなファイル一覧も先に控えておく
+  const flat = [...dt.files];
   const entries = [...dt.items].map((i) => i.webkitGetAsEntry?.()).filter((e): e is FileSystemEntry => !!e);
-  if (!entries.length) return fromFileList(dt.files);
+  if (!entries.length) return fromFileList(flat);
   const out: PickedFile[] = [];
   const walk = async (e: FileSystemEntry, prefix: string): Promise<void> => {
     if (e.isFile) {
@@ -29,7 +31,13 @@ export async function fromDataTransfer(dt: DataTransfer): Promise<PickedFile[]> 
       }
     }
   };
-  for (const e of entries) await walk(e, '');
+  try {
+    for (const e of entries) await walk(e, '');
+  } catch (err) {
+    // エントリを読めない（WebKit で合成した DataTransfer は NotFoundError になる）ときは、ファイルだけでも判定する
+    if (!flat.length) throw err;
+    return fromFileList(flat);
+  }
   return out;
 }
 

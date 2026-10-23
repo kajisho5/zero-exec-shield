@@ -149,7 +149,15 @@ function Scanner() {
   const started = state.phase !== 'idle' || !!state.imported || state.pasteFindings.length > 0;
   const pickFolder = () => dirInput.current?.click();
   const pickImport = () => importInput.current?.click();
-  const dropFolder = async (dt: DataTransfer) => scan(await fromDataTransfer(dt));
+  const dropFolder = async (dt: DataTransfer) => {
+    let picked: PickedFile[];
+    try { picked = await fromDataTransfer(dt); } catch {
+      // 読めなかったことを黙って捨てない（何も起きないと「問題なし」と誤認させる）
+      toast({ tone: 'error', text: 'ドロップしたフォルダを読み取れませんでした。「フォルダを選択…」か CLI で確認してください' });
+      return;
+    }
+    await scan(picked);
+  };
 
   // ドロップ先の外にファイルを落としても、ブラウザがそのファイルへ移動しない（file:// の画面が消え、
   // ローカルのファイルを開いてしまう）。ファイルのドラッグだけを扱い、テキストのドラッグ（貼り付け欄など）は既定のまま。
