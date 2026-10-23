@@ -30,6 +30,11 @@ jobs:
   ui:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    # ブラウザと OS 依存パッケージを含む公式イメージで実行する（@playwright/test と同じ版、ダイジェストで固定）。
+    # apt のミラーが遅いと playwright install --with-deps だけで 10〜40 分かかり、ジョブが時間切れになっていた
+    container:
+      image: mcr.microsoft.com/playwright:v1.56.1-noble@sha256:f1e7e01021efd65dd1a2c56064be399f3e4de00fd021ac561325f2bfbb2b837a
+      options: --user 1001
     defaults:
       run:
         working-directory: ui
@@ -44,39 +49,13 @@ jobs:
         run: npm ci
       - name: unit tests
         run: npm test
+      # コンテナに git が無くても比べられるよう、ビルド前のコミット済み index.html を退避して cmp で比べる
       - name: build（型検査・単一ファイル化・外部通信なしの静的検査を含む）
-        run: npm run build
+        run: cp ../index.html "$RUNNER_TEMP/index.committed.html" && npm run build
       - name: コミット済みの index.html がソースから再現できること
-        run: git diff --exit-code -- ../index.html
-      # ブラウザのダウンロードは不安定なことがあるので、テストとは別の手順にして時間を区切り、3 回まで試す。
-      # ブラウザ本体は @playwright/test の版をキーにキャッシュし、当たったときは OS の依存パッケージだけを入れる
-      - name: Playwright の版
-        id: pw
-        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
-      - name: Playwright ブラウザのキャッシュ
-        id: pw-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
-      - name: Playwright ブラウザの導入（3 回まで再試行）
-        if: steps.pw-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 10
-        run: |
-          for i in 1 2 3; do
-            npx playwright install --with-deps chromium firefox webkit && exit 0
-            echo "playwright install が失敗（${i} 回目）"; sleep $((i * 15))
-          done
-          exit 1
-      - name: Playwright の OS 依存パッケージ（キャッシュが当たったとき）
-        if: steps.pw-cache.outputs.cache-hit == 'true'
-        timeout-minutes: 10
-        run: |
-          for i in 1 2 3; do
-            npx playwright install-deps chromium firefox webkit && exit 0
-            echo "playwright install-deps が失敗（${i} 回目）"; sleep $((i * 15))
-          done
-          exit 1
+        run: cmp "$RUNNER_TEMP/index.committed.html" ../index.html
+      - name: Playwright の版がコンテナのイメージと一致すること
+        run: test "$(node -p "require('@playwright/test/package.json').version")" = "1.56.1"
       - name: e2e（Chromium / Firefox / WebKit）
         timeout-minutes: 20
         run: npm run test:e2e

@@ -418,7 +418,9 @@ printf '%s' "$out" | jq -e --arg p "$TMP/r3bs/app\\nx/yarn.lock" '[.findings[] |
   && ok "パス中の \\n / \\t を awk で展開しない（偽の依存行を作らせない・パスを変えない）" || ng "パスのバックスラッシュで §15 の結果が変わっています"
 
 # R3-10: リンク名の設定（.mcp.json → cfg/servers.json）を検査。ルート外を指す設定名のリンクは errors[] に記録
-printf '%s' "$(run_scan "$FIX/r3-symlink-config" quick "$FIX/_home")" | jq -e --arg p "symlink_leaves_root:$FIX/r3-symlink-config/out/.mcp.json" '[.errors[] | select(.reason == $p)] | length == 1' >/dev/null 2>&1 \
+# リンク先が存在しないリンクはリポジトリに置かない（GitHub Pages の成果物作成 tar --dereference が失敗する）ため、ここで作る
+mkdir -p "$TMP/r3link/out" && ln -s /nonexistent-zes-outside/servers.json "$TMP/r3link/out/.mcp.json"
+printf '%s' "$(run_scan "$TMP/r3link" quick "$FIX/_home")" | jq -e --arg p "symlink_leaves_root:$TMP/r3link/out/.mcp.json" '[.errors[] | select(.reason == $p)] | length == 1' >/dev/null 2>&1 \
   && ok "検査ルート外を指す設定名のリンクを errors[] に symlink_leaves_root として記録" || ng "ルート外を指す設定名のリンクが errors[] に記録されていません"
 
 # R3-05: YAML のエイリアスは解決せず errors[] に記録

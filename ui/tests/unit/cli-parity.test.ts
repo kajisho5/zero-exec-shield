@@ -18,7 +18,7 @@ const ALLOWED: Record<string, { cliOnly: string[]; uiOnly: string[]; reason: str
   },
   'r3-symlink-config': {
     cliOnly: ['HIGH §17 ev/.mcp.json', 'HIGH §7 ev/.vscode/tasks.json'],
-    uiOnly: ['MEDIUM §17 ev/.mcp.json', 'MEDIUM §17 out/.mcp.json'],
+    uiOnly: ['MEDIUM §17 ev/.mcp.json'],
     reason: 'ブラウザはシンボリックリンクのリンク先を読めず 0 バイトのファイルとして渡される。CLI はリンク先が検査ルート内の通常ファイルならリンク名でも内容を検査する（.mcp.json → cfg/servers.json、tasks.json → cfg/t.json）。UI は 0 バイトの MCP 設定を解析できないものとして MEDIUM（未判定）にする',
   },
   'r3-skillpact-script': {
