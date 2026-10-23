@@ -68,15 +68,17 @@ function EffectMatrix({ a }: { a: SkillPactAnalysis }) {
   const compared = a.contract.status === 'ok' || a.contract.status === 'invalid';
   return (
     <Card className="p-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <h3 className="font-semibold">効果：宣言（契約） vs 実態（静的解析）</h3>
-        <div className="flex items-center gap-3 text-xs text-muted">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted">
           <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm border border-dashed border-critical" />未宣言（乖離）</span>
           <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm border border-accent" />宣言あり</span>
           <span>— なし</span>
         </div>
       </div>
-      <table className="mt-3 w-full table-fixed text-sm">
+      {/* エフェクト列は狭い幅に収まらないため、表だけを横スクロールさせる（ページ全体は横スクロールさせない） */}
+      <div className="mt-3 overflow-x-auto">
+      <table className="w-full min-w-[640px] table-fixed text-sm">
         <thead><tr className="border-b border-border text-xs text-muted"><th className="w-28 py-2 text-left font-normal">区分</th>{EFFECTS.map((e) => <th key={e} className="py-2 font-mono font-normal">{e}</th>)}</tr></thead>
         <tbody>
           <tr><td className="py-2">宣言（契約）</td>{EFFECTS.map((e) => (
@@ -101,6 +103,7 @@ function EffectMatrix({ a }: { a: SkillPactAnalysis }) {
           })}</tr>
         </tbody>
       </table>
+      </div>
       <p className="mt-2 text-xs text-subtle">read は機密ファイル（~/.ssh・.env・認証情報など）を読む兆候のみ、write は作業領域外への永続的な書き込み（crontab・.bashrc など）を含みます。宣言は permissions.*.level が none 以外のもの。</p>
     </Card>
   );
@@ -109,8 +112,8 @@ function EffectMatrix({ a }: { a: SkillPactAnalysis }) {
 function Alert({ title, level, children, testid }: { title: string; level: string; children: React.ReactNode; testid: string }) {
   return (
     <div className="relative rounded-xl border border-high bg-surface p-4" data-testid={testid}>
-      <div className="flex items-center justify-between"><h3 className="flex items-center gap-2 font-semibold"><Icon name="warn" className="text-high" />{title}</h3><span className="rounded border border-high bg-high-bg px-2 text-xs text-high">{level}</span></div>
-      <div className="mt-2 text-sm">{children}</div>
+      <div className="flex items-center justify-between gap-2"><h3 className="flex min-w-0 items-center gap-2 font-semibold"><Icon name="warn" className="shrink-0 text-high" />{title}</h3><span className="shrink-0 rounded border border-high bg-high-bg px-2 text-xs text-high">{level}</span></div>
+      <div className="mt-2 break-words text-sm">{children}</div>
     </div>
   );
 }
@@ -120,16 +123,16 @@ export function SkillPactViewer({ a }: { a: SkillPactAnalysis }) {
   const und = a.results.filter((r) => r.status === 'undetermined').length;
   const ident = a.diffAnomaly ? { same: '前版と同一（未検証）', changed: '前版と異なる（未検証）', unsigned: '署名なし' }[a.diffAnomaly.identity] : '';
   return (
-    <div className="flex flex-col gap-4" data-testid="skillpact-viewer">
+    <div className="flex min-w-0 flex-col gap-4" data-testid="skillpact-viewer">
       <Card className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="flex items-baseline gap-3"><h2 className="text-xl font-semibold">{a.skillName ?? a.name}</h2><span className="truncate font-mono text-xs text-muted">{a.contract.path ?? `${a.skillId}/（skill.contract.json なし）`}</span></div>
+            <div className="flex flex-wrap items-baseline gap-x-3"><h2 className="min-w-0 break-words text-xl font-semibold">{a.skillName ?? a.name}</h2><span className="min-w-0 max-w-full truncate font-mono text-xs text-muted">{a.contract.path ?? `${a.skillId}/（skill.contract.json なし）`}</span></div>
             <p className="mt-1 text-xs text-subtle">version {a.skillVersion ?? '—'} ・ contract_version {a.contract.contractVersion ?? '—'}{a.signers.length ? ` ・ 署名者（自己申告）: ${a.signers.join(', ')}` : ''}</p>
-            {a.contract.errors.length > 0 && <p className="text-xs text-medium">ZES の部分検査で不合格: <span className="font-mono">{a.contract.errors.join(', ')}</span></p>}
-            {a.contract.problem && <p className="text-xs text-medium">JSON の問題: {a.contract.problem}</p>}
+            {a.contract.errors.length > 0 && <p className="break-words text-xs text-medium">ZES の部分検査で不合格: <span className="font-mono">{a.contract.errors.join(', ')}</span></p>}
+            {a.contract.problem && <p className="break-words text-xs text-medium">JSON の問題: {a.contract.problem}</p>}
           </div>
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex min-w-0 flex-col items-end gap-2">
             <div className="flex flex-wrap justify-end gap-2"><LevelBadge a={a} /><SignedBadge signed={a.signed} /></div>
             <Counts a={a} />
           </div>
@@ -144,12 +147,12 @@ export function SkillPactViewer({ a }: { a: SkillPactAnalysis }) {
         </Alert>
       )}
       <Card className="p-5">
-        <div className="flex items-baseline gap-3"><h3 className="font-semibold">§49 検出ルール</h3><span className="text-xs text-subtle">{a.results.length} ルール・該当 {hits}・非該当/対象外 {a.results.length - hits - und}・判定不可 {und}</span></div>
-        <ol className="mt-3 grid grid-cols-2 gap-x-6">
+        <div className="flex flex-wrap items-baseline gap-x-3"><h3 className="font-semibold">§49 検出ルール</h3><span className="text-xs text-subtle">{a.results.length} ルール・該当 {hits}・非該当/対象外 {a.results.length - hits - und}・判定不可 {und}</span></div>
+        <ol className="mt-3 grid grid-cols-1 gap-x-6 xl:grid-cols-2">
           {a.results.map((r) => (
-            <li key={r.ruleNo} data-testid="rule-row" data-status={r.status} className={`grid grid-cols-[28px_1fr_80px_64px] items-center rounded-md px-2 py-2 text-sm ${r.status === 'hit' ? 'bg-high-bg' : ''}`}>
+            <li key={r.ruleNo} data-testid="rule-row" data-status={r.status} className={`grid grid-cols-[28px_minmax(0,1fr)_auto_auto] sm:grid-cols-[28px_minmax(0,1fr)_80px_64px] items-center gap-x-2 rounded-md px-2 py-2 text-sm ${r.status === 'hit' ? 'bg-high-bg' : ''}`}>
               <span className="font-mono text-xs text-subtle">{String(r.ruleNo).padStart(2, '0')}</span>
-              <span>{r.title}</span>
+              <span className="min-w-0 break-words">{r.title}</span>
               <span className="text-xs text-muted">{r.level}</span>
               <span className={`text-right text-xs ${r.status === 'hit' ? 'font-semibold text-high' : 'text-subtle'}`}>{{ hit: '該当', clear: '非該当', 'n/a': '対象外', undetermined: '判定不可' }[r.status]}</span>
             </li>
@@ -165,13 +168,13 @@ export function SkillPactTab({ skills, selected, onSelect }: { skills: SkillPact
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1 rounded-xl border border-signed bg-signed-bg px-4 py-2 text-sm" data-testid="level-note">
-        <span className="flex items-center gap-2"><Icon name="info" className="text-signed" /><span><b>実験的</b>: AI エージェントのスキルが宣言した権限（<a className="underline" href={SPEC.url} target="_blank" rel="noreferrer">SkillPact</a> 契約 skill.contract.json）と、コードが実際にしていること（静的解析）が一致するかを確かめます。</span></span>
+        <span className="flex min-w-0 items-center gap-2"><Icon name="info" className="shrink-0 text-signed" /><span className="min-w-0 break-words"><b>実験的</b>: AI エージェントのスキルが宣言した権限（<a className="underline" href={SPEC.url} target="_blank" rel="noreferrer">SkillPact</a> 契約 skill.contract.json）と、コードが実際にしていること（静的解析）が一致するかを確かめます。</span></span>
         <span className="text-xs text-muted">{LEVEL_NOTE} 契約は JSON として読むのみで、スキル・テストは実行しません。SkillPact © SEVENTHWELL (shogo kajiyama)、仕様 CC BY 4.0。</span>
       </div>
       {skills.length === 0 ? (
         <Card className="p-10 text-center text-sm text-subtle">スキル（SKILL.md / skill.contract.json）が見つかりません。スキルのフォルダを投入してください。</Card>
       ) : (
-        <div className="grid grid-cols-[320px_1fr] gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[320px_minmax(0,1fr)]">
           <SkillList skills={skills} selected={a?.skillId ?? null} onSelect={onSelect} />
           {a && <SkillPactViewer a={a} />}
         </div>

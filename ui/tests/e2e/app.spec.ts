@@ -1,6 +1,8 @@
 // index.html（ビルド成果物）を file:// で開き、外部リクエストゼロと主要操作を確認する。
 import { expect, test, type Page } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validate } from '../unit/schema';
 
@@ -155,17 +157,48 @@ test('敵対的な findings.json の取り込みで画面が消えない・書�
   expect(errors).toEqual([]);
 });
 
-test('375px 幅でページ全体が横スクロールしない', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 800 });
-  await open(page);
-  await scan(page, 'chaindrop');
-  await expect(page.getByTestId('finding-row').first()).toBeVisible();
-  for (const tab of [/^総合/, /^SkillPact/, /^MCP/]) {
-    await page.getByRole('tab', { name: tab }).click();
-    const { sw, cw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
-    expect(sw, `${tab}`).toBeLessThanOrEqual(cw);
-  }
-});
+/** ページ全体の横スクロール量と、はみ出している要素（スクロール領域内を除く）を返す。 */
+async function overflow(page: Page) {
+  return page.evaluate(() => {
+    const cw = document.documentElement.clientWidth;
+    const clipped = (e: Element) => { for (let p = e.parentElement; p; p = p.parentElement) { if (['auto', 'scroll', 'hidden'].includes(getComputedStyle(p).overflowX)) return true; } return false; };
+    const bad = [...document.querySelectorAll('body *')].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.right > cw + 1 && !clipped(e); })
+      .slice(-3).map((e) => `${e.tagName}.${String(e.className).slice(0, 60)} "${(e.textContent ?? '').slice(0, 30)}"`);
+    return { sw: document.documentElement.scrollWidth, cw, bad };
+  });
+}
+
+// 各ビューアが実際に描画されるフィクスチャで、狭い幅でもページ全体が横スクロールしないこと
+const NARROW: [string, RegExp, string?][] = [
+  ['chaindrop', /^総合/],
+  ['skillpact-signed-divergence', /^SkillPact/, 'skillpact-viewer'],
+  ['skillpact-diff-anomaly', /^SkillPact/, 'diff-alert'],
+  ['skillpact-diff-anomaly', /^SkillPact/, 'skill-item'],
+  ['mcp-visible', /^MCP/, 'mcp-viewer'],
+  ['github-actions', /^GitHub Actions/, 'actions-viewer'],
+  ['browser-ext', /^ブラウザ拡張/, 'extension-viewer'],
+];
+for (const width of [375, 320]) {
+  test(`${width}px 幅でページ全体が横スクロールしない（総合 / SkillPact / MCP / Actions / 拡張）`, async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', 'Playwright WebKit は隠しエントリだけのフォルダを setInputFiles できない（github-actions）');
+    await page.setViewportSize({ width, height: 800 });
+    await open(page);
+    for (const [fixture, tab, testid] of NARROW) {
+      await page.getByRole('tab', { name: /^総合/ }).click();
+      await scan(page, fixture);
+      await page.getByRole('tab', { name: tab }).click();
+      if (testid) await expect(page.getByTestId(testid).first()).toBeVisible();
+      const r = await overflow(page);
+      expect(r.sw, `${fixture} ${tab} ${width}px: ${r.bad.join(' | ')}`).toBeLessThanOrEqual(r.cw);
+    }
+    // 17 タブすべても確認する（最後のフィクスチャの結果で）
+    for (const t of await page.getByRole('tab').all()) {
+      await t.click();
+      const r = await overflow(page);
+      expect(r.sw, `${await t.textContent()} ${width}px: ${r.bad.join(' | ')}`).toBeLessThanOrEqual(r.cw);
+    }
+  });
+}
 
 test('「すべてのタブ」メニュー: Escape・外側クリックで閉じ、フォーカスを戻す', async ({ page }) => {
   await open(page);
@@ -191,4 +224,38 @@ test('「すべてのタブ」メニュー: Escape・外側クリックで閉じ
   await expect(menu).toBeHidden();
   await expect(page.getByRole('tab', { name: /^SkillPact/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: /^SkillPact/ })).toBeFocused();
+});
+
+test('書き出した findings.json を取り込み直しても件数が増えず、再書き出しの id は一意', async ({ page }) => {
+  await open(page);
+  await scan(page, 'chaindrop');
+  const n = await page.getByTestId('finding-row').count();
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export').click()]);
+  const first = readFileSync(await dl.path(), 'utf8');
+  await page.getByTestId('import-input').setInputFiles({ name: 'findings.json', mimeType: 'application/json', buffer: Buffer.from(first) });
+  await expect(page.getByTestId('import-status')).toBeVisible();
+  await expect(page.getByTestId('finding-row')).toHaveCount(n);
+  const [dl2] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export').click()]);
+  const ids = JSON.parse(readFileSync(await dl2.path(), 'utf8')).findings.map((f: { id: string }) => f.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(ids.length).toBe(JSON.parse(first).findings.length);
+});
+
+test('次のスキャン中は前回の結果を表示せず、書き出しもできない', async ({ page }) => {
+  await open(page);
+  await scan(page, 'chaindrop');
+  await expect(page.getByTestId('count-CRITICAL')).not.toHaveText('0');
+  const big = mkdtempSync(join(tmpdir(), 'zes-big-'));
+  mkdirSync(join(big, 'd'));
+  for (let i = 0; i < 1500; i++) writeFileSync(join(big, 'd', `f${i}.txt`), 'hello ' + i);
+  await page.getByTestId('dir-input').setInputFiles(big);
+  const status = page.getByTestId('scan-status');
+  await expect(status).toContainText(/読み取り中|判定中|スキャン完了/);
+  if (!(await status.textContent())?.includes('スキャン完了')) {
+    await expect(page.getByTestId('count-CRITICAL')).toHaveText('0');
+    await expect(page.getByTestId('export')).toBeDisabled();
+  }
+  await expect(status).toContainText('スキャン完了', { timeout: 30_000 });
+  await expect(page.getByTestId('count-CRITICAL')).toHaveText('0');
+  await expect(page.getByTestId('export')).toBeEnabled();
 });

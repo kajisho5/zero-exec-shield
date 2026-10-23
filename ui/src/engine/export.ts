@@ -33,6 +33,7 @@ export function toFindingsDoc(findings: Finding[], errors: ScanError[], bundle: 
     if (imported.dropped) errs.push({ module: 'core', reason: `ui:import_dropped_invalid_entries:${imported.dropped}` });
   }
   const seen = new Set<string>();
+  const ids = new Set<string>();
   return {
     schema_version: '1.0',
     incident_bundle: bundle,
@@ -40,7 +41,8 @@ export function toFindingsDoc(findings: Finding[], errors: ScanError[], bundle: 
     scan_finished_at: finishedAt,
     scan_mode: 'full',
     status: imported?.status === 'error' ? 'error' : 'partial',
-    findings: findings.map((f) => {
+    // 同じ id の finding は 1 件だけ出す（先勝ち）
+    findings: findings.filter((f) => (ids.has(f.id) ? false : (ids.add(f.id), true))).map((f) => {
       const o: FindingsDoc['findings'][number] = {
         id: f.id, level: f.level, module: f.module, campaign: f.campaign,
         path: f.path == null ? null : f.path.startsWith('/') ? f.path : '/' + f.path,

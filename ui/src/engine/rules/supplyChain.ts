@@ -74,31 +74,57 @@ function npmLockDeps(j: unknown, path: string, sha: string | null, out: Dep[]): 
   walk(j);
 }
 
-/** yarn.lock（v1: `  version "1.2.3"` / Berry: `  version: 1.2.3`）。見出し行の先頭の指定子から名前を取る。 */
+/** "name" / "@scope/name" に続く "@" の位置（無ければ -1）。 */
+const nameEnd = (spec: string) => (spec.startsWith('@') ? spec.indexOf('@', 1) : spec.indexOf('@'));
+
+/** yarn の指定子（"name@range"）から実パッケージ名を取る。"alias@npm:real@range" のエイリアスは npm: の後ろの実名。 */
+function yarnSpecName(spec: string): string {
+  const at = nameEnd(spec);
+  if (at <= 0) return '';
+  const range = spec.slice(at + 1);
+  if (range.startsWith('npm:')) {
+    const target = range.slice(4);
+    const t = nameEnd(target);
+    if (t > 0 && /^(@[^/@]+\/[^/@]+|[^@/\s]+)$/.test(target.slice(0, t))) return target.slice(0, t);
+  }
+  return spec.slice(0, at);
+}
+
+/** yarn.lock（v1: `  version "1.2.3"` / Berry: `  version: 1.2.3`）。名前は Berry の resolution、無ければ見出し行の先頭の指定子から取る
+ *  （npm: エイリアスは実名に解決する）。 */
 export function yarnLockDeps(text: string): { name: string; version: string }[] {
   const out: { name: string; version: string }[] = [];
   let n = '';
+  let res = '';
+  let ver: string | null = null;
+  const flush = () => { const name = res || n; if (name && ver !== null) out.push({ name, version: ver }); n = ''; res = ''; ver = null; };
   for (const l of lines(text)) {
     if (/^[^ #].*:$/.test(l)) {
-      const first = (l.slice(0, -1).split(/, */)[0] ?? '').replace(/"/g, '');
-      n = first.startsWith('@') ? '@' + (first.slice(1).split('@')[0] ?? '') : (first.split('@')[0] ?? '');
+      flush();
+      n = yarnSpecName((l.slice(0, -1).split(/, */)[0] ?? '').replace(/"/g, ''));
       if (n === '__metadata') n = '';
       continue;
     }
+    if (!n) continue;
     const v = /^ {2}version:? +(.*)$/.exec(l);
-    if (v && n) { out.push({ name: n, version: (v[1] ?? '').replace(/"/g, '').trim() }); n = ''; }
+    if (v && ver === null) { ver = (v[1] ?? '').replace(/"/g, '').trim(); continue; }
+    const r = /^ {2}resolution:? +"?([^"]*)"?\s*$/.exec(l);
+    if (r) { const at = nameEnd(r[1] ?? ''); if (at > 0) res = (r[1] ?? '').slice(0, at); }
   }
+  flush();
   return out;
 }
 
-/** pnpm-lock.yaml の "/name@1.2.3:" / "name@1.2.3(peer):" / "'@scope/name@1.2.3':" 形式。 */
+/** pnpm-lock.yaml のパッケージキー。v6+ の "/name@1.2.3:" / "name@1.2.3(peer):" / "'@scope/name@1.2.3':" と、
+ *  v5.x の "/name/1.2.3:" / "/@scope/name/1.2.3_peer@1.0.0:"（"_" 以降は peer 接尾辞）。 */
 export function pnpmLockDeps(text: string): { name: string; version: string }[] {
   const out: { name: string; version: string }[] = [];
   for (const l of lines(text)) {
-    if (!/^ {2}['/]?@?[^ @]+@[0-9][^:]*:/.test(l)) continue;
-    const s = l.slice(2).replace(/'/g, '').replace(/^\//, '').replace(/:.*$/, '').replace(/\(.*$/, '');
-    const at = s.startsWith('@') ? s.indexOf('@', 1) : s.indexOf('@');
-    if (at > 0) out.push({ name: s.slice(0, at), version: s.slice(at + 1) });
+    const k = /^ {2}(['"]?)(\/?[^ '"].*?)\1:(\s.*)?$/.exec(l);
+    if (!k?.[2]) continue;
+    const s = k[2].replace(/^\//, '');
+    const m = /^(@[^/@]+\/[^/@]+|[^/@]+)@([0-9].*)$/.exec(s) ?? /^(@[^/@]+\/[^/@]+|[^/@]+)\/([0-9].*)$/.exec(s);
+    if (m?.[1] && m[2]) out.push({ name: m[1], version: m[2].replace(/[_(].*$/, '') });
   }
   return out;
 }
