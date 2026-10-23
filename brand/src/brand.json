@@ -1,1 +1,1 @@
-{ "id": "zes", "glow": ["#3DDCC4", "#3A6BFF"], "tagline": "実行ゼロのサプライチェーン検疫", "subline": "Zero-Exec Shield · 静的解析のみ · CLI / Web UI · Apache-2.0" }
+{ "id": "zes", "glow": ["#3DDCC4", "#3A6BFF"], "tagline": "Scans supply chains without running code", "subline": "Static analysis only. CLI and offline web UI. Apache-2.0" }
