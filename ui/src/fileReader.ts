@@ -41,32 +41,44 @@ function looksBinary(bytes: Uint8Array): boolean {
   return false;
 }
 
-/** 50 件ごとに UI へ制御を返しながら読み取る（N-06）。2 MiB 超は未判定として数える（N-07）。
+/** 同時に読むファイル数の上限。1 件ずつ await すると、file.arrayBuffer() と SHA-256 の待ちが直列になり大きなフォルダで遅い。
+ *  多すぎるとメモリ（2 MiB × 同時数）とファイルハンドルを食うので 8 に抑える。 */
+export const READ_CONCURRENCY = 8;
+
+async function readOne({ file, relPath }: PickedFile, dec: TextDecoder): Promise<FileInput> {
+  const base: Omit<FileInput, 'text' | 'sha256' | 'readState'> = { relPath, name: file.name, size: file.size, lastModified: file.lastModified };
+  if (file.size > MAX_READ_BYTES) return { ...base, text: null, sha256: null, readState: 'skipped-size' };
+  try {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const sha = await sha256Hex(buf);
+    if (looksBinary(buf)) return { ...base, text: null, sha256: sha, readState: 'skipped-binary' };
+    return { ...base, text: dec.decode(buf), sha256: sha, readState: 'read' };
+  } catch {
+    return { ...base, text: null, sha256: null, readState: 'error' };
+  }
+}
+
+/** 最大 READ_CONCURRENCY 件ずつ並行に読み、結果は picked と同じ順に返す（判定結果を読み終わりの順に左右させない）。
+ *  50 件読み終わるごとに進捗を通知して UI へ制御を返す（N-06）。2 MiB 超は未判定として数える（N-07）。
  *  signal が中断されたら（クリア・次のスキャン開始）、次のファイルを読む前に AbortError で止める。 */
-export async function readFiles(picked: PickedFile[], onProgress: (n: number) => void, signal?: AbortSignal): Promise<FileInput[]> {
-  const out: FileInput[] = [];
+export async function readFiles(picked: PickedFile[], onProgress: (n: number) => void, signal?: AbortSignal, concurrency = READ_CONCURRENCY): Promise<FileInput[]> {
+  const out = new Array<FileInput>(picked.length);
   const dec = new TextDecoder('utf-8', { fatal: false });
-  for (let i = 0; i < picked.length; i++) {
-    signal?.throwIfAborted();
-    const { file, relPath } = picked[i]!;
-    const base: Omit<FileInput, 'text' | 'sha256' | 'readState'> = { relPath, name: file.name, size: file.size, lastModified: file.lastModified };
-    if (file.size > MAX_READ_BYTES) {
-      out.push({ ...base, text: null, sha256: null, readState: 'skipped-size' });
-    } else {
-      try {
-        const buf = new Uint8Array(await file.arrayBuffer());
-        const sha = await sha256Hex(buf);
-        if (looksBinary(buf)) out.push({ ...base, text: null, sha256: sha, readState: 'skipped-binary' });
-        else out.push({ ...base, text: dec.decode(buf), sha256: sha, readState: 'read' });
-      } catch {
-        out.push({ ...base, text: null, sha256: null, readState: 'error' });
+  let next = 0;
+  let done = 0;
+  const worker = async () => {
+    for (;;) {
+      signal?.throwIfAborted();
+      const i = next++;
+      if (i >= picked.length) return;
+      out[i] = await readOne(picked[i]!, dec);
+      if (++done % 50 === 0) {
+        onProgress(done);
+        await yieldToUi();
       }
     }
-    if (i % 50 === 49) {
-      onProgress(i + 1);
-      await yieldToUi();
-    }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, picked.length)) }, worker));
   signal?.throwIfAborted();
   onProgress(picked.length);
   return out;

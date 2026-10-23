@@ -251,7 +251,8 @@ test('次のスキャン中は前回の結果を表示せず、書き出しも�
   await expect(page.getByTestId('count-CRITICAL')).not.toHaveText('0');
   const big = mkdtempSync(join(tmpdir(), 'zes-big-'));
   mkdirSync(join(big, 'd'));
-  for (let i = 0; i < 1500; i++) writeFileSync(join(big, 'd', `f${i}.txt`), 'hello ' + i);
+  // 300 件で足りる: 読み取り（50 件ごとに UI へ制御を返す）の途中の画面を確かめられる。1,500 件では遅いエンジンで不安定だった
+  for (let i = 0; i < 300; i++) writeFileSync(join(big, 'd', `f${i}.txt`), 'hello ' + i);
   await page.getByTestId('dir-input').setInputFiles(big);
   const status = page.getByTestId('scan-status');
   await expect(status).toContainText(/読み取り中|判定中|スキャン完了/);
