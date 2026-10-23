@@ -403,7 +403,7 @@ fgrep_q() { grep -q -I -E "$@" 2>/dev/null; }
 # ---------------------------------------------------------------------------
 DEPS_TSV="$TMP_DIR/deps.tsv"
 DEPS_BUILT=0
-norm_pypi() { printf '%s' "$1" | tr 'A-Z_.' 'a-z--'; }
+norm_pypi() { printf '%s' "$1" | tr 'A-Z_.' 'a-z--' | tr -s '-'; }
 build_deps() {
   [ "$DEPS_BUILT" -eq 1 ] && return 0
   DEPS_BUILT=1
@@ -459,21 +459,21 @@ build_deps() {
       { line=$0; sub(/#.*/,"",line); gsub(/[ \t]/,"",line) }
       line ~ /^[A-Za-z0-9][A-Za-z0-9._-]*(\[[^]]*\])?===?[^;,]+/ {
         n=line; sub(/(\[[^]]*\])?===?.*/,"",n); v=line; sub(/^[^=]*===?/,"",v); sub(/[;,].*/,"",v)
-        n=tolower(n); gsub(/[_.]/,"-",n); print "pypi\t" n "\t" v "\t" src }' "$f" >>"$DEPS_TSV"
+        n=tolower(n); gsub(/[-_.]+/,"-",n); print "pypi\t" n "\t" v "\t" src }' "$f" >>"$DEPS_TSV"
   done < <(files_named '^(requirements.*|constraints.*)\.txt$')
   # pypi: poetry.lock / uv.lock / pdm.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     awk -v src="$f" '
       /^\[\[package\]\]/ { n=""; next }
-      /^name = "/ { n=$0; sub(/^name = "/,"",n); sub(/".*/,"",n); n=tolower(n); gsub(/[_.]/,"-",n); next }
+      /^name = "/ { n=$0; sub(/^name = "/,"",n); sub(/".*/,"",n); n=tolower(n); gsub(/[-_.]+/,"-",n); next }
       /^version = "/ && n!="" { v=$0; sub(/^version = "/,"",v); sub(/".*/,"",v); print "pypi\t" n "\t" v "\t" src; n="" }' "$f" >>"$DEPS_TSV"
   done < <(files_named '^(poetry\.lock|uv\.lock|pdm\.lock)$')
   # pypi: Pipfile.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if [ "$HAVE_JQ" -eq 1 ]; then
-      jq -r --arg src "$f" '((.default // {}) + (.develop // {})) | to_entries[] | ["pypi", (.key | ascii_downcase | gsub("[_.]"; "-")), ((.value.version // "") | ltrimstr("==")), $src] | @tsv' "$f" 2>/dev/null >>"$DEPS_TSV" \
+      jq -r --arg src "$f" '((.default // {}) + (.develop // {})) | to_entries[] | ["pypi", (.key | ascii_downcase | gsub("[-_.]+"; "-")), ((.value.version // "") | ltrimstr("==")), $src] | @tsv' "$f" 2>/dev/null >>"$DEPS_TSV" \
         || record_error "§15" "lockfile_parse_failed:$f"
     else
       record_error "§15" "jq_unavailable:$f"
@@ -635,7 +635,7 @@ intel_actions() {
     [ -n "$act" ] || continue
     while IFS= read -r f; do
       [ -n "$f" ] || continue
-      grep -E -o "uses:[[:space:]]*[\"']?$(printf '%s' "$act" | sed 's/[.[\*^$+?(){}|]/\\&/g')@[^\"'[:space:]#]+" "$f" 2>/dev/null | sed -E 's/.*@//' | sort -u | while IFS= read -r ref; do
+      grep -i -E -o "uses:[[:space:]]*[\"']?$(printf '%s' "$act" | sed 's/[.[\*^$+?(){}|]/\\&/g')@[^\"'[:space:]#,}]+" "$f" 2>/dev/null | sed -E 's/.*@//' | sort -u | while IFS= read -r ref; do
         if printf '%s\n' "$bad" | tr ',' '\n' | grep -q -x -F -- "$ref"; then
           critical "$camp" "$f" "侵害が報告されたアクション ${act}@${ref}"
         elif [ -n "$safe" ] && ! printf '%s\n' "$safe" | tr ',' '\n' | grep -q -x -F -- "$ref" && ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
@@ -1631,9 +1631,9 @@ check_s22() {
   local f line act ref
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -E -o '^[[:space:]-]*uses:[[:space:]]*["'"'"']?[^"'"'"'[:space:]#]+' "$f" 2>/dev/null | sed -E 's/.*uses:[[:space:]]*["'"'"']?//' | sort -u | while IFS= read -r line; do
+    grep -E -o '^[[:space:]-]*(\{([^}#]*,)?[[:space:]]*)?uses:[[:space:]]*["'"'"']?[^"'"'"'[:space:]#,}]+' "$f" 2>/dev/null | sed -E 's/.*uses:[[:space:]]*["'"'"']?//' | sort -u | while IFS= read -r line; do
       case "$line" in ./*|docker://*) continue ;; esac
-      act="${line%@*}"; ref="${line##*@}"
+      act="${line%@*}"; ref="${line##*@}"; act="${act,,}"
       [ "$act" != "$line" ] || { high "ghostaction-oct2026" "$f" "uses: ${line} がバージョン未指定"; continue; }
       if [ "$act" = "aquasecurity/trivy-action" ] && ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]] && [ "$ref" != "v0.35.0" ]; then
         critical "ghostaction-oct2026" "$f" "汚染されたタグ参照の可能性（${line}。2026-03-19 にタグ 75/76 が強制 push。安全版 v0.35.0 または検証済み SHA に固定）"

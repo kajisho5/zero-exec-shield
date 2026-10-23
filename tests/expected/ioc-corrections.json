@@ -13,6 +13,12 @@
       "path": "package-lock.json"
     },
     {
+      "campaign": "teampcp-mini-shai-hulud",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "py-normalized/requirements.txt"
+    },
+    {
       "campaign": "mcp-python-sdk-jul-2026",
       "level": "HIGH",
       "module": "§15",

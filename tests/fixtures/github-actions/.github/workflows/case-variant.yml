@@ -1,0 +1,7 @@
+# ZES test fixture: 所有者名の大文字小文字を変えても侵害履歴のある発行元として検出する
+on: push
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: TJ-Actions/changed-files@v45
