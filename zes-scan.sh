@@ -19,6 +19,8 @@
 #   ZES_NOW          現在時刻の上書き（epoch秒、テスト用）
 #   ZES_FORCE_NO_JQ  1 で jq を使わず grep フォールバックを強制（テスト用）
 #   ZES_GIT_TIMEOUT  §38/§46 の git 呼び出しの打ち切り秒数（既定 60）
+#   ZES_LANG         Terminal language (log, help, errors): en | ja. Default: the locale. findings.json is always English
+#   ZES_I18N_DIR     Message catalog directory (default: <script_dir>/i18n; for tests)
 # =============================================================================
 set -u
 set -o pipefail
@@ -29,12 +31,45 @@ unset CDPATH
 ZES_VERSION="0.4.0"      # ソフトウェアの版
 ZES_SPEC_VERSION="5.2"   # 準拠する Master Specification の版
 INCIDENT_BUNDLE="ZES-2026-OCT-EMERGENCY-V5.2"
-FINDINGS_SCHEMA_VERSION="1.1"  # 1.1 は 1.0 に任意の項目（scan_roots・kind・subject・locators・related・evidence）を足したもの
+FINDINGS_SCHEMA_VERSION="1.2"  # 1.2: code / params (catalog key and values), English detail, id v2
 
 if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+  echo "ZES: ZES needs Bash 4 or later (found: ${BASH_VERSION:-unknown}). On macOS, run 'brew install bash'." >&2
   echo "ZES: Bash 4 以上が必要です（現在: ${BASH_VERSION:-unknown}）。macOS は 'brew install bash' を利用してください。" >&2
   exit 64
 fi
+
+# Language of the terminal output (log, help, errors): --lang > ZES_LANG > LC_ALL > LC_MESSAGES > LANG.
+#   findings.json is always English. The locale is read here, before LC_ALL=C below.
+#   ja (no charset, or UTF-8) → ja; ja_JP.eucJP / SJIS and everything else → en. An invalid ZES_LANG is silently en.
+zes_lang_of_locale() {  # zes_lang_of_locale VALUE → ZES_LANG_RESOLVED
+  local v="$1" cs
+  ZES_LANG_RESOLVED=en
+  case "$v" in
+    ja|ja_*|ja.*|ja@*)
+      case "$v" in
+        *.*) cs="${v#*.}"; cs="${cs%%@*}"; cs="${cs,,}"
+             case "$cs" in utf-8|utf8) ZES_LANG_RESOLVED=ja ;; esac ;;
+        *) ZES_LANG_RESOLVED=ja ;;
+      esac ;;
+  esac
+}
+ZES_LANG_ARG=""; ZES_LANG_ARG_SET=0
+_zes_a=("$@"); _zes_i=0
+while [ "$_zes_i" -lt "${#_zes_a[@]}" ]; do
+  case "${_zes_a[_zes_i]}" in
+    --root|--url|--skillpact-cache) _zes_i=$((_zes_i + 1)) ;;
+    --lang) ZES_LANG_ARG_SET=1; ZES_LANG_ARG="${_zes_a[_zes_i + 1]-}"; _zes_i=$((_zes_i + 1)) ;;
+  esac
+  _zes_i=$((_zes_i + 1))
+done
+unset _zes_a _zes_i
+case "${ZES_LANG:-}" in
+  en|ja) ZES_LANG_RESOLVED="$ZES_LANG" ;;
+  ?*) ZES_LANG_RESOLVED=en ;;
+  *) zes_lang_of_locale "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" ;;
+esac
+case "$ZES_LANG_ARG" in en|ja) ZES_LANG_RESOLVED="$ZES_LANG_ARG" ;; esac
 
 export LC_ALL=C
 
@@ -128,36 +163,127 @@ MODE=""
 JSON_OUT=0
 TARGET_URL=""
 
-USAGE_TEXT='Usage: zes-scan.sh [--quick|--standard|--full|--worm|--skillpact] [--root <dir>] [--url <URL>] [--json]
-                   [--skillpact-cache <dir>]
+# render TEMPLATE [key=value...] → RENDERED. One left-to-right pass over the template: {name} ([a-z_]+) is replaced by
+#   its value, a value that contains "{x}" is not expanded again, and a placeholder without a value stays "{name}"
+#   (tests fail on it). No ${s//pat/rep} with the value (bash 5.2 patsub_replacement turns "&" into the match).
+#   Pure bash (no external command): usage() and arg_error() need it before PATH is fully sanitised
+zes_render() {
+  local t="$1" out="" a name; shift
+  local -A rv=()
+  for a in "$@"; do rv["${a%%=*}"]="${a#*=}"; done
+  while [[ "$t" == *"{"* ]]; do
+    out+="${t%%\{*}"; t="${t#*\{}"
+    if [[ "$t" =~ ^([a-z_]+)\} ]]; then
+      name="${BASH_REMATCH[1]}"; t="${t:${#name}+1}"
+      if [ -n "${rv[$name]+x}" ]; then out+="${rv[$name]}"; else out+="{$name}"; fi
+    else
+      out+="{"
+    fi
+  done
+  RENDERED="$out$t"
+}
 
-  --root <dir>   検査ルート（既定 "."）
-  --full         §1〜49 全実行
-  --standard     §1〜35
-  --quick        §1〜19（既定）
-  --worm         §15/18/25/45 のみ
-  --skillpact    §49 のみ
-  --url <URL>    §4 の非侵襲URLチェック（Server / X-Powered-By ヘッダのみ取得。HEAD、405/501 時のみ GET、リダイレクト非追従）
-  --json         findings.json を標準出力へ（人間向けログは標準エラーへ）
-  --skillpact-cache <dir>  §49 差分異常検出用の前バージョン契約キャッシュ
+# Help and argument / environment errors (cli.*). They are needed before the catalog can be read (and an unreadable
+#   catalog is itself one of them), so both languages are kept here. tests/run-tests.sh checks that this block equals
+#   the cli.* entries of i18n/en.json and i18n/ja.json.
+# >>> cli-messages
+declare -A CLI_MSG_EN=(
+  [cli.help.usage]='Usage: zes-scan.sh [--quick|--standard|--full|--worm|--skillpact] [--root DIR] [--url URL] [--json]'
+  [cli.help.usage_more]='                   [--skillpact-cache DIR] [--lang en|ja]'
+  [cli.help.root]='  --root DIR     Directory to scan (default ".")'
+  [cli.help.full]='  --full         Run §1–49'
+  [cli.help.standard]='  --standard     Run §1–35'
+  [cli.help.quick]='  --quick        Run §1–19 (default)'
+  [cli.help.worm]='  --worm         Run §15, §18, §25 and §45 only'
+  [cli.help.skillpact]='  --skillpact    Run §49 only'
+  [cli.help.url]='  --url URL      §4 passive URL check: reads only the Server and X-Powered-By headers (HEAD; GET only after 405/501; redirects are not followed)'
+  [cli.help.json]='  --json         Write findings.json to stdout (the log goes to stderr)'
+  [cli.help.skillpact_cache]='  --skillpact-cache DIR  Earlier contract versions for the §49 diff check'
+  [cli.help.lang]='  --lang en|ja   Language of the log and this help (default: ZES_LANG, then the locale). findings.json is always in English.'
+  [cli.help.exit]='Exit codes: 0 = finished (status ok or partial), 2 = status error (the scan root could not be listed, or every module failed), 64 = bad arguments or environment'
+  [cli.arg.mode_conflict]='Only one mode can be given (got {a} and {b})'
+  [cli.arg.unknown]='Unknown argument: {value}'
+  [cli.arg.lang]='--lang must be en or ja'
+  [cli.arg.root_not_dir]='--root is not a directory: {value}'
+  [cli.arg.root_unresolved]='Cannot resolve --root'
+  [cli.arg.home_unset]='No home directory. Set ZES_HOME or HOME.'
+  [cli.arg.home_not_dir]='ZES_HOME/HOME is not a directory: {value}'
+  [cli.arg.home_unresolved]='Cannot resolve ZES_HOME/HOME'
+  [cli.arg.url_scheme]='--url must start with {http} or {https}'
+  [cli.arg.url_chars]='--url contains characters that are not allowed'
+  [cli.err.catalog]='cannot read the message catalog: {path}'
+  [cli.err.tmpdir]='Cannot create a temporary directory'
+  [cli.err.ioc_unreadable]='Cannot read the IoC database: {path}'
+  [cli.err.ioc_invalid]='The IoC database is not valid JSON: {path}'
+)
+declare -A CLI_MSG_JA=(
+  [cli.help.usage]='Usage: zes-scan.sh [--quick|--standard|--full|--worm|--skillpact] [--root DIR] [--url URL] [--json]'
+  [cli.help.usage_more]='                   [--skillpact-cache DIR] [--lang en|ja]'
+  [cli.help.root]='  --root DIR     検査ルート（既定 "."）'
+  [cli.help.full]='  --full         §1〜49 全実行'
+  [cli.help.standard]='  --standard     §1〜35'
+  [cli.help.quick]='  --quick        §1〜19（既定）'
+  [cli.help.worm]='  --worm         §15/18/25/45 のみ'
+  [cli.help.skillpact]='  --skillpact    §49 のみ'
+  [cli.help.url]='  --url URL      §4 の非侵襲URLチェック（Server / X-Powered-By ヘッダのみ取得。HEAD、405/501 時のみ GET、リダイレクト非追従）'
+  [cli.help.json]='  --json         findings.json を標準出力へ（人間向けログは標準エラーへ）'
+  [cli.help.skillpact_cache]='  --skillpact-cache DIR  §49 差分異常検出用の前バージョン契約キャッシュ'
+  [cli.help.lang]='  --lang en|ja   ログとこのヘルプの言語（既定: ZES_LANG、次にロケール）。findings.json は常に英語'
+  [cli.help.exit]='終了コード: 0=完了(status ok/partial) / 2=status error（インベントリを作れない・全モジュール失敗） / 64=引数・環境エラー'
+  [cli.arg.mode_conflict]='モード指定が重複しています（{a} と {b}）'
+  [cli.arg.unknown]='不明な引数: {value}'
+  [cli.arg.lang]='--lang は en か ja を指定してください'
+  [cli.arg.root_not_dir]='--root がディレクトリではありません: {value}'
+  [cli.arg.root_unresolved]='--root を解決できません'
+  [cli.arg.home_unset]='ホームディレクトリが未設定です（ZES_HOME または HOME を指定してください）'
+  [cli.arg.home_not_dir]='ZES_HOME/HOME がディレクトリではありません: {value}'
+  [cli.arg.home_unresolved]='ZES_HOME/HOME を解決できません'
+  [cli.arg.url_scheme]='--url は {http} または {https} のみ受け付けます'
+  [cli.arg.url_chars]='--url に使用できない文字が含まれています'
+  [cli.err.catalog]='メッセージカタログを読めません: {path}'
+  [cli.err.tmpdir]='一時ディレクトリを作成できません'
+  [cli.err.ioc_unreadable]='IoC データベースを読めません: {path}'
+  [cli.err.ioc_invalid]='IoC データベースが不正な JSON です: {path}'
+)
+# Lines of the help ("" = blank line)
+CLI_HELP_LINES=(cli.help.usage cli.help.usage_more "" cli.help.root cli.help.full cli.help.standard cli.help.quick
+  cli.help.worm cli.help.skillpact cli.help.url cli.help.json cli.help.skillpact_cache cli.help.lang "" cli.help.exit)
+# <<< cli-messages
 
-終了コード: 0=完了(status ok/partial) / 2=status error（インベントリを作れない・全モジュール失敗） / 64=引数・環境エラー
-'
-usage() { printf '%s' "$USAGE_TEXT"; }   # cat を使わない（PATH の 2 段目の無害化より前に呼ばれうるため）
+# cli_text KEY [key=value...] → RENDERED (in the terminal language)
+cli_text() {
+  local k="$1"; shift
+  if [ "$ZES_LANG_RESOLVED" = ja ]; then zes_render "${CLI_MSG_JA[$k]-$k}" "$@"; else zes_render "${CLI_MSG_EN[$k]-$k}" "$@"; fi
+}
+# cli_fail KEY [key=value...] … prints "ZES: <message>" to stderr and exits 64
+cli_fail() { cli_text "$@"; printf 'ZES: %s\n' "$RENDERED" >&2; exit 64; }
+usage() {  # printf only: no cat (it can run before the second PATH sanitising)
+  local k
+  for k in "${CLI_HELP_LINES[@]}"; do
+    if [ -n "$k" ]; then cli_text "$k"; printf '%s\n' "$RENDERED"; else printf '\n'; fi
+  done
+}
 
-# 引数・環境エラー（exit 64）。値は端末向けに符号化して表示する（制御文字・C1 制御文字による端末エスケープ注入の防止）
-arg_error() {  # arg_error MESSAGE [VALUE]
-  if [ $# -ge 2 ]; then zes_enc "$2"; printf 'ZES: %s%s\n' "$1" "$ENC_TERM" >&2
-  else printf 'ZES: %s\n' "$1" >&2; fi
-  exit 64
+# Argument / environment errors (exit 64). Values are encoded for the terminal (no escape injection by control or
+#   C1 control characters)
+arg_error() {  # arg_error KEY [key=value...]
+  local k="$1" a; shift
+  local -a kv=()
+  for a in "$@"; do zes_enc "${a#*=}"; kv+=("${a%%=*}=$ENC_TERM"); done
+  cli_fail "$k" "${kv[@]}"
 }
 
 set_mode() {
   if [ -n "$MODE" ] && [ "$MODE" != "$1" ]; then
-    arg_error "モード指定が重複しています（$MODE と $1）"
+    arg_error cli.arg.mode_conflict a="$MODE" b="$1"
   fi
   MODE="$1"
 }
+
+# --lang was read before parsing (so argument errors use it); a missing or invalid value is an argument error
+if [ "$ZES_LANG_ARG_SET" -eq 1 ]; then
+  case "$ZES_LANG_ARG" in en|ja) ;; *) arg_error cli.arg.lang ;; esac
+fi
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -170,16 +296,17 @@ while [ $# -gt 0 ]; do
     --url) [ $# -ge 2 ] || { usage >&2; exit 64; }; TARGET_URL="$2"; shift 2 ;;
     --json) JSON_OUT=1; shift ;;
     --skillpact-cache) [ $# -ge 2 ] || { usage >&2; exit 64; }; SKILLPACT_CACHE="$2"; shift 2 ;;
+    --lang) shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    *) usage >&2; arg_error "不明な引数: " "$1" ;;
+    *) usage >&2; arg_error cli.arg.unknown value="$1" ;;
   esac
 done
 [ -n "$MODE" ] || MODE="quick"
 
-[ -d "$ROOT" ] || arg_error "--root がディレクトリではありません: " "$ROOT"
+[ -d "$ROOT" ] || arg_error cli.arg.root_not_dir value="$ROOT"
 case "$ROOT" in -*) ROOT="./$ROOT" ;; esac  # "-" や "-dash" を cd のオプション/OLDPWD と解釈させない
 ROOT="$(cd -- "$ROOT" 2>/dev/null && pwd -P)"
-{ [ -n "$ROOT" ] && [ -d "$ROOT" ]; } || arg_error "--root を解決できません"
+{ [ -n "$ROOT" ] && [ -d "$ROOT" ]; } || arg_error cli.arg.root_unresolved
 # RP … パス連結用の検査ルート（"/" のときは空。"$RP/x" が "//x" にならないように）
 RP="${ROOT%/}"
 
@@ -190,21 +317,63 @@ OS_NAME="$(uname -s 2>/dev/null || echo unknown)"
 
 # ホーム（ZES_HOME / HOME）も ROOT と同様に実パスへ正規化する（相対パス・末尾スラッシュ・シンボリックリンクのまま
 # 出力すると findings[].path が絶対パスにならない / "//" を含む / 実体と異なるパスになるため）
-[ -n "$HOME_DIR" ] || arg_error "ホームディレクトリが未設定です（ZES_HOME または HOME を指定してください）"
-[ -d "$HOME_DIR" ] || arg_error "ZES_HOME/HOME がディレクトリではありません: " "$HOME_DIR"
+[ -n "$HOME_DIR" ] || arg_error cli.arg.home_unset
+[ -d "$HOME_DIR" ] || arg_error cli.arg.home_not_dir value="$HOME_DIR"
 case "$HOME_DIR" in -*) HOME_DIR="./$HOME_DIR" ;; esac
 HOME_DIR="$(cd -- "$HOME_DIR" 2>/dev/null && pwd -P)"
-{ [ -n "$HOME_DIR" ] && [ -d "$HOME_DIR" ]; } || arg_error "ZES_HOME/HOME を解決できません"
+{ [ -n "$HOME_DIR" ] && [ -d "$HOME_DIR" ]; } || arg_error cli.arg.home_unresolved
 
 if [ -n "$TARGET_URL" ]; then
   case "$TARGET_URL" in
     http://*|https://*) ;;
-    *) arg_error "--url は http:// または https:// のみ受け付けます" ;;
+    *) arg_error cli.arg.url_scheme http="http://" https="https://" ;;
   esac
   case "$TARGET_URL" in
-    *[[:space:]\'\"\`\$\;\|\&\<\>]*) arg_error "--url に使用できない文字が含まれています" ;;
+    *[[:space:]\'\"\`\$\;\|\&\<\>]*) arg_error cli.arg.url_chars ;;
   esac
 fi
+
+# Message catalog (i18n/en.json and, for a Japanese terminal, i18n/ja.json): read once, by one awk run, into
+#   MSG_EN (findings.json: detail is always English) and MSG_LANG (the terminal). No jq: a run without jq must give the
+#   same detail and id. The files are flat JSON, one "key": "value" per line, with only \" and \\ escapes
+I18N_DIR="${ZES_I18N_DIR:-$SCRIPT_DIR/i18n}"
+declare -A MSG_EN=() MSG_LANG=()
+ZES_CATALOG_AWK='
+  FNR == 1 { fi++ }
+  { line = $0 }
+  line == "{" || line == "}" { next }
+  {
+    if (substr(line, 1, 1) != "\"") { bad = 1; exit }
+    i = index(substr(line, 2), "\""); key = substr(line, 2, i - 1)
+    if (key !~ /^[a-z0-9_.]+$/ || substr(line, i + 2, 3) != ": \"") { bad = 1; exit }
+    r = substr(line, i + 5); v = ""; n = length(r); done = 0
+    for (k = 1; k <= n; k++) {
+      c = substr(r, k, 1)
+      if (c == "\\") { k++; c = substr(r, k, 1); if (c != "\"" && c != "\\") { bad = 1; exit } v = v c; continue }
+      if (c == "\"") { done = 1; break }
+      v = v c }
+    rest = substr(r, k + 1)
+    if (!done || (rest != "" && rest != ",")) { bad = 1; exit }
+    printf "%s\037%s\037%s\n", (fi == 1 ? "E" : "J"), key, v; nk++ }
+  END { if (!bad && nk > 0) print "OK" }'
+zes_load_catalog() {
+  local en="$I18N_DIR/en.json" ja="$I18N_DIR/ja.json" f line t k ok=0
+  local -a files=("$en")
+  [ "$ZES_LANG_RESOLVED" = ja ] && files+=("$ja")
+  for f in "${files[@]}"; do { [ -f "$f" ] && [ -r "$f" ]; } || cli_fail cli.err.catalog path="$f"; done
+  local -a lines=()
+  mapfile -t lines < <(awk "$ZES_CATALOG_AWK" "${files[@]}" 2>/dev/null)
+  for line in "${lines[@]}"; do
+    case "$line" in
+      OK) ok=1 ;;
+      E"$US_CHAR"*) line="${line#E"$US_CHAR"}"; k="${line%%"$US_CHAR"*}"; t="${line#*"$US_CHAR"}"; MSG_EN["$k"]="$t"; MSG_LANG["$k"]="$t" ;;
+      J"$US_CHAR"*) line="${line#J"$US_CHAR"}"; k="${line%%"$US_CHAR"*}"; t="${line#*"$US_CHAR"}"; MSG_LANG["$k"]="$t" ;;
+    esac
+  done
+  [ "$ok" -eq 1 ] || cli_fail cli.err.catalog path="${files[*]}"
+}
+US_CHAR=$'\037'
+zes_load_catalog
 
 # jq / git は無害化した PATH で 1 度だけ絶対パスに解決し、以降は常にその絶対パスで起動する
 #   （関数 jq は "$JQ_BIN" を呼ぶ。git は safe_git の "$GIT_BIN" のみ）
@@ -215,7 +384,7 @@ HAVE_JQ=0
 [ -n "$JQ_BIN" ] && HAVE_JQ=1
 [ "${ZES_FORCE_NO_JQ:-0}" = "1" ] && HAVE_JQ=0
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zes.XXXXXX")" || { echo "ZES: 一時ディレクトリを作成できません" >&2; exit 64; }
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zes.XXXXXX")" || cli_fail cli.err.tmpdir
 TMP_DIR="$(cd -- "$TMP_DIR" && pwd -P)" || exit 64
 TMPDIR_REAL=""; [ -n "${TMPDIR:-}" ] && TMPDIR_REAL="$(cd -- "$TMPDIR" 2>/dev/null && pwd -P)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -241,11 +410,15 @@ else
 fi
 
 CURRENT_MODULE=""
+# msg KEY [key=value...] → RENDERED: the catalog entry in the terminal language
+msg() { local k="$1"; shift; zes_render "${MSG_LANG[$k]-$k}" "$@"; }
+# log_section "§N" … the title is log.section.sN
 log_section() {
   CURRENT_MODULE="$1"
-  printf '\n%s== %s %s ==%s\n' "$C_CYN" "$1" "${2:-}" "$C_OFF" >&3
+  msg "log.section.s${1#§}"
+  printf '\n%s== %s %s ==%s\n' "$C_CYN" "$1" "$RENDERED" "$C_OFF" >&3
 }
-log_info() { zes_enc "$*"; printf '%s  %s%s\n' "$C_DIM" "$ENC_TERM" "$C_OFF" >&3; }
+log_info() { msg "$@"; zes_enc "$RENDERED"; printf '%s  %s%s\n' "$C_DIM" "$ENC_TERM" "$C_OFF" >&3; }
 
 sha256_str() {
   if command -v sha256sum >/dev/null 2>&1; then printf '%s' "$1" | sha256sum | awk '{print $1}'
@@ -404,9 +577,12 @@ default_related() {
   return 0
 }
 
-# emit LEVEL CAMPAIGN PATH DETAIL [SKILLPACT_JSON] [EXTRA_JSON]
-#   findings[].id は module|campaign|path|detail（JSON に出力する値そのもの＝zes_enc の正規形）から決定的に生成（§6 保証）
-#   evidence_hash は通常ファイルならその SHA-256、それ以外は detail の SHA-256（findings 1.0 と同じ。変えない）
+# emit LEVEL CAMPAIGN PATH CODE [key=value ...] [--sp=SKILLPACT_JSON] [--x=EXTRA_JSON]
+#   CODE is the message id: detail = render(i18n/en.json "f.CODE", params), always English. The terminal line uses the
+#   selected language. Params are the values of the message (strings), never file contents.
+#   id v2: sha256("zes-id-v2|" module "|" campaign "|" path "|" CODE "|" canon), canon = "key=value" in C-locale key
+#   order joined by U+001F, values in the zes_enc normal form (a null campaign / path is the empty string)
+#   evidence_hash は通常ファイルならその SHA-256、それ以外は（英語の）detail の SHA-256（findings 1.0 と同じ。変えない）
 #   evidence（findings 1.1）は種類つきの証跡: 通常ファイルは file（100MB 超は large_file。evidence_hash と同じ値）、
 #   シンボリックリンクは symlink（readlink の値のバイト列の SHA-256）、ディレクトリは tree（ger-tree-v1）、
 #   それ以外（path なし・FIFO 等・ツリーハッシュを出せないディレクトリ・検査ルート / ホームそのもの）は detail
@@ -414,13 +590,38 @@ default_related() {
 #   パスに不正な UTF-8 バイトがある場合、path は "\xHH" 置換後の値になるため errors[] に non_utf8_path を記録する
 declare -A SEEN_IDS=()
 emit() {
-  local level="$1" campaign="$2" path="$3" detail="$4" sp="${5:-}" extra="${6:-}"
-  local module="$CURRENT_MODULE"
+  local level="$1" campaign="$2" path="$3" code="$4"; shift 4
+  local module="$CURRENT_MODULE" sp="" extra="" a k i j
+  local -a ks=() vs=()
+  for a in "$@"; do
+    case "$a" in
+      --sp=*) sp="${a#--sp=}" ;;
+      --x=*) extra="${a#--x=}" ;;
+      *) ks+=("${a%%=*}"); vs+=("${a#*=}") ;;
+    esac
+  done
+  # params in C-locale key order (insertion sort; [[ > ]] compares bytes under LC_ALL=C)
+  for ((i = 1; i < ${#ks[@]}; i++)); do
+    k="${ks[i]}"; a="${vs[i]}"; j=$((i - 1))
+    while [ "$j" -ge 0 ] && [[ "${ks[j]}" > "$k" ]]; do ks[j + 1]="${ks[j]}"; vs[j + 1]="${vs[j]}"; j=$((j - 1)); done
+    ks[j + 1]="$k"; vs[j + 1]="$a"
+  done
+  local -a kv=()
+  local canon="" pj=""
+  for i in "${!ks[@]}"; do
+    kv+=("${ks[i]}=${vs[i]}")
+    zes_enc "${vs[i]}"
+    [ "$i" -gt 0 ] && canon+=$'\037'
+    canon+="${ks[i]}=$ENC_NORM"
+    pj+="${pj:+,}\"${ks[i]}\":\"$ENC_JSON\""
+  done
   local id ev evk evh color np jp tp pbad nd jd td nc jc
+  zes_render "${MSG_EN["f.$code"]-"f.$code"}" "${kv[@]}"
+  zes_enc "$RENDERED"; nd="$ENC_NORM"; jd="$ENC_JSON"; td="$ENC_TERM"
+  if [ "$ZES_LANG_RESOLVED" != en ]; then zes_render "${MSG_LANG["f.$code"]-"f.$code"}" "${kv[@]}"; zes_enc "$RENDERED"; td="$ENC_TERM"; fi
   zes_enc "$path"; np="$ENC_NORM"; jp="$ENC_JSON"; tp="$ENC_TERM"; pbad="$ENC_BAD"
-  zes_enc "$detail"; nd="$ENC_NORM"; jd="$ENC_JSON"; td="$ENC_TERM"
   zes_enc "$campaign"; nc="$ENC_NORM"; jc="$ENC_JSON"
-  id="sha256:$(sha256_str "$module|$nc|$np|$nd")"
+  id="sha256:$(sha256_str "zes-id-v2|$module|$nc|$np|$code|$canon")"
   # 同じ id は 1 回だけ。生のパスが違うのに正規形が同じ（"\xHH" という文字列と不正なバイト 0xHH）なら、
   #   落とした重複を errors[] に記録する（dedup_findings と同じ扱い。サブシェルをまたぐものは dedup_findings が拾う）
   if [ -n "${SEEN_IDS[$id]+x}" ]; then
@@ -446,9 +647,10 @@ emit() {
   case "$extra" in *'"related":'*) ;; *) extra="$(x_join "$extra" "$(default_related "$module" "$path")")" ;; esac
   if [ -z "$evh" ]; then evk="detail"; evh="$ev"; fi
   {
-    printf '{"id":"%s","level":"%s","module":"%s","campaign":%s,"path":%s,"detail":%s,"evidence_hash":"sha256:%s"' \
+    # "id" must stay the first member (dedup_findings cuts it at a fixed offset)
+    printf '{"id":"%s","level":"%s","module":"%s","campaign":%s,"path":%s,"detail":"%s","evidence_hash":"sha256:%s","code":"%s","params":{%s}' \
       "$id" "$level" "$(json_escape "$module")" "$( [ -n "$campaign" ] && printf '"%s"' "$jc" || printf null)" \
-      "$( [ -n "$path" ] && printf '"%s"' "$jp" || printf null)" "$( [ -n "$detail" ] && printf '"%s"' "$jd" || printf null)" "$ev"
+      "$( [ -n "$path" ] && printf '"%s"' "$jp" || printf null)" "$jd" "$ev" "$code" "$pj"
     [ -n "$extra" ] && printf ',%s' "$extra"
     printf ',"evidence":{"kind":"%s","hash":"sha256:%s"}' "$evk" "$evh"
     [ -n "$sp" ] && printf ',"skillpact":%s' "$sp"
@@ -465,7 +667,7 @@ high()     { emit HIGH "$@"; }
 medium()   { emit MEDIUM "$@"; }
 low()      { emit LOW "$@"; }
 info()     { emit INFO "$@"; }
-safe()     { zes_enc "$*"; printf '%s[SAFE]%s %s\n' "$C_GRN" "$C_OFF" "$ENC_TERM" >&3; }
+safe()     { msg "$@"; zes_enc "$RENDERED"; printf '%s[SAFE]%s %s\n' "$C_GRN" "$C_OFF" "$ENC_TERM" >&3; }
 
 record_error() {
   local module="$1" reason="$2" jr tr
@@ -814,9 +1016,9 @@ safe_git() {
 #   jq 不在時は「トップレベルセクション内の最初の同名キーの文字列配列」を抽出する。
 #   rules/ioc.json は grep フォールバックのため 1 エントリ 1 行の整形を維持すること。
 # ---------------------------------------------------------------------------
-[ -r "$IOC_FILE" ] || { echo "ZES: IoC データベースを読めません: $IOC_FILE" >&2; exit 64; }
+[ -r "$IOC_FILE" ] || cli_fail cli.err.ioc_unreadable path="$IOC_FILE"
 if [ "$HAVE_JQ" -eq 1 ] && ! jq -e . "$IOC_FILE" >/dev/null 2>&1; then
-  echo "ZES: IoC データベースが不正な JSON です: $IOC_FILE" >&2; exit 64
+  cli_fail cli.err.ioc_invalid path="$IOC_FILE"
 fi
 
 read_ioc() {
@@ -1276,11 +1478,13 @@ check_lockfile_versions() {
       fi
       x="$(x_join "$(x_kind "$kind")" "$x" "$(pkg_related "$eco" "$dname" "$dsrc")")"
       if [ "$hit" -eq 1 ] && [ "$match" = "vulnerable_versions" ]; then
-        high "$camp" "$dsrc" "脆弱なバージョン ${dname}@${dver:-?}（${eco}、悪性ではなく CVE の影響範囲）${safev:+。修正版: $safev 以上}" "" "$x"
+        if [ -n "$safev" ]; then high "$camp" "$dsrc" s15.pkg_vulnerable_fixed ecosystem="$eco" fixed_version="$safev" package="$dname" version="${dver:-?}" --x="$x"
+        else high "$camp" "$dsrc" s15.pkg_vulnerable ecosystem="$eco" package="$dname" version="${dver:-?}" --x="$x"; fi
       elif [ "$hit" -eq 1 ]; then
-        critical "$camp" "$dsrc" "侵害パッケージ ${dname}@${dver:-?} を検出（${eco}）${safev:+。安全版: $safev}" "" "$x"
+        if [ -n "$safev" ]; then critical "$camp" "$dsrc" s15.pkg_compromised_safe ecosystem="$eco" package="$dname" safe_version="$safev" version="${dver:-?}" --x="$x"
+        else critical "$camp" "$dsrc" s15.pkg_compromised ecosystem="$eco" package="$dname" version="${dver:-?}" --x="$x"; fi
       elif [ "$match" = "unknown_versions" ]; then
-        medium "$camp" "$dsrc" "侵害報告のあるパッケージ ${dname}@${dver:-?}（侵害版の特定バージョン未定義のため要確認）" "" "$x"
+        medium "$camp" "$dsrc" s15.pkg_reported package="$dname" version="${dver:-?}" --x="$x"
       fi
     done < <(tsv_us <"$DEPS_TSV")
   done < <(tsv_us <"$TMP_DIR/packages.tsv")
@@ -1348,12 +1552,12 @@ intel_files() {
           ($1 in want) { h=$1; sub(/^[0-9a-f]+ [ *]/,""); print h "\t" $0 }' "$TMP_DIR/intel_sha.lst" - \
       | while IFS=$'\t' read -r h f; do
           IFS=$'\t' read -r camp sev _ < <(grep -F -- "$h" "$TMP_DIR/intel_sha.tsv" | head -n1)
-          critical "$camp" "$f" "既知の悪性ファイル（SHA-256 一致）"
+          critical "$camp" "$f" intel.file_sha256
         done
   fi
   while IFS=$'\t' read -r camp sev name; do
     [ -n "$name" ] || continue
-    while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知の悪性ファイル名（${name}）"; done \
+    while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" intel.file_name name="$name"; done \
       < <(files_named "^$(printf '%s' "$name" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
   done < <(intel_jq '.intel.files[]? | .campaign as $c | (.name_severity // "HIGH") as $s | (.names // [])[] | [$c, $s, .] | @tsv')
 }
@@ -1378,9 +1582,9 @@ intel_actions() {
       [ -n "$f" ] || continue
       workflow_text "$f" | grep -i -E -o "uses:[[:space:]]*[\"']?$(printf '%s' "$act" | sed 's/[.[\*^$+?(){}|]/\\&/g')@[^\"'[:space:]#,}]+" 2>/dev/null | sed -E 's/.*@//' | sort -u | while IFS= read -r ref; do
         if printf '%s\n' "$bad" | tr ',' '\n' | grep_q -x -F -- "$ref"; then
-          critical "$camp" "$f" "侵害が報告されたアクション ${act}@${ref}"
+          critical "$camp" "$f" intel.action_compromised action="$act" ref="$ref"
         elif [ -n "$safe" ] && ! printf '%s\n' "$safe" | tr ',' '\n' | grep_q -x -F -- "$ref" && ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
-          lvl_emit "$sev" "$camp" "$f" "侵害が報告されたアクション ${act} を安全版（${safe}）以外のタグで参照（${ref}）"
+          lvl_emit "$sev" "$camp" "$f" intel.action_unsafe_tag action="$act" ref="$ref" safe="$safe"
         fi
       done
     done < <(workflow_files; files_path '/action\.ya?ml$')
@@ -1394,7 +1598,7 @@ intel_workflow_strings() {
   while IFS=$'\t' read -r camp sev str; do
     [ -n "$str" ] || continue
     files_path '(/\.github/workflows/[^/]+\.ya?ml|\.gitlab-ci\.ya?ml|/\.circleci/config\.ya?ml|/Jenkinsfile|/action\.ya?ml)$' | grep_lF "$str" | while IFS= read -r f; do
-      [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "CI 設定に既知の悪性パターン（${camp}）"
+      [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" intel.ci_pattern campaign="$camp"
     done
   done < <(intel_jq '.intel.workflow_strings[]? | .campaign as $c | (.severity // "HIGH") as $s | (.strings // [])[] | [$c, $s, .] | @tsv')
 }
@@ -1414,7 +1618,10 @@ intel_extensions() {
           if [ -n "$bads" ] && [ -n "$ver" ]; then
             hit=0; local b; for b in ${bads//,/ }; do version_matches_spec "${ver%%_*}" "$b" && hit=1; done
           fi
-          [ "$hit" -eq 1 ] && lvl_emit "$sev" "$camp" "$d" "悪性・侵害が報告されたブラウザ拡張（${id}${ver:+ ${ver}}）"
+          if [ "$hit" -eq 1 ]; then
+            if [ -n "$ver" ]; then lvl_emit "$sev" "$camp" "$d" intel.browser_ext_version id="$id" version="$ver"
+            else lvl_emit "$sev" "$camp" "$d" intel.browser_ext id="$id"; fi
+          fi
         done < <({ extension_manifests | sed -E 's#/manifest\.json$##'; files_path "/Extensions/${id}/" | sed -E "s#(/Extensions/${id})/.*#\1#"; } | grep -E "/Extensions/${id}(/[^/]+)?$" | sort -u)
         ;;
       vscode|openvsx|cursor|windsurf)
@@ -1423,7 +1630,7 @@ intel_extensions() {
           ver="${d##*/${id}-}"; ver="${ver%%-*}"
           hit=1
           if [ -n "$bads" ]; then hit=0; local b; for b in ${bads//,/ }; do version_matches_spec "$ver" "$b" && hit=1; done; fi
-          [ "$hit" -eq 1 ] && lvl_emit "$sev" "$camp" "$d" "悪性・侵害が報告された IDE 拡張（${id} ${ver}）"
+          [ "$hit" -eq 1 ] && lvl_emit "$sev" "$camp" "$d" intel.ide_ext id="$id" version="$ver"
         done < <(for d in "$HOME_DIR"/.vscode/extensions/"$id"-[0-9]* "$HOME_DIR"/.vscode-server/extensions/"$id"-[0-9]* "$HOME_DIR"/.cursor/extensions/"$id"-[0-9]* "$HOME_DIR"/.windsurf/extensions/"$id"-[0-9]*; do printf '%s\n' "$d"; done
                  files_path "/extensions/${id}-[0-9][^/]*/package\.json$" | sed -E 's#/package\.json$##')
         ;;
@@ -1449,30 +1656,30 @@ intel_host_files() {
           '$TMPDIR/'*) host_enabled && e="${TMPDIR:-/tmp}/${val#\$TMPDIR/}" ;;
           /*) host_enabled && e="$val" ;;
           *)
-            while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス（検査ルート内）"; done < <(files_path "/$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
+            while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" intel.host_path_in_root; done < <(files_path "/$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
             ;;
         esac
         if [ -n "$e" ]; then
           # 空白を含むパス（Application Support 等）を分割せず、グロブ文字のみ展開する
           local IFS=$'\n'
-          for f in $e; do [ -e "$f" ] || [ -L "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス"; done
+          for f in $e; do [ -e "$f" ] || [ -L "$f" ] && lvl_emit "$sev" "$camp" "$f" intel.host_path; done
           unset IFS
         fi
         ;;
       file_name)
-        while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェアのファイル名（${val}）"; done < <(files_named "^$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
+        while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" intel.host_file_name name="$val"; done < <(files_named "^$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
         ;;
       launch_label)
         while IFS= read -r f; do
-          [ -n "$f" ] && [ "$(plist_label "$f")" = "$val" ] && critical "$camp" "$f" "既知のマルウェアの LaunchAgent/Daemon（${val}）"
+          [ -n "$f" ] && [ "$(plist_label "$f")" = "$val" ] && critical "$camp" "$f" intel.launchd label="$val"
         done < <(files_path '/LaunchAgents/[^/]+\.plist$|/LaunchDaemons/[^/]+\.plist$'; ls "$HOME_DIR"/Library/LaunchAgents/*.plist 2>/dev/null; host_enabled && ls /Library/LaunchAgents/*.plist /Library/LaunchDaemons/*.plist 2>/dev/null)
         ;;
       systemd_unit)
         for f in "$HOME_DIR/.config/systemd/user/$val" /etc/systemd/system/"$val" /usr/lib/systemd/system/"$val"; do
           case "$f" in /etc/*|/usr/*) host_enabled || continue ;; esac
-          [ -e "$f" ] && critical "$camp" "$f" "既知のマルウェアの systemd ユニット（${val}）"
+          [ -e "$f" ] && critical "$camp" "$f" intel.systemd_unit unit="$val"
         done
-        while IFS= read -r f; do [ -n "$f" ] && critical "$camp" "$f" "既知のマルウェアの systemd ユニット（${val}）"; done < <(files_path "/systemd/(user|system)/$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
+        while IFS= read -r f; do [ -n "$f" ] && critical "$camp" "$f" intel.systemd_unit unit="$val"; done < <(files_path "/systemd/(user|system)/$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
         ;;
     esac
   done < <(intel_jq '.intel.host[]? | .campaign as $c | (.severity // "HIGH") as $s |
@@ -1486,7 +1693,7 @@ intel_host_processes() {
   while IFS=$'\t' read -r camp name; do
     [ -n "$name" ] || continue
     ZES_V_N="$name" awk 'BEGIN { n = ENVIRON["ZES_V_N"] } {c=$2; sub(/.*\//,"",c); if (c==n) print $1}' "$TMP_DIR/ps.txt" | while IFS= read -r pid; do
-      critical "$camp" "/proc/$pid" "既知のマルウェアのプロセス名（${name}、pid ${pid}）"
+      critical "$camp" "/proc/$pid" intel.process name="$name" pid="$pid"
     done
   done < <(intel_jq '.intel.host[]? | .campaign as $c | (.process_names // [])[] | [$c, .] | @tsv')
 }
@@ -1502,8 +1709,11 @@ intel_infra() {
     local -a fx; IFS=',' read -r -a fx <<<"$fixed"
     while IFS=$'\t' read -r ver f; do
       [ -n "$ver" ] || continue
-      [[ "${ver#v}" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { [ "$ver" = "latest" ] && medium "" "$f" "${iid} が浮動タグ（latest）。${cve} の修正版（${fixed//,/ }）以上か確認"; continue; }
-      version_branch_vulnerable "${ver#v}" "${fx[@]}" && lvl_emit "$sev" "" "$f" "${iid} ${ver} は ${cve}${cvss:+（CVSS ${cvss}）}の影響範囲（修正版: ${fixed//,/ }）" "" "$(x_kind runtime.cve)"
+      [[ "${ver#v}" =~ ^[0-9]+(\.[0-9]+)+$ ]] || { [ "$ver" = "latest" ] && medium "" "$f" intel.infra_latest cve="$cve" fixed="${fixed//,/ }" product="$iid"; continue; }
+      if version_branch_vulnerable "${ver#v}" "${fx[@]}"; then
+        if [ -n "$cvss" ]; then lvl_emit "$sev" "" "$f" intel.infra_vulnerable_cvss cve="$cve" cvss="$cvss" fixed="${fixed//,/ }" product="$iid" version="$ver" --x="$(x_kind runtime.cve)"
+        else lvl_emit "$sev" "" "$f" intel.infra_vulnerable cve="$cve" fixed="${fixed//,/ }" product="$iid" version="$ver" --x="$(x_kind runtime.cve)"; fi
+      fi
     done < <(detect_service_version "$pat")
   done < <(intel_jq '.infrastructures[] | (.generic == true) as $g | .id as $i | (.image_patterns // []) as $p | .cves[] | select($g or .generic == true) | select((.fixed // []) | length > 0) |
             [$i, ($p | join("|")), .id, (.fixed | join(",")), (.severity // (if (.cvss // 0) >= 9 or .kev then "CRITICAL" else "HIGH" end)), ((.cvss // "") | tostring)] | @tsv' | tsv_us)
@@ -1532,7 +1742,7 @@ intel_tool_versions() {
     local -a fx; IFS=',' read -r -a fx <<<"$fixed"
     # ディストリビューション版はバックポートで修正済みのことが多いため、上限を HIGH とする
     [ "$sev" = "CRITICAL" ] && sev=HIGH
-    version_branch_vulnerable "$v" "${fx[@]}" && lvl_emit "$sev" "" "$(command -v "$bin")" "${bin} ${v} は ${cve} の影響範囲（修正版: ${fixed//,/ }）。ディストリビューションのバックポート有無を確認" "" "$(x_kind runtime.cve)"
+    version_branch_vulnerable "$v" "${fx[@]}" && lvl_emit "$sev" "" "$(command -v "$bin")" intel.tool_vulnerable cve="$cve" fixed="${fixed//,/ }" tool="$bin" version="$v" --x="$(x_kind runtime.cve)"
   done < <(intel_jq '.infrastructures[] | select(.binary != null) | .id as $i | .binary as $b | .cves[] | select((.fixed // []) | length > 0) |
             [$i, $b, .id, (.fixed | join(",")), (.severity // (if (.cvss // 0) >= 9 or .kev then "CRITICAL" else "HIGH" end))] | @tsv')
 }
@@ -1546,7 +1756,7 @@ intel_apps() {
     for f in "/Applications/$bundle/Contents/Info.plist" "$HOME_DIR/Applications/$bundle/Contents/Info.plist"; do
       [ -f "$f" ] || continue
       v="$(grep -A1 'CFBundleShortVersionString' "$f" | grep -o -E '[0-9]+(\.[0-9]+)+' | head -n1)"
-      [ -n "$v" ] && version_lt "$v" "$fixed" && lvl_emit "$sev" "$camp" "$f" "${bundle%.app} ${v} は ${cve} の影響範囲（修正版 ${fixed}）" "" "$(x_kind runtime.cve)"
+      [ -n "$v" ] && version_lt "$v" "$fixed" && lvl_emit "$sev" "$camp" "$f" intel.app_vulnerable app="${bundle%.app}" cve="$cve" fixed="$fixed" version="$v" --x="$(x_kind runtime.cve)"
     done
   done < <(intel_jq '.intel.apps[]? | [.campaign, .bundle, .cve, (.severity // "HIGH"), .fixed] | @tsv' | tsv_us)
 }
@@ -1563,7 +1773,7 @@ intel_strings() {
       # エージェントの設定ファイルのフックなら、その文字列を含むフックの位置を locators に入れる
       local x=""
       case "$f" in */.claude/settings.json|*/.claude/settings.local.json) x="$(x_locators "$(json_ptr_locators "$f" "$HOOK_PATHS_STR" --arg s "$str")")" ;; esac
-      lvl_emit "$sev" "$camp" "$f" "既知の攻撃キャンペーンの文字列（${camp}）" "" "$x"
+      lvl_emit "$sev" "$camp" "$f" intel.campaign_string campaign="$camp" --x="$x"
     done
   done < <(intel_jq ".intel.strings[]? | select(.module == \"$CURRENT_MODULE\") | .campaign as \$c | (.severity // \"HIGH\") as \$s | (.file_regex // \".\") as \$r | (.strings // [])[] | [\$c, \$s, \$r, .] | @tsv")
 }
@@ -1578,18 +1788,18 @@ host_enabled() { [ "$HOST_CHECKS" = "1" ]; }
 
 # §1 マーカー・プロセス署名
 check_s1() {
-  log_section "§1" "マーカー・プロセス署名"
+  log_section "§1"
   local m f sig
   # ROOT 内のマーカー同名ファイル（オフライン解析用）
   while IFS= read -r m; do
     local base="${m##*/}"
-    while IFS= read -r f; do [ -n "$f" ] && critical "" "$f" "侵害マーカーファイル（$base）を検出"; done \
+    while IFS= read -r f; do [ -n "$f" ] && critical "" "$f" s1.marker_file name="$base"; done \
       < <(ZES_G="$base" awk 'BEGIN{g=ENVIRON["ZES_G"]; gsub(/\./,"[.]",g); gsub(/\*/,".*",g); g="^" g "$"} {n=$0; sub(/.*\//,"",n); if (n ~ g) print}' "$FILES_LIST")
   done < <(read_ioc '.markers')
-  host_enabled || { log_info "ホスト検査は無効（ZES_HOST_CHECKS=0）"; return 0; }
+  host_enabled || { log_info log.host_checks_off; return 0; }
   while IFS= read -r m; do
     local IFS=$'\n'
-    for f in $m; do [ -e "$f" ] && critical "" "$f" "侵害マーカーを検出（$m）"; done
+    for f in $m; do [ -e "$f" ] && critical "" "$f" s1.marker marker="$m"; done
     unset IFS
   done < <(read_ioc '.markers')
   if command -v ps >/dev/null 2>&1; then
@@ -1597,7 +1807,7 @@ check_s1() {
     while IFS= read -r sig; do
       [ -n "$sig" ] || continue
       grep -F -- "$sig" "$TMP_DIR/ps.txt" 2>/dev/null | grep -v -F -- "zes-scan" | awk '{print $1}' | while IFS= read -r pid; do
-        critical "" "/proc/$pid" "プロセス署名 '$sig' に一致するプロセス（pid $pid）"
+        critical "" "/proc/$pid" s1.process_signature pid="$pid" signature="$sig"
       done
     done < <(read_ioc '.process_signatures')
   else
@@ -1609,7 +1819,7 @@ check_s1() {
     while IFS= read -r ioc; do
       ioc="$(refang "$ioc")"
       grep -F -- "$ioc" "$TMP_DIR/lsof.txt" 2>/dev/null | awk '{print $2}' | sort -u | while IFS= read -r pid; do
-        critical "teampcp-mini-shai-hulud" "/proc/$pid" "C2 ($ioc) への接続（pid $pid）"
+        critical "teampcp-mini-shai-hulud" "/proc/$pid" s1.c2_connection ioc="$ioc" pid="$pid"
       done
     done < <(read_ioc '.worm_iocs.teampcp.c2_ip')
   else
@@ -1620,7 +1830,7 @@ check_s1() {
     for mp in /proc/[0-9]*/maps; do
       [ -r "$mp" ] || continue
       if grep -q -E '(/tmp/|/dev/shm/|/var/tmp/)[^ ]*\.so' "$mp" 2>/dev/null; then
-        high "" "$mp" "一時領域から読み込まれた共有ライブラリ（LD_PRELOAD/インジェクション疑い）"
+        high "" "$mp" s1.tmp_library
       fi
     done
   fi
@@ -1636,10 +1846,10 @@ PTH_SAFE_RE+='|[[:space:]]*import[[:space:]]+(__editable___[A-Za-z0-9_]+_finder|
 # package.json のライフサイクルスクリプト（install 系と prepare 系。prepare は git 依存の取得時・npm install 時にも実行される）
 PKG_HOOK_RE='^(pre|post)?(install|prepare)$'
 check_s2() {
-  log_section "§2" "Python/Nodeフック"
+  log_section "§2"
   local f
-  while IFS= read -r f; do [ -n "$f" ] && critical "litellm-oct2026" "$f" "悪性フックファイル（${f##*/}）を検出"; done < <(files_named '^cook\.(pth|py)$')
-  while IFS= read -r f; do [ -n "$f" ] && high "litellm-oct2026" "$f" "Python起動時自動実行フック（${f##*/}）"; done < <(files_named '^(sitecustomize|usercustomize)\.py$')
+  while IFS= read -r f; do [ -n "$f" ] && critical "litellm-oct2026" "$f" s2.hook_file name="${f##*/}"; done < <(files_named '^cook\.(pth|py)$')
+  while IFS= read -r f; do [ -n "$f" ] && high "litellm-oct2026" "$f" s2.startup_hook name="${f##*/}"; done < <(files_named '^(sitecustomize|usercustomize)\.py$')
   # .pth の import 行は Python 起動のたびに exec される。標準の形（virtualenv の _virtualenv、setuptools の
   # distutils-precedence、PEP 660 editable の __editable___*_finder / _editable_impl_*）以外の import 行は MEDIUM、
   # 難読化・通信・実行（exec/eval/compile/os.system/popen/getattr/__import__ 等）を伴うものは HIGH
@@ -1650,21 +1860,21 @@ check_s2() {
       | grep -a -v -x -E "$PTH_SAFE_RE")"
     [ -n "$pthl" ] || continue
     if printf '%s\n' "$pthl" | grep_q -a -E '(^|[^A-Za-z0-9_])(exec|eval|compile|getattr|popen|system|__import__)[[:space:]]*\(|b64decode|subprocess|urllib|socket|fromhex|marshal|zlib|codecs|pickle|ctypes|requests'; then
-      high "litellm-oct2026" "$f" ".pth ファイルに起動時実行コード（import + exec/eval/system/通信）"
+      high "litellm-oct2026" "$f" s2.pth_exec
     else
-      medium "litellm-oct2026" "$f" ".pth ファイルに起動時に実行される import 行（標準の virtualenv / editable 形式以外。内容を確認）"
+      medium "litellm-oct2026" "$f" s2.pth_import
     fi
   done < <(files_named '\.pth$')
   # PYTHONSTARTUP
-  if host_enabled && [ -n "${PYTHONSTARTUP:-}" ]; then medium "" "${PYTHONSTARTUP}" "環境変数 PYTHONSTARTUP が設定されています"; fi
-  while IFS= read -r f; do [ -n "$f" ] && fgrep_q 'PYTHONSTARTUP=' "$f" && medium "" "$f" "シェル設定で PYTHONSTARTUP を設定"; done < <(home_rc_paths)
+  if host_enabled && [ -n "${PYTHONSTARTUP:-}" ]; then medium "" "${PYTHONSTARTUP}" s2.pythonstartup_env; fi
+  while IFS= read -r f; do [ -n "$f" ] && fgrep_q 'PYTHONSTARTUP=' "$f" && medium "" "$f" s2.pythonstartup_rc; done < <(home_rc_paths)
   # __pycache__/*.pyc とソースの不一致（ヘッダの mtime/size のみ読む。flags=0 の時刻ベース pyc に限る）
   local pyc src flags hm hs sm ss
   while IFS= read -r pyc; do
     [ -n "$pyc" ] || continue
     src="$(dirname -- "$(dirname -- "$pyc")")/$(basename -- "$pyc" | sed -E 's/\.(cpython|pypy)[^.]*\.pyc$/.py/; s/\.pyc$/.py/')"
     if [ ! -f "$src" ]; then
-      case "$pyc" in */site-packages/*|*/dist-packages/*) medium "" "$pyc" "対応するソースの無い .pyc（ソースレス配布・差し替え疑い）" ;; esac
+      case "$pyc" in */site-packages/*|*/dist-packages/*) medium "" "$pyc" s2.pyc_sourceless ;; esac
       continue
     fi
     read -r flags hm hs < <(od -An -tu4 -j4 -N12 -- "$pyc" 2>/dev/null) || continue
@@ -1672,7 +1882,7 @@ check_s2() {
     sm="$(stat_mtime "$src")"; ss="$(stat_size "$src")"
     [ -n "$sm" ] && [ -n "$ss" ] || continue
     if [ "$hm" != "$(( sm % 4294967296 ))" ] || [ "$hs" != "$(( ss % 4294967296 ))" ]; then
-      high "" "$pyc" ".pyc ヘッダとソース（mtime/size）が不一致（バイトコード差し替え疑い）"
+      high "" "$pyc" s2.pyc_mismatch
     fi
   done < <(files_path '/__pycache__/[^/]+\.pyc$')
   # package.json の preinstall/install/postinstall
@@ -1690,9 +1900,9 @@ check_s2() {
     fi
     [ -n "$scripts" ] || continue
     if printf '%s' "$scripts" | grep_q -E '(curl|wget|bash|sh -c|base64|eval|node -e|\.mjs|https?://)'; then
-      high "" "$f" "install / prepare ライフサイクルスクリプトに不審なコマンド"
+      high "" "$f" s2.lifecycle_suspicious
     elif [[ "$f" != */node_modules/* ]]; then
-      medium "" "$f" "install / prepare ライフサイクルスクリプトが定義されています（ignore-scripts 推奨）"
+      medium "" "$f" s2.lifecycle_defined
     fi
   done < <(files_named '^package\.json$')
   return 0
@@ -1700,13 +1910,13 @@ check_s2() {
 
 # §3 GitLab
 check_s3() {
-  log_section "§3" "GitLab"
+  log_section "§3"
   local ver f found=0
   # 判定する CVE は ioc の infrastructures[gitlab].cves（修正版があるもの）。jq が無い場合は既知の 3 件
   local -a gcves; local -A gcvss=()
   if [ "$HAVE_JQ" -eq 1 ]; then
     local c v
-    while IFS=$'\t' read -r c v; do gcves+=("$c"); [ -n "$v" ] && gcvss[$c]="CVSS $v"; done \
+    while IFS=$'\t' read -r c v; do gcves+=("$c"); [ -n "$v" ] && gcvss[$c]="$v"; done \
       < <(jq -r '.infrastructures[] | select(.id=="gitlab") | .cves[] | select((.fixed // []) | length > 0) | [.id, ((.cvss // "") | tostring)] | @tsv' "$IOC_FILE")
   else
     gcves=(CVE-2026-110264 CVE-2026-85706 CVE-2026-19478)
@@ -1718,21 +1928,25 @@ check_s3() {
     for cve in "${gcves[@]}"; do
       local -a gfix; mapfile -t gfix < <(infra_fixed gitlab "$cve")
       if [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "${#gfix[@]}" -gt 0 ] && version_branch_vulnerable "$ver" "${gfix[@]}"; then
-        critical "" "$f" "GitLab ${ver} は ${cve}（${gcvss[$cve]:-CVSS 9 以上}）の影響範囲（修正版: ${gfix[*]}。系列に修正版が無い場合は ${gfix[0]} 以降へ移行）" "" "$(x_kind runtime.cve)"
+        if [ -n "${gcvss[$cve]:-}" ]; then
+          critical "" "$f" s3.gitlab_vulnerable cve="$cve" cvss="${gcvss[$cve]}" first_fixed="${gfix[0]}" fixed="${gfix[*]}" version="$ver" --x="$(x_kind runtime.cve)"
+        else
+          critical "" "$f" s3.gitlab_vulnerable_cvss9 cve="$cve" first_fixed="${gfix[0]}" fixed="${gfix[*]}" version="$ver" --x="$(x_kind runtime.cve)"
+        fi
       fi
     done
-    [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || high "" "$f" "GitLab のバージョンを特定できません（${ver}）。${gcves[*]} の修正版を確認してください"
+    [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || high "" "$f" s3.gitlab_version_unknown cves="${gcves[*]}" version="$ver"
   done < <(detect_service_version 'gitlab/gitlab-(ee|ce)')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q "trusted_proxies.*0\.0\.0\.0/0" "$f" && high "" "$f" "gitlab.rb の trusted_proxies が全開放（0.0.0.0/0）"
-    fgrep_q "^[[:space:]]*nginx\['custom_gitlab_server_config'\]" "$f" && medium "" "$f" "gitlab.rb に nginx['custom_gitlab_server_config'] が設定されています（設定注入の確認）"
+    fgrep_q "trusted_proxies.*0\.0\.0\.0/0" "$f" && high "" "$f" s3.trusted_proxies
+    fgrep_q "^[[:space:]]*nginx\['custom_gitlab_server_config'\]" "$f" && medium "" "$f" s3.custom_nginx
   done < <(files_named '^gitlab\.rb$'; host_enabled && [ -f /etc/gitlab/gitlab.rb ] && echo /etc/gitlab/gitlab.rb)
   if host_enabled && [ -f "$TMP_DIR/ps.txt" ] && grep -q -E 'gitlab-(workhorse|rails)|gitaly' "$TMP_DIR/ps.txt"; then
-    high "" "" "GitLab プロセスが稼働中（ps）。バージョンと修正適用を確認してください"
+    high "" "" s3.gitlab_process
     found=1
   fi
-  [ "$found" -eq 0 ] && safe "GitLab の痕跡なし"
+  [ "$found" -eq 0 ] && safe log.safe.gitlab_none
   return 0
 }
 
@@ -1803,8 +2017,7 @@ os_release_id() {
 # 実際に配信に使われるパッケージ（php*-fpm / libapache2-mod-php* / php*-cgi / php*-cli）をベンダー修正版と比較する
 #   出力: php_distro_packages が判定したパッケージ数（ホストの dpkg を判定できたら 0 以外）
 php_distro_packages() {
-  local f base id vid pkg ver src row fixed adv url note n=0
-  note="パッケージが修正済みでも、稼働中の PHP-FPM / Apache ワーカーが更新後に再起動されたか（配信中のバイナリ）を確認"
+  local f base id vid pkg ver src row fixed adv url n=0
   while IFS= read -r f; do
     [ -f "$f" ] || continue
     awk 'BEGIN { RS = "" } {
@@ -1828,14 +2041,14 @@ php_distro_packages() {
       n=$((n + 1))
       row="$(jq -r --arg v "$id" --arg r "$vid" --arg s "$src" '.php2shell_distro.packages[]? | select(.vendor == $v and .release == $r and .source_package == $s) | [.fixed, .advisory, .url] | @tsv' "$IOC_FILE" 2>/dev/null | head -n1)"
       if [ -z "$row" ]; then
-        medium "" "$f" "${pkg} ${ver}（${id:-OS 不明} ${vid}、ソース ${src}）: PHP2Shell（CVE-2026-109618/109619）の対応するベンダー勧告を特定できません。修正状況は不明（ベンダーの勧告で確認）。${note}"
+        medium "" "$f" s4.dpkg_no_advisory os="${id:-unknown}" os_version="$vid" package="$pkg" source="$src" version="$ver"
         continue
       fi
       IFS=$'\t' read -r fixed adv url <<<"$row"
       if deb_version_lt "$ver" "$fixed"; then
-        high "" "$f" "${pkg} ${ver}（${id} ${vid}）は PHP2Shell（CVE-2026-109618/109619）のベンダー修正版 ${fixed}（${adv} ${url}）未満。潜在的に脆弱。${note}"
+        high "" "$f" s4.dpkg_vulnerable advisory="$adv" fixed="$fixed" os="$id" os_version="$vid" package="$pkg" url="$url" version="$ver"
       else
-        info "" "$f" "${pkg} ${ver}（${id} ${vid}）は PHP2Shell のベンダー修正版 ${fixed}（${adv}）以上。${note}"
+        info "" "$f" s4.dpkg_fixed advisory="$adv" fixed="$fixed" os="$id" os_version="$vid" package="$pkg" version="$ver"
       fi
     done <"$TMP_DIR/php-dpkg.tsv"
   done < <(host_enabled && echo /var/lib/dpkg/status; files_path '/var/lib/dpkg/status$')
@@ -1843,21 +2056,25 @@ php_distro_packages() {
 }
 
 check_s4() {
-  log_section "§4" "PHP"
+  log_section "§4"
   local f
   local -a pfix; mapfile -t pfix < <(infra_fixed php CVE-2026-109618)
   php_judge() {  # php_judge VERSION PATH SOURCE(upstream|distro|header)
     local ver="$1" path="$2" src="$3" st
     st="$(php_status "$ver")"
-    local eol=""; [[ "$ver" =~ ^v?([0-9]+)\.([0-9]+)\. ]] && version_lt "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.0" "8.2.0" && eol="（8.1 以前は公式の修正リリースなし。サポート版へ移行）"
-    case "$src:$st" in
-      *:fixed) [ "$src" = "header" ] && safe "PHP ${ver}（ヘッダ申告）は upstream 修正版以上（インストール自体は未検証）" ;;
-      *:prerelease) medium "" "$path" "PHP ${ver} はプレリリース版（dev/alpha/beta/RC）。PHP2Shell（CVE-2026-109618/109619）の修正有無を版番号から判断できません（要確認）" ;;
-      *:unknown_branch) medium "" "$path" "PHP ${ver} は PHP2Shell の修正版一覧（${pfix[*]}）にないブランチ。修正済みとは判断できません（要確認）" ;;
-      *:unparsed) medium "" "$path" "PHP のバージョン表記（${ver}）を解釈できません。PHP2Shell（CVE-2026-109618/109619）の修正状況は不明（要確認）" ;;
-      distro:vulnerable) high "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の upstream 修正版（${pfix[*]}）未満${eol}。ディストリビューションのバックポート有無を確認" ;;
-      header:vulnerable) high "" "$path" "PHP ${ver}（HTTP ヘッダで申告された版）は PHP2Shell（CVE-2026-109618/109619）の影響範囲の可能性（潜在的に脆弱）${eol}。ヘッダではバックポートの有無を判断できないため、サーバー上のパッケージを確認" ;;
-      *:vulnerable) critical "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の影響範囲（修正版: ${pfix[*]}）${eol}" ;;
+    # 8.1 and earlier have no official fix release: separate *_eol codes
+    local eol=0; [[ "$ver" =~ ^v?([0-9]+)\.([0-9]+)\. ]] && version_lt "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.0" "8.2.0" && eol=1
+    case "$src:$st:$eol" in
+      *:fixed:*) [ "$src" = "header" ] && safe log.safe.php_header_fixed version="$ver" ;;
+      *:prerelease:*) medium "" "$path" s4.php_prerelease version="$ver" ;;
+      *:unknown_branch:*) medium "" "$path" s4.php_unknown_branch fixed="${pfix[*]}" version="$ver" ;;
+      *:unparsed:*) medium "" "$path" s4.php_unparsed version="$ver" ;;
+      distro:vulnerable:0) high "" "$path" s4.php_vulnerable_distro fixed="${pfix[*]}" version="$ver" ;;
+      distro:vulnerable:1) high "" "$path" s4.php_vulnerable_distro_eol fixed="${pfix[*]}" version="$ver" ;;
+      header:vulnerable:0) high "" "$path" s4.php_vulnerable_header version="$ver" ;;
+      header:vulnerable:1) high "" "$path" s4.php_vulnerable_header_eol version="$ver" ;;
+      *:vulnerable:0) critical "" "$path" s4.php_vulnerable fixed="${pfix[*]}" version="$ver" ;;
+      *:vulnerable:1) critical "" "$path" s4.php_vulnerable_eol fixed="${pfix[*]}" version="$ver" ;;
     esac
   }
   local ndeb; ndeb="$(php_distro_packages)"
@@ -1865,16 +2082,17 @@ check_s4() {
     local v
     v="$(safe_probe php -n -v | head -n1 | awk '{print $2}')"
     if [ -n "$v" ]; then
-      info "" "" "PHP ${v} がインストールされています"
+      info "" "" s4.php_installed version="$v"
       case "$v" in
         *ubuntu*|*deb*|*el[0-9]*|*fc[0-9]*|*-[0-9]*)
           # dpkg のパッケージ DB でベンダー修正版と比較できた場合は、版番号だけの判定（バックポート不明）を重ねない
-          if [ "${ndeb:-0}" -gt 0 ]; then log_info "PHP ${v}: dpkg のパッケージ版で判定済み"; else php_judge "$v" "$(command -v php)" distro; fi ;;
+          if [ "${ndeb:-0}" -gt 0 ]; then log_info log.php_dpkg_checked version="$v"; else php_judge "$v" "$(command -v php)" distro; fi ;;
         *) php_judge "$v" "$(command -v php)" upstream ;;
       esac
       if [ -f /etc/redhat-release ]; then
-        local rows; rows="$(intel_jq '.php2shell_distro.packages[]? | select(.vendor == "rhel") | "RHEL \(.release) \(.source_package) ≥ \(.fixed)（\(.advisory)）"' | paste -sd'/' -)"
-        medium "" "/etc/redhat-release" "RHEL 系: rpm DB は静的に読めないため PHP2Shell の修正状況を判定できません。配信中の php-fpm / mod_php の所有パッケージを rpm -qf で確認し、ベンダー修正版と比較（${rows:-Red Hat の CVE-2026-109618/109619 情報を参照}）"
+        local rows; rows="$(intel_jq '.php2shell_distro.packages[]? | select(.vendor == "rhel") | "RHEL \(.release) \(.source_package) >= \(.fixed) (\(.advisory))"' | paste -sd'/' -)"
+        if [ -n "$rows" ]; then medium "" "/etc/redhat-release" s4.rhel_rows rows="$rows"
+        else medium "" "/etc/redhat-release" s4.rhel; fi
       fi
     fi
   fi
@@ -1891,17 +2109,17 @@ check_s4() {
     [ -n "$f" ] || continue
     grep -E -i -o '^[[:space:]]*FROM[[:space:]]+([^ ]*/)?php(:[^ ]+)?' "$f" 2>/dev/null | while IFS= read -r line; do
       case "$line" in
-        *php:*latest*|*php) medium "" "$f" "PHP ベースイメージが浮動タグ（latest/タグなし）" ;;
-        *) info "" "$f" "PHP ベースイメージ: ${line##* }" ;;
+        *php:*latest*|*php) medium "" "$f" s4.php_image_floating ;;
+        *) info "" "$f" s4.php_image image="${line##* }" ;;
       esac
     done
   done < <(files_named '^(Dockerfile.*|.*\.dockerfile)$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q '^[[:space:]]*auto_prepend_file[[:space:]]*=[[:space:]]*[^[:space:];]' "$f" && high "" "$f" "php.ini の auto_prepend_file が設定されています（全リクエストで実行）" "" \
-      "$(x_text_locators "$f" '^[[:space:]]*auto_prepend_file[[:space:]]*=[[:space:]]*[^[:space:];]')"
-    fgrep_q '^[[:space:]]*disable_functions[[:space:]]*=[[:space:]]*$' "$f" && medium "" "$f" "php.ini の disable_functions が空欄" "" \
-      "$(x_text_locators "$f" '^[[:space:]]*disable_functions[[:space:]]*=[[:space:]]*$')"
+    fgrep_q '^[[:space:]]*auto_prepend_file[[:space:]]*=[[:space:]]*[^[:space:];]' "$f" && high "" "$f" s4.auto_prepend \
+      --x="$(x_text_locators "$f" '^[[:space:]]*auto_prepend_file[[:space:]]*=[[:space:]]*[^[:space:];]')"
+    fgrep_q '^[[:space:]]*disable_functions[[:space:]]*=[[:space:]]*$' "$f" && medium "" "$f" s4.disable_functions_empty \
+      --x="$(x_text_locators "$f" '^[[:space:]]*disable_functions[[:space:]]*=[[:space:]]*$')"
   done < <(files_named '^php.*\.ini$'; host_enabled && ls /etc/php*/php.ini /etc/php/*/*/php.ini /usr/local/etc/php/php.ini 2>/dev/null)
   if [ -n "$TARGET_URL" ]; then
     if [ "$OFFLINE" = "1" ]; then record_error "§4" "skipped_offline"; return 0; fi
@@ -1919,8 +2137,8 @@ check_s4() {
     hdrs="$(printf '%s\n' "$hdrs" | awk '/^HTTP\// { b = "" } { b = b $0 "\n" } END { printf "%s", b }')"
     xpb="$(printf '%s\n' "$hdrs" | grep -i '^x-powered-by:' | sed -E 's/^[^:]*:[[:space:]]*//' | paste -sd';' - | sed 's/;/; /g')"
     srv="$(printf '%s\n' "$hdrs" | grep -i '^server:' | sed -E 's/^[^:]*:[[:space:]]*//' | paste -sd';' - | sed 's/;/; /g')"
-    [ -n "$xpb" ] && medium "" "" "${TARGET_URL}: X-Powered-By ヘッダでバージョンを露出: ${xpb}"
-    printf '%s' "$srv" | grep_q -i -E '(^|[^A-Za-z])PHP[ /]' && medium "" "" "${TARGET_URL}: Server ヘッダで PHP のバージョンを露出: ${srv}"
+    [ -n "$xpb" ] && medium "" "" s4.header_exposes url="$TARGET_URL" value="$xpb"
+    printf '%s' "$srv" | grep_q -i -E '(^|[^A-Za-z])PHP[ /]' && medium "" "" s4.server_exposes url="$TARGET_URL" value="$srv"
     # 両ヘッダの PHP/x.y.z を全て判定し、警告（vulnerable）> 不明 > 修正済み の順で最も悪いものを採用（安心材料を優先しない）
     while IFS= read -r pv; do
       [ -n "$pv" ] || continue
@@ -1929,14 +2147,14 @@ check_s4() {
       [ "$bst" = "vulnerable" ] && break
     done < <(printf '%s\n%s\n' "$srv" "$xpb" | grep -o -i -E '(^|[^A-Za-z])PHP[ /][^[:space:],;)]+' | sed -E 's/^[^Pp]*[Pp][Hh][Pp][ \/]//')
     if [ -n "$best" ]; then php_judge "$best" "" header
-    else safe "PHP のバージョンを示すヘッダなし（$TARGET_URL。修正状況はヘッダからは不明）"; fi
+    else safe log.safe.php_no_header url="$TARGET_URL"; fi
   fi
   return 0
 }
 
 # §5 Python ランタイム（3.15.1 / 3.14.9 / 3.13.17 以降）
 check_s5() {
-  log_section "§5" "Pythonランタイム"
+  log_section "§5"
   local -a mins; mapfile -t mins < <(read_ioc '.runtime_minimums.python')
   local v f
   check_py_version() {
@@ -1944,7 +2162,7 @@ check_s5() {
     [[ "$ver" =~ ^3\.[0-9]+(\.[0-9]+)?$ ]] || return 0
     [[ "$ver" =~ ^3\.[0-9]+$ ]] && ver="$ver.0"
     if version_branch_vulnerable "$ver" "${mins[@]}"; then
-      high "" "$path" "Python ${ver} は修正版（${mins[*]} 以降）未満" "" "$(x_kind runtime.cve)"
+      high "" "$path" s5.python_old fixed="${mins[*]}" version="$ver" --x="$(x_kind runtime.cve)"
     fi
   }
   if host_enabled; then
@@ -1966,7 +2184,7 @@ check_s5() {
 
 # §6 eMudhra（認証局危殆化）
 check_s6() {
-  log_section "§6" "eMudhra"
+  log_section "§6"
   local host camp="emudhra-ca-oct2026"
   if [ "$OFFLINE" = "1" ] || ! host_enabled; then
     record_error "§6" "skipped_offline"
@@ -1979,8 +2197,8 @@ check_s6() {
       curl -q -sI --connect-timeout 5 --max-time 10 --proto '=https' -o /dev/null -- "https://$host/" 2>/dev/null
       local rc=$?
       case "$rc" in
-        0) critical "$camp" "" "危殆化した eMudhra 中間 CA をシステムの curl が信頼しています（https://$host/ への接続成功）" ;;
-        35|51|53|54|58|59|60|77|80|83|90|91) safe "eMudhra テスト接続は SSL エラー（$host、信頼ストア更新済み）" ;;
+        0) critical "$camp" "" s6.curl_trusts url="https://$host/" ;;
+        35|51|53|54|58|59|60|77|80|83|90|91) safe log.safe.emudhra_tls_error host="$host" ;;
         *) record_error "§6" "network_timeout" ;;
       esac
     done < <(read_ioc '.emudhra.probe_hosts')
@@ -1992,12 +2210,12 @@ check_s6() {
   for d in /opt/homebrew/Cellar/ca-certificates /usr/local/Cellar/ca-certificates "$HOME_DIR/.linuxbrew/Cellar/ca-certificates"; do
     [ -d "$d" ] || continue
     v="$(ls -1 "$d" 2>/dev/null | sort | tail -n1)"
-    [ -n "$v" ] && [[ "$v" < "$min" ]] && high "$camp" "$d/$v" "Homebrew ca-certificates ${v} は ${min} 未満（eMudhra 侵害 CA が未除去）" "" "$(x_kind runtime.cve)"
+    [ -n "$v" ] && [[ "$v" < "$min" ]] && high "$camp" "$d/$v" s6.homebrew_ca min="$min" version="$v" --x="$(x_kind runtime.cve)"
   done
   min="$(read_ioc '.runtime_minimums.certifi')"
   build_deps
   awk -F'\t' '$1=="pypi" && $2=="certifi" {print $3"\t"$4}' "$DEPS_TSV" | tsv_us | while IFS="$US" read -r v d; do
-    version_lt "$v" "$min" && high "$camp" "$d" "certifi ${v} は ${min} 未満（eMudhra 失効が未反映）" "" "$(x_kind runtime.cve)"
+    version_lt "$v" "$min" && high "$camp" "$d" s6.certifi min="$min" version="$v" --x="$(x_kind runtime.cve)"
   done
   local -a gmins; mapfile -t gmins < <(read_ioc '.runtime_minimums.go')
   if host_enabled; then
@@ -2007,14 +2225,14 @@ check_s6() {
     v=""
     [ -n "${goroot:-}" ] && [ -f "$goroot/VERSION" ] && v="$(head -n1 "$goroot/VERSION" | grep -o -E 'go[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
     v="${v#go}"
-    [ -n "$v" ] && version_branch_vulnerable "$v" "${gmins[@]}" && high "" "$(command -v go)" "Go ${v} は ${gmins[*]} 未満" "" "$(x_kind runtime.cve)"
+    [ -n "$v" ] && version_branch_vulnerable "$v" "${gmins[@]}" && high "" "$(command -v go)" s6.go_old min="${gmins[*]}" version="$v" --x="$(x_kind runtime.cve)"
   fi
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     v="$(grep -E '^(toolchain go|go )[0-9]' "$d" | tail -n1 | grep -o -E '[0-9]+\.[0-9]+(\.[0-9]+)?')"
     [ -n "$v" ] || continue
     [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]] && v="$v.0"
-    version_branch_vulnerable "$v" "${gmins[@]}" && medium "" "$d" "go.mod の Go ${v} は ${gmins[*]} 未満（証明書ストア更新を含む修正版を使用）" "" "$(x_kind runtime.cve)"
+    version_branch_vulnerable "$v" "${gmins[@]}" && medium "" "$d" s6.go_mod_old min="${gmins[*]}" version="$v" --x="$(x_kind runtime.cve)"
   done < <(files_named '^go\.mod$')
   return 0
 }
@@ -2052,9 +2270,9 @@ emudhra_os_packages() {
     # ベンダーは同じイメージの os-release から判定する（Ubuntu の SRU 版 20260601~24.04.1 は "ubuntu" を含まない）
     local osid=""; IFS=$'\t' read -r osid _ < <(os_release_id "${f%/var/lib/dpkg/status}")
     if [[ "$v" == *ubuntu* ]] || [ "$osid" = "ubuntu" ]; then
-      [ "${v:0:8}" -lt "${min_ub:-20260816}" ] 2>/dev/null && high "$camp" "$f" "ca-certificates ${v}（Ubuntu）は eMudhra 侵害 CA を含む（修正版 ${min_ub}ubuntu0.*）" "" "$(x_kind runtime.cve)"
+      [ "${v:0:8}" -lt "${min_ub:-20260816}" ] 2>/dev/null && high "$camp" "$f" s6.ca_ubuntu min="$min_ub" version="$v" --x="$(x_kind runtime.cve)"
     elif ! debian_ca_fixed "$v"; then
-      high "$camp" "$f" "ca-certificates ${v}（Debian 系）は eMudhra 侵害 CA を含む（修正版 20250419~deb12u2 / 20250419+deb13u1 / 20260816+nmu1）" "" "$(x_kind runtime.cve)"
+      high "$camp" "$f" s6.ca_debian version="$v" --x="$(x_kind runtime.cve)"
     fi
   done < <(host_enabled && echo /var/lib/dpkg/status; files_path '/var/lib/dpkg/status$')
   # apk（Alpine / Wolfi / Chainguard）: /lib/apk/db/installed
@@ -2063,14 +2281,14 @@ emudhra_os_packages() {
     v="$(awk '/^P:ca-certificates$/ {p=1; next} p && /^V:/ {sub(/^V:/,""); print; exit} /^$/ {p=0}' "$f")"
     [ -n "$v" ] || continue
     local amin; amin="$(read_ioc '.emudhra.os_ca_certificates.alpine')"
-    [[ "${v%%-r*}" < "${amin%%-r*}" ]] && high "$camp" "$f" "ca-certificates ${v}（apk）は eMudhra 侵害 CA を含む（Alpine 修正版 ${amin}、Chainguard 20260909-r3）" "" "$(x_kind runtime.cve)"
+    [[ "${v%%-r*}" < "${amin%%-r*}" ]] && high "$camp" "$f" s6.ca_apk min="$amin" version="$v" --x="$(x_kind runtime.cve)"
   done < <(host_enabled && echo /lib/apk/db/installed; files_path '/lib/apk/db/installed$')
   # pacman（Arch）: /var/lib/pacman/local/ca-certificates-mozilla-<ver>/
   local d
   for d in /var/lib/pacman/local/ca-certificates-mozilla-*; do
     host_enabled && [ -d "$d" ] || continue
     v="${d##*/ca-certificates-mozilla-}"
-    version_lt "${v%-*}" "3.131.1" && high "$camp" "$d" "ca-certificates-mozilla ${v} は eMudhra 侵害 CA を含む（修正版 3.131.1-1）" "" "$(x_kind runtime.cve)"
+    version_lt "${v%-*}" "3.131.1" && high "$camp" "$d" s6.ca_pacman version="$v" --x="$(x_kind runtime.cve)"
   done
   return 0
 }
@@ -2082,7 +2300,7 @@ emudhra_runtimes() {
   judge() {  # judge NAME VERSION PATH FIXED...
     local name="$1" ver="$2" path="$3"; shift 3
     [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 0
-    version_branch_vulnerable "$ver" "$@" && high "$camp" "$path" "${name} ${ver} は eMudhra 侵害 CA を信頼（修正版: $*）" "" "$(x_kind runtime.cve)"
+    version_branch_vulnerable "$ver" "$@" && high "$camp" "$path" s6.runtime_trusts fixed="$*" name="$name" version="$ver" --x="$(x_kind runtime.cve)"
   }
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -2098,7 +2316,7 @@ emudhra_runtimes() {
   while IFS=$'\t' read -r v f; do judge "Deno" "${v#v}" "$f" "${dfix[@]}"; done < <(detect_service_version 'denoland/deno')
   while IFS=$'\t' read -r v f; do
     v="${v%%_*}"; v="${v%%+*}"
-    [[ "$v" =~ ^8u?([0-9]+) ]] && { [ "${BASH_REMATCH[1]}" -lt "$(read_ioc '.emudhra.fixed.java8_update')" ] && high "$camp" "$f" "Java 8u${BASH_REMATCH[1]} は eMudhra 侵害 CA を信頼（修正版 8u511）" "" "$(x_kind runtime.cve)"; continue; }
+    [[ "$v" =~ ^8u?([0-9]+) ]] && { [ "${BASH_REMATCH[1]}" -lt "$(read_ioc '.emudhra.fixed.java8_update')" ] && high "$camp" "$f" s6.java8_trusts update="${BASH_REMATCH[1]}" --x="$(x_kind runtime.cve)"; continue; }
     judge "Java" "$v" "$f" "${jfix[@]}"
   done < <(detect_service_version '(eclipse-temurin|amazoncorretto|openjdk|bellsoft/liberica-openjdk-[a-z]+|azul/zulu-openjdk)')
   # ホスト: Docker Desktop（macOS の Info.plist）、mise、rustup（バージョン情報はファイルから読む）
@@ -2106,7 +2324,7 @@ emudhra_runtimes() {
     for f in /Applications/Docker.app/Contents/Info.plist "$HOME_DIR/Applications/Docker.app/Contents/Info.plist"; do
       [ -f "$f" ] || continue
       v="$(grep -A1 'CFBundleShortVersionString' "$f" | grep -o -E '[0-9]+(\.[0-9]+)+' | head -n1)"
-      [ -n "$v" ] && version_lt "$v" "$(read_ioc '.emudhra.fixed.docker_desktop')" && high "$camp" "$f" "Docker Desktop ${v} は eMudhra 侵害 CA を信頼（修正版 $(read_ioc '.emudhra.fixed.docker_desktop')）" "" "$(x_kind runtime.cve)"
+      [ -n "$v" ] && version_lt "$v" "$(read_ioc '.emudhra.fixed.docker_desktop')" && high "$camp" "$f" s6.docker_desktop fixed="$(read_ioc '.emudhra.fixed.docker_desktop')" version="$v" --x="$(x_kind runtime.cve)"
     done
   fi
   return 0
@@ -2122,7 +2340,7 @@ ai_instruction_files() {
 
 # §7 AI/エディタ設定（不可視文字・BiDi・ホモグリフ、Git hooks、runOn: folderOpen）
 check_s7() {
-  log_section "§7" "AI/エディタ"
+  log_section "§7"
   local f
   # 不可視文字: U+200B–200F・U+202A–202E・U+2066–2069・タグ文字（U+E0000–E007F）・異体字セレクタ（U+FE00–FE0D、
   # U+E0100–E01EF、U+FE00–FE0F の 2 連続以上。絵文字の表示用 U+FE0E/FE0F の単独は対象外）による文字列の埋め込み
@@ -2130,8 +2348,8 @@ check_s7() {
   local cyr=$'[A-Za-z][\xd0\xd1][\x80-\xbf]|[\xd0\xd1][\x80-\xbf][A-Za-z]|[A-Za-z]\xce[\x91-\xbf]|\xce[\x91-\xbf][A-Za-z]'
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -q -a -E -- "$inv" "$f" 2>/dev/null && high "" "$f" "AI指示ファイルに不可視文字/Unicode BiDi 制御文字（U+200B–200F, U+202A–202E, U+2066–2069, タグ文字, 異体字セレクタ）"
-    grep -q -a -E -- "$cyr" "$f" 2>/dev/null && medium "" "$f" "AI指示ファイルにラテン文字と混在するキリル/ギリシャ文字（ホモグリフ疑い）"
+    grep -q -a -E -- "$inv" "$f" 2>/dev/null && high "" "$f" s7.invisible_chars
+    grep -q -a -E -- "$cyr" "$f" 2>/dev/null && medium "" "$f" s7.homoglyph
   done < <(ai_instruction_files)
   # Git hooks（検査ルート直下・入れ子の .git〔gitdir: ファイル・worktree の共有側を含む〕の hooks の非 sample ファイル）
   local hookdir
@@ -2141,16 +2359,16 @@ check_s7() {
       [ -f "$f" ] || continue
       case "$f" in *.sample) continue ;; esac
       if fgrep_q '(curl|wget|base64|nc |/dev/tcp|python[0-9.]* -c|node -e)' "$f"; then
-        high "" "$f" "Git hook に通信/難読化コマンド"
+        high "" "$f" s7.git_hook_suspicious
       else
-        medium "" "$f" "有効な Git hook が存在します（内容を目視確認）"
+        medium "" "$f" s7.git_hook
       fi
     done
   done <"$GIT_HOOKS_LIST"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q '"runOn"[[:space:]]*:[[:space:]]*"folderOpen"' "$f" && high "mcp-poisoning" "$f" "フォルダを開くだけで自動実行されるタスク（runOn: folderOpen）" "" \
-      "$(x_locators "$(json_ptr_locators "$f" "$TASK_RUNON_PATHS")")"
+    fgrep_q '"runOn"[[:space:]]*:[[:space:]]*"folderOpen"' "$f" && high "mcp-poisoning" "$f" s7.folder_open \
+      --x="$(x_locators "$(json_ptr_locators "$f" "$TASK_RUNON_PATHS")")"
   done < <(files_path '/\.(vscode|claude|cursor)/tasks\.json$')
   intel_strings
   intel_apps
@@ -2159,30 +2377,30 @@ check_s7() {
 
 # §8 クラウド/コンテナ
 check_s8() {
-  log_section "§8" "クラウド/コンテナ"
+  log_section "§8"
   local f
-  while IFS= read -r f; do [ -n "$f" ] && medium "" "$f" ".env ファイル（シークレット格納の可能性。内容は読み取りません）"; done \
+  while IFS= read -r f; do [ -n "$f" ] && medium "" "$f" s8.env_file; done \
     < <(files_named '^\.env(\.[A-Za-z0-9_-]+)?$' | grep -v -E '\.env\.(example|sample|template|dist)$')
   files_named '^(id_rsa|id_dsa|id_ecdsa|id_ed25519|.*\.pem|.*\.key|.*\.p12|.*\.pfx)$' | grep_l 'PRIVATE KEY' | while IFS= read -r f; do
-    [ -n "$f" ] && [ "$f" != /dev/null ] && high "" "$f" "秘密鍵ファイルがリポジトリ/検査対象内にあります"
+    [ -n "$f" ] && [ "$f" != /dev/null ] && high "" "$f" s8.private_key
   done
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q -i '^[[:space:]]*USER[[:space:]]+(root|0)([[:space:]]|$)' "$f" && medium "" "$f" "Dockerfile が USER root で実行"
+    fgrep_q -i '^[[:space:]]*USER[[:space:]]+(root|0)([[:space:]]|$)' "$f" && medium "" "$f" s8.user_root
     grep -E -i '^[[:space:]]*FROM[[:space:]]+' "$f" 2>/dev/null | awk '{print $2}' | while IFS= read -r img; do
       case "$img" in scratch|'$'*|*@sha256:*) continue ;; esac
-      if [[ "$img" == *:latest ]] || [[ "${img##*/}" != *:* ]]; then medium "" "$f" "浮動タグのベースイメージ（$img）"; fi
+      if [[ "$img" == *:latest ]] || [[ "${img##*/}" != *:* ]]; then medium "" "$f" s8.floating_image image="$img"; fi
     done
   done < <(files_named '^(Dockerfile.*|.*\.dockerfile)$')
   files_named '\.(ya?ml|json)$' | grep_l '/var/run/docker\.sock|/run/docker\.sock' | while IFS= read -r f; do
-    [ -n "$f" ] && [ "$f" != /dev/null ] && high "" "$f" "docker.sock のマウント（コンテナからホスト制御が可能）"
+    [ -n "$f" ] && [ "$f" != /dev/null ] && high "" "$f" s8.docker_sock
   done
   return 0
 }
 
 # §9 Rust/Go/Node タイポスクワット・非公式ソース
 check_s9() {
-  log_section "§9" "Rust/Go/Nodeロックファイル"
+  log_section "§9"
   build_deps
   local f
   # 既知タイポスクワット名の照合は §15 check_lockfile_versions（any_version）で実施
@@ -2191,99 +2409,99 @@ check_s9() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if grep -E -o '"resolved"[[:space:]]*:[[:space:]]*"https?://[^/"]+' "$f" 2>/dev/null | sed -E 's#.*://##' | sort -u | grep -v -E "^($re)$" | grep_q .; then
-      high "" "$f" "公式レジストリ以外から解決された依存関係（依存関係混乱/タイポスクワット）"
+      high "" "$f" s9.non_official_registry
     fi
-    fgrep_q '"resolved"[[:space:]]*:[[:space:]]*"(git\+|github:|https?://[^"]*\.tgz#)' "$f" && medium "" "$f" "Git/URL 直接参照の依存関係"
+    fgrep_q '"resolved"[[:space:]]*:[[:space:]]*"(git\+|github:|https?://[^"]*\.tgz#)' "$f" && medium "" "$f" s9.git_url_dependency
   done < <(files_named '^(package-lock\.json|npm-shrinkwrap\.json)$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -q -E '^source = "git\+' "$f" && medium "" "$f" "Cargo.lock に Git ソースの依存関係"
-    grep -E '^source = "registry\+' "$f" | grep_q -v 'github.com/rust-lang/crates.io-index\|sparse+https://index.crates.io' && high "" "$f" "Cargo.lock に crates.io 以外のレジストリ"
+    grep -q -E '^source = "git\+' "$f" && medium "" "$f" s9.cargo_git_source
+    grep -E '^source = "registry\+' "$f" | grep_q -v 'github.com/rust-lang/crates.io-index\|sparse+https://index.crates.io' && high "" "$f" s9.cargo_registry
   done < <(files_named '^Cargo\.lock$')
   return 0
 }
 
 # §10 OS 永続化（LaunchAgents/crontab/shell rc/履歴）
 check_s10() {
-  log_section "§10" "OS永続化"
+  log_section "§10"
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     # findings 1.1: 該当する行を locators（行番号と行の SHA-256）で示す
     local re
     re='(curl|wget)[^|#]*\|[[:space:]]*(ba|z)?sh'
-    fgrep_q "$re" "$f" && high "" "$f" "シェル設定に curl|sh 形式のリモート実行" "" "$(x_text_locators "$f" "$re")"
+    fgrep_q "$re" "$f" && high "" "$f" s10.curl_sh --x="$(x_text_locators "$f" "$re")"
     re='(base64[[:space:]]+(-d|--decode)|\\x[0-9a-f]{2}\\x[0-9a-f]{2}\\x[0-9a-f]{2})'
-    fgrep_q "$re" "$f" && high "" "$f" "シェル設定に難読化コード（base64 -d / \\x エスケープ）" "" "$(x_text_locators "$f" "$re")"
+    fgrep_q "$re" "$f" && high "" "$f" s10.obfuscated --x="$(x_text_locators "$f" "$re")"
     re='(/tmp/|/dev/shm/|/var/tmp/)[^[:space:]]+[[:space:]]*(&|$)'
-    fgrep_q "$re" "$f" && medium "" "$f" "シェル設定から一時領域のプログラムを起動" "" "$(x_text_locators "$f" "$re")"
+    fgrep_q "$re" "$f" && medium "" "$f" s10.tmp_program --x="$(x_text_locators "$f" "$re")"
   done < <(home_rc_paths)
   if [ -d "$HOME_DIR/Library/LaunchAgents" ]; then
-    for f in "$HOME_DIR"/Library/LaunchAgents/*.plist; do [ -f "$f" ] && info "" "$f" "LaunchAgent（§30 で詳細検査）"; done
+    for f in "$HOME_DIR"/Library/LaunchAgents/*.plist; do [ -f "$f" ] && info "" "$f" s10.launch_agent; done
   fi
   if host_enabled && command -v crontab >/dev/null 2>&1; then
     crontab -l 2>/dev/null >"$TMP_DIR/crontab.txt"
     if [ -s "$TMP_DIR/crontab.txt" ]; then
       if grep -v '^[[:space:]]*#' "$TMP_DIR/crontab.txt" | grep_q -E '(curl|wget|base64|/tmp/|/dev/shm/|nc )'; then
-        high "" "" "ユーザー crontab（$(id -un 2>/dev/null)）に通信/一時領域実行のエントリ"
+        high "" "" s10.crontab_suspicious user="$(id -un 2>/dev/null)"
       else
-        info "" "" "ユーザー crontab（$(id -un 2>/dev/null)）にエントリがあります"
+        info "" "" s10.crontab user="$(id -un 2>/dev/null)"
       fi
     fi
   fi
   for f in .lesshst .viminfo .python_history .node_repl_history .mysql_history .psql_history; do
-    [ -f "$HOME_DIR/$f" ] && info "" "$HOME_DIR/$f" "対話履歴ファイル（内容は読み取りません。侵害時はシークレット混入を確認）"
+    [ -f "$HOME_DIR/$f" ] && info "" "$HOME_DIR/$f" s10.history_file
   done
   return 0
 }
 
 # §11 SSH/GPG 権限
 check_s11() {
-  log_section "§11" "SSH/GPG権限"
+  log_section "§11"
   local d f p bad=0
   for d in "$HOME_DIR/.ssh" "$HOME_DIR/.gnupg"; do
     [ -d "$d" ] || continue
     p="$(stat_perm "$d")"
-    if [ -n "$p" ] && [ $(( 8#$p & 8#077 )) -ne 0 ]; then high "" "$d" "ディレクトリ権限 $p が緩い（chmod 700 を推奨）"; bad=1; fi
+    if [ -n "$p" ] && [ $(( 8#$p & 8#077 )) -ne 0 ]; then high "" "$d" s11.dir_perm mode="$p"; bad=1; fi
     for f in "$d"/*; do
       [ -f "$f" ] && [ ! -L "$f" ] || continue
       case "${f##*/}" in *.pub|known_hosts*|authorized_keys|config|*.conf|pubring.*|trustdb.gpg) continue ;; esac
       p="$(stat_perm "$f")"
-      if [ -n "$p" ] && [ $(( 8#$p & 8#077 )) -ne 0 ]; then high "" "$f" "秘密情報ファイルの権限 $p が緩い（chmod 600 を推奨）"; bad=1; fi
+      if [ -n "$p" ] && [ $(( 8#$p & 8#077 )) -ne 0 ]; then high "" "$f" s11.file_perm mode="$p"; bad=1; fi
     done
   done
-  [ "$bad" -eq 0 ] && safe "SSH/GPG の権限に問題なし"
+  [ "$bad" -eq 0 ] && safe log.safe.ssh_gpg_perms
   return 0
 }
 
 # §12 ワクチン3点（ignore-scripts / PYTHONNOUSERSITE / PIP_REQUIRE_VIRTUALENV）
 check_s12() {
-  log_section "§12" "ワクチン3点"
+  log_section "§12"
   local hit
   hit=0; for f in "$HOME_DIR/.npmrc" "$RP/.npmrc"; do [ -f "$f" ] && { [ "$f" = "$HOME_DIR/.npmrc" ] || in_root_regular "$f"; } && fgrep_q '^[[:space:]]*ignore-scripts[[:space:]]*=[[:space:]]*true' "$f" && hit=1; done
   host_enabled && [ "${npm_config_ignore_scripts:-${NPM_CONFIG_IGNORE_SCRIPTS:-}}" = "true" ] && hit=1
-  [ "$hit" -eq 1 ] && safe "npm ignore-scripts=true" || medium "" "$HOME_DIR/.npmrc" "npm の ignore-scripts=true が未設定"
+  [ "$hit" -eq 1 ] && safe log.safe.npm_ignore_scripts || medium "" "$HOME_DIR/.npmrc" s12.npm_ignore_scripts
   hit=0; host_enabled && [ "${PYTHONNOUSERSITE:-}" = "1" ] && hit=1
   home_rc_paths | grep_l 'PYTHONNOUSERSITE=1' | grep_q -v '^/dev/null$' && hit=1
-  [ "$hit" -eq 1 ] && safe "PYTHONNOUSERSITE=1" || medium "" "" "PYTHONNOUSERSITE=1 が未設定（ユーザー site-packages 経由のフック実行）"
+  [ "$hit" -eq 1 ] && safe log.safe.pythonnousersite || medium "" "" s12.pythonnousersite
   hit=0; host_enabled && [ "${PIP_REQUIRE_VIRTUALENV:-}" = "true" ] && hit=1
   home_rc_paths | grep_l 'PIP_REQUIRE_VIRTUALENV=(true|1)' | grep_q -v '^/dev/null$' && hit=1
   for f in "$HOME_DIR/.config/pip/pip.conf" "$HOME_DIR/.pip/pip.conf" "$HOME_DIR/Library/Application Support/pip/pip.conf"; do
     [ -f "$f" ] && fgrep_q '^[[:space:]]*require-virtualenv[[:space:]]*=[[:space:]]*(true|1)' "$f" && hit=1
   done
-  [ "$hit" -eq 1 ] && safe "PIP_REQUIRE_VIRTUALENV=true" || medium "" "" "PIP_REQUIRE_VIRTUALENV=true が未設定（グローバル環境への pip install）"
+  [ "$hit" -eq 1 ] && safe log.safe.pip_require_virtualenv || medium "" "" s12.pip_require_virtualenv
   return 0
 }
 
 # §13 ハニーポット（atime 監視設計指針・noatime 無効警告）
 check_s13() {
-  log_section "§13" "ハニーポット"
-  log_info "設計指針: ~/.aws/credentials 等にダミー認証情報を置き、atime 更新を監視する（読み取り＝侵害シグナル）"
+  log_section "§13"
+  log_info log.honeypot_tip
   if host_enabled && command -v mount >/dev/null 2>&1; then
     if mount 2>/dev/null | grep -E "[[:space:]]on[[:space:]]+(/|/home|/Users|$HOME_DIR)[[:space:]]" | grep_q 'noatime'; then
-      medium "" "$HOME_DIR" "noatime でマウントされています。atime ハニーポット・アクセス痕跡が機能しません"
+      medium "" "$HOME_DIR" s13.noatime
     else
-      safe "atime が有効（ハニーポット監視が機能）"
+      safe log.safe.atime
     fi
   fi
   return 0
@@ -2297,10 +2515,10 @@ blast_list() {
     [ -e "$e" ] || continue
     local sz mt
     sz="$(stat_size "$e")"; mt="$(stat_mtime "$e")"
-    info "" "$e" "シークレット保管場所が存在（size=${sz:-?} mtime=${mt:-?}。内容は読み取りません。侵害時はローテーション対象）"
+    info "" "$e" s14.secret_store mtime="${mt:-?}" size="${sz:-?}"
   done < <(read_ioc ".blast_radius.$key")
 }
-check_s14() { log_section "§14" "Blast Radius"; blast_list base; return 0; }
+check_s14() { log_section "§14"; blast_list base; return 0; }
 
 # =============================================================================
 # §15〜§19（v4.0）
@@ -2308,12 +2526,12 @@ check_s14() { log_section "§14" "Blast Radius"; blast_list base; return 0; }
 
 # §15 ワーム型サプライチェーン
 check_s15() {
-  log_section "§15" "ワーム型サプライチェーン"
+  log_section "§15"
   local f n h
   # preinstall: "node setup.mjs"
   local pre; pre="$(read_ioc '.worm_iocs.chaindrop.preinstall')"
   files_named '^package\.json$' | grep_lF "$pre" | while IFS= read -r f; do
-    [ -n "$f" ] && [ "$f" != /dev/null ] && critical "chaindrop-keyv" "$f" "ChainDrop の preinstall フック（$pre）"
+    [ -n "$f" ] && [ "$f" != /dev/null ] && critical "chaindrop-keyv" "$f" s15.preinstall hook="$pre"
   done
   # 悪性ファイル実体（ハッシュ一致は CRITICAL、名称一致は HIGH/MEDIUM）
   local -a hashes
@@ -2326,12 +2544,12 @@ check_s15() {
       [ -n "$f" ] || continue
       h="$(sha256_file "$f")"
       if [ -n "$h" ] && printf '%s\n' "${hashes[@]}" | grep_q -x -F -- "$h"; then
-        critical "$camp" "$f" "既知の悪性ハッシュと一致（${n}）"
+        critical "$camp" "$f" s15.worm_hash name="$n"
       elif [ "$n" = "setup.mjs" ]; then
         local pj; pj="$(dirname -- "$f")/package.json"
-        if [ -f "$pj" ] && fgrep_q 'setup\.mjs' "$pj"; then high "$camp" "$f" "package.json から参照される setup.mjs（ChainDrop 型ドロッパー疑い）"; fi
+        if [ -f "$pj" ] && fgrep_q 'setup\.mjs' "$pj"; then high "$camp" "$f" s15.worm_setup; fi
       else
-        high "$camp" "$f" "ワーム関連ファイル名（${n}）"
+        high "$camp" "$f" s15.worm_file name="$n"
       fi
     done < <(files_named "^$(printf '%s' "$n" | sed 's/\./\\./g')\$")
   done < <(read_ioc '.malicious_files' | grep -E '\.(m?js)$')
@@ -2339,25 +2557,25 @@ check_s15() {
   check_lockfile_versions
   # TanStack 不正 Git 依存
   files_named '^(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$' | grep_lF 'github:tanstack/router#79ac49ee' | while IFS= read -r f; do
-    [ -n "$f" ] && [ "$f" != /dev/null ] && critical "teampcp-mini-shai-hulud" "$f" "TanStack の不正 Git 依存（github:tanstack/router#79ac49ee）"
+    [ -n "$f" ] && [ "$f" != /dev/null ] && critical "teampcp-mini-shai-hulud" "$f" s15.tanstack_git
   done
   # Bun 取得痕跡（ライフサイクルスクリプト・ローダー）
   files_path '(/package\.json|\.m?js|\.cjs|\.sh)$' | grep_l '(bun\.sh/install|oven-sh/bun/releases/download)' | while IFS= read -r f; do
-    [ -n "$f" ] && [ "$f" != /dev/null ] && high "teampcp-mini-shai-hulud" "$f" "Bun ランタイムの取得処理（Mini Shai-Hulud 型ペイロード）"
+    [ -n "$f" ] && [ "$f" != /dev/null ] && high "teampcp-mini-shai-hulud" "$f" s15.bun_fetch
   done
   # site-packages/*/__init__.py ドロッパー
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     fgrep_q '(exec|eval)\(' "$f" && fgrep_q '(b64decode|zlib\.decompress|marshal\.loads|bytes\.fromhex)' "$f" \
-      && high "pypi-oct2026" "$f" "site-packages の __init__.py に難読化実行コード（ドロッパー疑い）"
+      && high "pypi-oct2026" "$f" s15.init_dropper
   done < <(files_path '/(site|dist)-packages/[^/]+/__init__\.py$')
   [ -d "$ROOT" ] && files_path '/(site|dist)-packages/lightning/_runtime/' | head -n1 | while IFS= read -r f; do
-    [ -n "$f" ] && critical "pypi-oct2026" "$(dirname -- "$f")" "lightning の _runtime/ ディレクトリ（侵害版の痕跡）"
+    [ -n "$f" ] && critical "pypi-oct2026" "$(dirname -- "$f")" s15.lightning_runtime
   done
   # IronWorm / sckit / Miasma バイナリ名
   while IFS= read -r n; do
     [ -n "$n" ] || continue
-    while IFS= read -r f; do [ -n "$f" ] && critical "post-shaihulud" "$f" "後続ワームのバイナリ名（${n}）"; done < <(files_named "^$(printf '%s' "$n" | sed 's/\./\\./g')\$")
+    while IFS= read -r f; do [ -n "$f" ] && critical "post-shaihulud" "$f" s15.worm_binary name="$n"; done < <(files_named "^$(printf '%s' "$n" | sed 's/\./\\./g')\$")
   done < <(read_ioc '.worm_iocs.post_shaihulud.binaries')
   intel_files
   return 0
@@ -2365,7 +2583,7 @@ check_s15() {
 
 # §16 CI/CD 基盤 RCE（TeamCity / Artifactory / Docker cp）
 check_s16() {
-  log_section "§16" "CI/CD基盤RCE"
+  log_section "§16"
   local ver f
   local -a tc_fixed af_fixed
   if [ "$HAVE_JQ" -eq 1 ]; then
@@ -2377,24 +2595,24 @@ check_s16() {
   fi
   while IFS=$'\t' read -r ver f; do
     [ -n "$ver" ] || continue
-    if [ "$ver" = "latest" ]; then medium "" "$f" "TeamCity が浮動タグ（latest）。CVE-2026-63077 の修正版（${tc_fixed[*]}）を確認"; continue; fi
+    if [ "$ver" = "latest" ]; then medium "" "$f" s16.teamcity_latest fixed="${tc_fixed[*]}"; continue; fi
     if version_branch_vulnerable "$ver" "${tc_fixed[@]}"; then
-      critical "" "$f" "TeamCity ${ver} は CVE-2026-63077（CVSS 9.8, CISA KEV）の影響範囲（修正版: ${tc_fixed[*]}）" "" "$(x_kind runtime.cve)"
+      critical "" "$f" s16.teamcity_vulnerable fixed="${tc_fixed[*]}" version="$ver" --x="$(x_kind runtime.cve)"
     else
-      safe "TeamCity ${ver} は修正版以上（$f）"
+      safe log.safe.teamcity_fixed path="$f" version="$ver"
     fi
   done < <(detect_service_version 'jetbrains/teamcity-server')
   while IFS=$'\t' read -r ver f; do
     [ -n "$ver" ] || continue
-    if [ "$ver" = "latest" ]; then medium "" "$f" "Artifactory が浮動タグ（latest）。CVE-2026-82329 の修正版を確認"; continue; fi
+    if [ "$ver" = "latest" ]; then medium "" "$f" s16.artifactory_latest; continue; fi
     if version_branch_vulnerable "$ver" "${af_fixed[@]}"; then
-      critical "" "$f" "JFrog Artifactory ${ver} は CVE-2026-82329（CVSS 9.8）の影響範囲（修正版: ${af_fixed[*]}）" "" "$(x_kind runtime.cve)"
+      critical "" "$f" s16.artifactory_vulnerable fixed="${af_fixed[*]}" version="$ver" --x="$(x_kind runtime.cve)"
     else
-      safe "Artifactory ${ver} は修正版以上（$f）"
+      safe log.safe.artifactory_fixed path="$f" version="$ver"
     fi
   done < <(detect_service_version 'jfrog/artifactory-(pro|oss|jcr)|releases-docker\.jfrog\.io/jfrog/artifactory-(pro|oss|jcr)')
   files_path '\.(sh|bash|ya?ml|mk|Makefile|py|js|ts)$|/Makefile$|/Dockerfile[^/]*$' | grep_l 'docker[[:space:]]+(container[[:space:]]+)?cp[[:space:]]' | while IFS= read -r f; do
-    [ -n "$f" ] && [ "$f" != /dev/null ] && medium "" "$f" "docker cp の使用（CVE-2026-17106 CopyEscape: 信頼できないコンテナからのコピーでホスト上書き）"
+    [ -n "$f" ] && [ "$f" != /dev/null ] && medium "" "$f" s16.docker_cp
   done
   intel_infra
   return 0
@@ -2602,7 +2820,7 @@ MCP_DANGER_RE+="|(^|[[:space:]\"/])(pwsh|powershell)(\.exe)?([[:space:]]+[^[:spa
 MCP_DANGER_RE+="|(^|[[:space:]\"/])cmd(\.exe)?[[:space:]]+/[ck]([[:space:]]|\$)"
 
 check_s17() {
-  log_section "§17" "MCP静的ポイズニング"
+  log_section "§17"
   local f cmdline fmt ptr nm
   # 1 行 1 コマンド: 形式 US JSON pointer（command を持つオブジェクトの位置。例 /mcpServers/<name>）US command args…
   #   command に改行があれば行ごとに分けて照合する（従来どおり）
@@ -2643,12 +2861,12 @@ check_s17() {
     # 同じファイルの同じ種類の問題は 1 件の finding にまとめ、該当するサーバーを locators に並べる（findings 1.1。
     #   同じ pointer は 1 回だけ。command の改行で分けた行は同じサーバーを指す）
     if [ "${#hi[@]}" -gt 0 ]; then
-      high "mcp-poisoning" "$f" "MCP/エージェント設定の command/args に危険なコマンド（curl/wget/シェル -c/インタプリタの -e・--eval/powershell -Command 等）" "" \
-        "$(x_join "$(x_kind mcp.dangerous_command)" "$(x_locators "$(printf '%s\n' "${hi[@]}" | awk 'NF && !seen[$0]++' | paste -sd, -)")")"
+      high "mcp-poisoning" "$f" s17.dangerous_command \
+        --x="$(x_join "$(x_kind mcp.dangerous_command)" "$(x_locators "$(printf '%s\n' "${hi[@]}" | awk 'NF && !seen[$0]++' | paste -sd, -)")")"
     fi
     if [ "${#me[@]}" -gt 0 ]; then
-      medium "mcp-poisoning" "$f" "MCP の command が npx/uvx（実行時に最新版を取得。バージョン固定を確認）" "" \
-        "$(x_join "$(x_kind mcp.unpinned)" "$(x_locators "$(printf '%s\n' "${me[@]}" | awk 'NF && !seen[$0]++' | paste -sd, -)")")"
+      medium "mcp-poisoning" "$f" s17.npx \
+        --x="$(x_join "$(x_kind mcp.unpinned)" "$(x_locators "$(printf '%s\n' "${me[@]}" | awk 'NF && !seen[$0]++' | paste -sd, -)")")"
     fi
   done < <(mcp_config_files | sort -u)
   # SymJack: シンボリックリンクがエージェント設定を指す / デコイ名
@@ -2658,22 +2876,22 @@ check_s17() {
     t="$(readlink -- "$l" 2>/dev/null)"
     base="${l#"$RP"/}"
     if printf '%s' "$t" | grep_q -E '(\.claude/|\.mcp\.json|\.cursor/|\.gemini/|\.codex/|\.vscode/settings\.json)'; then
-      critical "mcp-poisoning" "$l" "SymJack: シンボリックリンクがエージェント設定（$t）を指しています"
+      critical "mcp-poisoning" "$l" s17.symjack target="$t"
     elif printf '%s' "$base" | grep_q -i -E '(^|/)(vid-|logo\.|readme\.)|^docs/' && [[ "$t" == ../* || "$t" == /* ]]; then
-      high "mcp-poisoning" "$l" "SymJack 疑い: デコイ名のリンクが外部（$t）を指しています"
+      high "mcp-poisoning" "$l" s17.symjack_decoy target="$t"
     fi
   done <"$LINKS_LIST"
   # エージェントフック（.claude/settings.json の hooks に通信/難読化）
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if fgrep_q '"hooks"[[:space:]]*:' "$f" && fgrep_q '"command"[[:space:]]*:[[:space:]]*"[^"]*(curl|wget|base64|nc |/dev/tcp)' "$f"; then
-      high "mcp-poisoning" "$f" "エージェントフックに通信/難読化コマンド" "" \
-        "$(x_locators "$(json_ptr_locators "$f" "$HOOK_PATHS_RE" --arg re '(curl|wget|base64|nc |/dev/tcp)')")"
+      high "mcp-poisoning" "$f" s17.agent_hook \
+        --x="$(x_locators "$(json_ptr_locators "$f" "$HOOK_PATHS_RE" --arg re '(curl|wget|base64|nc |/dev/tcp)')")"
     fi
   done < <(files_path '/\.(claude|cursor|gemini)/(settings(\.local)?|hooks)\.json$')
   # setup.mjs 内の .claude/.vscode/.cursor 参照
   files_named '^setup\.mjs$' | grep_l '\.(claude|vscode|cursor)(/|\b)' | while IFS= read -r f; do
-    [ -n "$f" ] && [ "$f" != /dev/null ] && critical "chaindrop-keyv" "$f" "setup.mjs がエージェント/IDE 設定ディレクトリを参照（MCP 設定改ざん）"
+    [ -n "$f" ] && [ "$f" != /dev/null ] && critical "chaindrop-keyv" "$f" s17.setup_mjs
   done
   return 0
 }
@@ -2693,7 +2911,7 @@ network_iocs() {
   if [ "${1:-}" = "all" ]; then intel_network_iocs; else intel_network_iocs | awk -F'\t' '$3=="malicious"'; fi
 }
 check_s18() {
-  log_section "§18" "ネットワークIoC"
+  log_section "§18"
   network_iocs all >"$TMP_DIR/netioc.tsv"
   awk -F'\t' '$3=="malicious"{print $1}' "$TMP_DIR/netioc.tsv" >"$TMP_DIR/netioc.pat"
   awk -F'\t' '$3=="legit"{print $1}' "$TMP_DIR/netioc.tsv" >"$TMP_DIR/netioc-legit.pat"
@@ -2706,23 +2924,23 @@ check_s18() {
       hit="$(grep -o -a -i -F -f "$TMP_DIR/$pat.pat" -- "$f" 2>/dev/null | tr 'A-Z' 'a-z' | sort -u | head -n3 | tr '\n' ' ')"
       camp="$(grep -i -F -- "$(printf '%s' "$hit" | awk '{print $1}')" "$TMP_DIR/netioc.tsv" | head -n1 | cut -f2)"
       if [ "$pat" = "netioc" ]; then
-        critical "$camp" "$f" "ネットワーク IoC を含むファイル（${hit% }）"
+        critical "$camp" "$f" s18.network_ioc iocs="${hit% }"
       else
-        medium "$camp" "$f" "攻撃に悪用された正規インフラへの参照（${hit% }）。正規利用か、想定外の接続元かを確認"
+        medium "$camp" "$f" s18.legit_infra iocs="${hit% }"
       fi
     done
   done
   local hf
   for hf in "$HOME_DIR/.zsh_history" "$HOME_DIR/.bash_history"; do
     [ -f "$hf" ] && [ ! -L "$hf" ] || continue
-    grep -q -a -i -F -f "$TMP_DIR/netioc.pat" -- "$hf" 2>/dev/null && critical "" "$hf" "シェル履歴に C2 ドメイン/IP"
-    tail -n 5 -- "$hf" 2>/dev/null | grep_q -E '(curl|wget)[^|]*\|[[:space:]]*(ba|z)?sh' && high "" "$hf" "シェル履歴の直近5件に curl|sh 形式の実行"
+    grep -q -a -i -F -f "$TMP_DIR/netioc.pat" -- "$hf" 2>/dev/null && critical "" "$hf" s18.history_c2
+    tail -n 5 -- "$hf" 2>/dev/null | grep_q -E '(curl|wget)[^|]*\|[[:space:]]*(ba|z)?sh' && high "" "$hf" s18.history_curl_sh
   done
   return 0
 }
 
 # §19 Blast Radius 拡張
-check_s19() { log_section "§19" "Blast Radius拡張"; blast_list extended; return 0; }
+check_s19() { log_section "§19"; blast_list extended; return 0; }
 
 # =============================================================================
 # §20〜§35（v4.1）
@@ -2736,28 +2954,28 @@ mcp_source_files() {
 
 # §20 MCP セマンティック（Deadbugz / NeighborJack / 命令形＋外部参照）
 check_s20() {
-  log_section "§20" "MCPセマンティック"
+  log_section "§20"
   local f
   mcp_source_files >"$TMP_DIR/mcpsrc.lst"
   grep_l '(ignore (all |any )?(the )?previous instructions|do not tell the user|don'"'"'t tell the user|without (telling|informing) the user)' -i <"$TMP_DIR/mcpsrc.lst" | while IFS= read -r f; do
-    [ -n "$f" ] && high "mcp-poisoning" "$f" "MCP ツール定義にプロンプトインジェクション文言（ignore previous instructions / do not tell the user）"
+    [ -n "$f" ] && high "mcp-poisoning" "$f" s20.prompt_injection
   done
   grep_l '"description"[[:space:]]*:[[:space:]]*"[^"]*\b(execute|run|send|upload|fetch|download|must call|always call)\b[^"]*(https?://|curl|wget|~/\.|\.ssh|\.env)' -i <"$TMP_DIR/mcpsrc.lst" | while IFS= read -r f; do
-    [ -n "$f" ] && high "mcp-poisoning" "$f" "ツール description 内で命令形動詞と外部リソース参照が共起"
+    [ -n "$f" ] && high "mcp-poisoning" "$f" s20.imperative_external
   done
   grep_l '(callCount|invocations?|callCounter|numCalls|count)[[:space:]]*(>|>=)[[:space:]]*[0-9]+' <"$TMP_DIR/mcpsrc.lst" | while IFS= read -r f; do
-    [ -n "$f" ] && high "mcp-poisoning" "$f" "Deadbugz 型ランタイムゲート（呼び出し回数による条件分岐）"
+    [ -n "$f" ] && high "mcp-poisoning" "$f" s20.deadbugz
   done
   local nre; nre="$(read_ioc '.mcp_poisoning.neighbor.internal_ip_regex')"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     grep -q -E "\"(url|serverUrl|endpoint)\"[[:space:]]*:[[:space:]]*\"https?://${nre}" "$f" 2>/dev/null \
-      && medium "mcp-poisoning" "$f" "NeighborJack: ループバック以外の内部 IP の MCP エンドポイントを登録"
+      && medium "mcp-poisoning" "$f" s20.neighborjack
     grep -q -E '"(url|serverUrl)"[[:space:]]*:[[:space:]]*"http://' "$f" 2>/dev/null \
       && grep -E -o '"(url|serverUrl)"[[:space:]]*:[[:space:]]*"http://[^"]+' "$f" | grep_q -v -E 'http://(localhost|127\.0\.0\.1|\[::1\])' \
-      && medium "mcp-poisoning" "$f" "平文 HTTP のリモート MCP エンドポイント"
+      && medium "mcp-poisoning" "$f" s20.plain_http
     grep -q -E '"(host|bind|listen)"[[:space:]]*:[[:space:]]*"0\.0\.0\.0"|--host[ =]0\.0\.0\.0' "$f" 2>/dev/null \
-      && medium "mcp-poisoning" "$f" "MCP サーバーが 0.0.0.0 で待ち受け（同一ネットワークから到達可能）"
+      && medium "mcp-poisoning" "$f" s20.listen_all
   done < <(mcp_config_files | sort -u)
   intel_strings
   return 0
@@ -2864,7 +3082,7 @@ workflow_text() {
 
 # §21 GitHub Actions 危険パターン
 check_s21() {
-  log_section "§21" "GitHub Actions"
+  log_section "§21"
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -2897,49 +3115,49 @@ check_s21() {
         }
         END{ flush() }' < <(workflow_text "$f"))"
       if printf '%s\n' "$refs" | grep_q -x 'prhead'; then
-        critical "ghostaction-oct2026" "$f" "pull_request_target + PR head の checkout + secrets 参照（pwn request）" "" "$(x_kind gha.pwn_request)"
+        critical "ghostaction-oct2026" "$f" s21.pwn_request --x="$(x_kind gha.pwn_request)"
       fi
       if printf '%s\n' "$refs" | grep_q -x 'noref'; then
-        high "ghostaction-oct2026" "$f" "pull_request_target + actions/checkout(refなし) + secrets 参照（ベースブランチの取得だが、後続ステップで PR 由来のコードを扱わないか確認）" "" "$(x_kind gha.pwn_request)"
+        high "ghostaction-oct2026" "$f" s21.prt_checkout_base --x="$(x_kind gha.pwn_request)"
       fi
       if printf '%s\n' "$refs" | grep_q -x 'exprref'; then
-        high "ghostaction-oct2026" "$f" "pull_request_target + actions/checkout の ref が式（\${{ … }}）+ secrets 参照（PR 由来の ref でないことを静的に確認できません）" "" "$(x_kind gha.pwn_request)"
+        high "ghostaction-oct2026" "$f" s21.prt_checkout_expr --x="$(x_kind gha.pwn_request)"
       fi
     fi
-    fgrep_q 'key:.*github\.event\.pull_request\.number' "$f" && high "ghostaction-oct2026" "$f" "actions/cache のキーに PR 番号（キャッシュポイズニング）"
-    fgrep_q '^[[:space:]]*permissions:[[:space:]]*write-all' "$f" && high "ghostaction-oct2026" "$f" "permissions: write-all"
+    fgrep_q 'key:.*github\.event\.pull_request\.number' "$f" && high "ghostaction-oct2026" "$f" s21.cache_pr_key
+    fgrep_q '^[[:space:]]*permissions:[[:space:]]*write-all' "$f" && high "ghostaction-oct2026" "$f" s21.write_all
   done < <(workflow_files)
   return 0
 }
 
 # §22 アクション SHA 固定
 check_s22() {
-  log_section "§22" "アクションSHA固定"
+  log_section "§22"
   local f line act ref
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     workflow_text "$f" | grep -E -o '^[[:space:]-]*(\{([^}#]*,)?[[:space:]]*)?uses:[[:space:]]*["'"'"']?[^"'"'"'[:space:]#,}]+' 2>/dev/null | sed -E 's/.*uses:[[:space:]]*["'"'"']?//' | sort -u | while IFS= read -r line; do
       case "$line" in ./*|docker://*) continue ;; esac
       act="${line%@*}"; ref="${line##*@}"; act="${act,,}"
-      [ "$act" != "$line" ] || { high "ghostaction-oct2026" "$f" "uses: ${line} がバージョン未指定" "" "$(x_kind gha.unpinned)"; continue; }
+      [ "$act" != "$line" ] || { high "ghostaction-oct2026" "$f" s22.no_version ref="$line" --x="$(x_kind gha.unpinned)"; continue; }
       if [ "$act" = "aquasecurity/trivy-action" ] && ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]] && [ "$ref" != "v0.35.0" ]; then
-        critical "ghostaction-oct2026" "$f" "汚染されたタグ参照の可能性（${line}。2026-03-19 にタグ 75/76 が強制 push。安全版 v0.35.0 または検証済み SHA に固定）" "" "$(x_kind gha.unpinned)"
+        critical "ghostaction-oct2026" "$f" s22.poisoned_tag ref="$line" --x="$(x_kind gha.unpinned)"
       elif [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
-        case "$act" in tj-actions/*|aquasecurity/*) medium "ghostaction-oct2026" "$f" "侵害履歴のある発行元のアクション ${act}（SHA 固定済み。SHA が安全な版か確認）" ;; esac
+        case "$act" in tj-actions/*|aquasecurity/*) medium "ghostaction-oct2026" "$f" s22.risky_publisher_sha action="$act" ;; esac
       else
         case "$act" in
-          tj-actions/*|aquasecurity/*) critical "ghostaction-oct2026" "$f" "侵害履歴のある発行元のアクションをタグ参照（${line}）" "" "$(x_kind gha.unpinned)" ;;
-          *) high "ghostaction-oct2026" "$f" "SHA 固定されていないアクション参照（${line}）" "" "$(x_kind gha.unpinned)" ;;
+          tj-actions/*|aquasecurity/*) critical "ghostaction-oct2026" "$f" s22.risky_publisher_tag ref="$line" --x="$(x_kind gha.unpinned)" ;;
+          *) high "ghostaction-oct2026" "$f" s22.unpinned ref="$line" --x="$(x_kind gha.unpinned)" ;;
         esac
       fi
     done
     if grep -q -E "(trivy-version|version):[[:space:]]*[\"']?v?0\.69\.4[\"']?[[:space:]]*$" "$f" 2>/dev/null && grep -q 'trivy' "$f"; then
-      critical "ghostaction-oct2026" "$f" "Trivy 本体の悪性版 v0.69.4 を指定（安全版は v0.69.3）"
+      critical "ghostaction-oct2026" "$f" s22.trivy_version
     fi
   done < <(workflow_files; files_path '/action\.ya?ml$')
   local ver
   while IFS=$'\t' read -r ver f; do
-    [ "${ver#v}" = "0.69.4" ] && critical "ghostaction-oct2026" "$f" "Trivy 本体の悪性版イメージ（aquasec/trivy:0.69.4）"
+    [ "${ver#v}" = "0.69.4" ] && critical "ghostaction-oct2026" "$f" s22.trivy_image
   done < <(detect_service_version 'aquasec/trivy')
   intel_actions
   return 0
@@ -2947,7 +3165,7 @@ check_s22() {
 
 # §23 コンテナランタイム（CopyEscape / Copy Fail / 特権コンテナ）
 check_s23() {
-  log_section "§23" "コンテナランタイム"
+  log_section "§23"
   if host_enabled; then
     local dv kv
     # docker version はデーモン（DOCKER_HOST / context。ssh:// なら ssh を起動）へ接続するため使わず、
@@ -2955,8 +3173,8 @@ check_s23() {
     dv="$(safe_probe docker --version | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+[^ ,]*' | head -n1)"
     if [ -n "$dv" ]; then
       local dfix; dfix="$(infra_fixed docker CVE-2026-17106 | head -n1)"
-      if [ -z "$dfix" ]; then medium "" "$(command -v docker)" "Docker ${dv}: CVE-2026-17106（CopyEscape）の修正版を公式で確認してください（ioc に修正版未定義）"
-      elif version_lt "${dv%%-*}" "$dfix"; then high "" "$(command -v docker)" "Docker ${dv} は CVE-2026-17106（CopyEscape、moby/go-archive）の影響範囲（修正版: Engine/CLI ${dfix}）"
+      if [ -z "$dfix" ]; then medium "" "$(command -v docker)" s23.docker_unknown_fix version="$dv"
+      elif version_lt "${dv%%-*}" "$dfix"; then high "" "$(command -v docker)" s23.docker_vulnerable fixed="$dfix" version="$dv"
       fi
     fi
     kv="$(uname -r 2>/dev/null)"
@@ -2970,17 +3188,17 @@ check_s23() {
         local -a kfix; mapfile -t kfix < <(infra_fixed kernel "$cve")
         [ "${#kfix[@]}" -gt 0 ] && [ -n "$kver" ] || continue
         if version_branch_vulnerable "$kver" "${kfix[@]}"; then
-          high "" "/proc/version" "Linux カーネル ${kv} は ${cve} の upstream 修正版（${kfix[*]}）未満。ディストリビューションのバックポート有無を確認"
+          high "" "/proc/version" s23.kernel_old cve="$cve" fixed="${kfix[*]}" version="$kv"
         fi
       done
     fi
   fi
   local f
   files_named '\.(ya?ml)$' | grep_l '^[[:space:]]*privileged:[[:space:]]*true' | while IFS= read -r f; do
-    [ -n "$f" ] && high "" "$f" "特権コンテナ（privileged: true）。カーネル UAF によるエスケープの影響が拡大"
+    [ -n "$f" ] && high "" "$f" s23.privileged
   done
   files_named '\.(ya?ml)$' | grep_l '(cap_add:|add:)[^#]*(SYS_ADMIN|ALL)|- (SYS_ADMIN|ALL)$' | while IFS= read -r f; do
-    [ -n "$f" ] && high "" "$f" "危険なケーパビリティ（SYS_ADMIN/ALL）付与"
+    [ -n "$f" ] && high "" "$f" s23.capabilities
   done
   intel_tool_versions
   return 0
@@ -3005,7 +3223,7 @@ extension_manifests() {
 
 # §24 ブラウザ拡張（update_url / 危険パーミッション / <all_urls>）
 check_s24() {
-  log_section "§24" "ブラウザ拡張"
+  log_section "§24"
   local f perms
   local -a dperm offurl; mapfile -t dperm < <(read_ioc '.browser_extensions.dangerous_permissions'); mapfile -t offurl < <(read_ioc '.browser_extensions.official_update_urls')
   while IFS= read -r f; do
@@ -3019,14 +3237,14 @@ check_s24() {
       perms="$(tr -d '\n' <"$f" | grep -o -E '"[A-Za-z<>_.]+"' | tr -d '"')"
     fi
     if [ -n "$uu" ] && ! printf '%s\n' "${offurl[@]}" | grep_q -x -F -- "$uu"; then
-      high "" "$f" "拡張の update_url が公式ストア以外"
+      high "" "$f" s24.update_url
     fi
     local p found=""
     for p in "${dperm[@]}"; do printf '%s\n' "$perms" | grep_q -x -F -- "$p" && found="$found $p"; done
     local all=0; printf '%s\n' "$perms" | grep_q -x -F -- '<all_urls>' && all=1
-    if [ -n "$found" ] && [ "$all" -eq 1 ]; then high "" "$f" "危険パーミッション（${found# }）+ <all_urls>"
-    elif [ -n "$found" ]; then medium "" "$f" "危険パーミッション（${found# }）"
-    elif [ "$all" -eq 1 ]; then medium "" "$f" "全サイトへのアクセス（<all_urls>）"
+    if [ -n "$found" ] && [ "$all" -eq 1 ]; then high "" "$f" s24.perms_all_urls permissions="${found# }"
+    elif [ -n "$found" ]; then medium "" "$f" s24.perms permissions="${found# }"
+    elif [ "$all" -eq 1 ]; then medium "" "$f" s24.all_urls
     fi
   done < <(extension_manifests | sort -u)
   return 0
@@ -3034,19 +3252,19 @@ check_s24() {
 
 # §25 後続ワーム（IronWorm / sckit / Miasma / cargo-install 偽装）
 check_s25() {
-  log_section "§25" "後続ワーム"
+  log_section "§25"
   local n d
   local -a bins; mapfile -t bins < <(read_ioc '.worm_iocs.post_shaihulud.binaries')
   for d in "$HOME_DIR/.cargo/bin" "$HOME_DIR/.local/bin" "$HOME_DIR/go/bin" "$HOME_DIR/.bun/bin" /usr/local/bin /tmp /var/tmp /dev/shm; do
     [ -d "$d" ] || continue
     case "$d" in /usr/local/bin|/tmp|/var/tmp|/dev/shm) host_enabled || continue ;; esac
-    for n in "${bins[@]}"; do [ -e "$d/$n" ] && critical "post-shaihulud" "$d/$n" "後続ワームのバイナリ（${n}）"; done
-    [ -e "$d/cargo-install" ] && high "post-shaihulud" "$d/cargo-install" "cargo-install を名乗るバイナリ（偽装）"
+    for n in "${bins[@]}"; do [ -e "$d/$n" ] && critical "post-shaihulud" "$d/$n" s25.worm_binary name="${n}"; done
+    [ -e "$d/cargo-install" ] && high "post-shaihulud" "$d/cargo-install" s25.cargo_install_binary
   done
-  local f; while IFS= read -r f; do [ -n "$f" ] && high "post-shaihulud" "$f" "cargo-install を名乗るファイル（偽装）"; done < <(files_named '^cargo-install(\.exe)?$')
+  local f; while IFS= read -r f; do [ -n "$f" ] && high "post-shaihulud" "$f" s25.cargo_install_file; done < <(files_named '^cargo-install(\.exe)?$')
   if host_enabled && [ -f "$TMP_DIR/ps.txt" ]; then
     grep -E '(^|/| )cargo-install( |$)' "$TMP_DIR/ps.txt" | awk '{print $1}' | while IFS= read -r pid; do
-      high "post-shaihulud" "/proc/$pid" "cargo-install を名乗るプロセス（pid $pid）"
+      high "post-shaihulud" "/proc/$pid" s25.cargo_install_process pid="$pid"
     done
   fi
   return 0
@@ -3054,26 +3272,26 @@ check_s25() {
 
 # §26 開発者ツール設定
 check_s26() {
-  log_section "§26" "開発者ツール設定"
+  log_section "§26"
   local f
   while IFS= read -r f; do
     [ -n "$f" ] && [ -f "$f" ] || continue
     fgrep_q -i '^[[:space:]]*fsmonitor[[:space:]]*=' "$f" && ! fgrep_q -i '^[[:space:]]*fsmonitor[[:space:]]*=[[:space:]]*(true|false)[[:space:]]*$' "$f" \
-      && critical "" "$f" "core.fsmonitor に外部コマンド（git 操作のたびに実行）" "" \
-        "$(TL_EXCLUDE='[[:space:]]*fsmonitor[[:space:]]*=[[:space:]]*(true|false)[[:space:]]*$' x_text_locators "$f" -i '^[[:space:]]*fsmonitor[[:space:]]*=')"
-    fgrep_q -i '^[[:space:]]*sshCommand[[:space:]]*=' "$f" && high "" "$f" "core.sshCommand が設定されています" "" "$(x_text_locators "$f" -i '^[[:space:]]*sshCommand[[:space:]]*=')"
-    fgrep_q -i '^[[:space:]]*hooksPath[[:space:]]*=' "$f" && medium "" "$f" "core.hooksPath が設定されています（フック置き場の付け替え）" "" "$(x_text_locators "$f" -i '^[[:space:]]*hooksPath[[:space:]]*=')"
+      && critical "" "$f" s26.fsmonitor \
+        --x="$(TL_EXCLUDE='[[:space:]]*fsmonitor[[:space:]]*=[[:space:]]*(true|false)[[:space:]]*$' x_text_locators "$f" -i '^[[:space:]]*fsmonitor[[:space:]]*=')"
+    fgrep_q -i '^[[:space:]]*sshCommand[[:space:]]*=' "$f" && high "" "$f" s26.ssh_command --x="$(x_text_locators "$f" -i '^[[:space:]]*sshCommand[[:space:]]*=')"
+    fgrep_q -i '^[[:space:]]*hooksPath[[:space:]]*=' "$f" && medium "" "$f" s26.hooks_path --x="$(x_text_locators "$f" -i '^[[:space:]]*hooksPath[[:space:]]*=')"
   done < <(printf '%s\n' "$HOME_DIR/.gitconfig" "$HOME_DIR/.config/git/config"; cat "$GIT_CFG_LIST"; files_named '^\.gitconfig$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if fgrep_q '(curl|wget)[^|#]*\|[[:space:]]*(ba|z)?sh|eval[[:space:]]+"?\$\((curl|wget)' "$f"; then
-      high "" "$f" ".envrc がリモートスクリプトを実行（direnv: curl|bash）" "" "$(x_text_locators "$f" '(curl|wget)[^|#]*\|[[:space:]]*(ba|z)?sh|eval[[:space:]]+"?\$\((curl|wget)')"
+      high "" "$f" s26.envrc_remote --x="$(x_text_locators "$f" '(curl|wget)[^|#]*\|[[:space:]]*(ba|z)?sh|eval[[:space:]]+"?\$\((curl|wget)')"
     fi
   done < <(files_named '^\.envrc$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     grep -E -o 'https?://[^"'"'"'[:space:]]+' "$f" 2>/dev/null | grep_q -v -E '^https://github\.com/(asdf-vm|asdf-community|mise-plugins|jdx)/' \
-      && medium "" "$f" "asdf/mise のプラグイン URL が公式以外"
+      && medium "" "$f" s26.plugin_url
   done < <(files_named '^(\.tool-versions|mise\.toml|\.mise\.toml)$')
   local -a regs; mapfile -t regs < <(read_ioc '.official_registries')
   local re; re="$(printf '%s|' "${regs[@]}" | sed 's/\./\\./g; s/|$//')"
@@ -3081,7 +3299,7 @@ check_s26() {
     [ -n "$f" ] && [ -f "$f" ] || continue
     if grep -E -i '^[[:space:]]*(registry|@[^:]+:registry|npmRegistryServer|repository|index-url|index_url|extra-index-url)[[:space:]]*[=:]' "$f" 2>/dev/null \
        | grep -E -o 'https?://[^/"'"'"'[:space:]]+' | sed -E 's#https?://##' | grep_q -v -E "^($re)$"; then
-      medium "" "$f" "パッケージレジストリ URL が公式以外（改ざん/依存関係混乱の確認）"
+      medium "" "$f" s26.registry_url
     fi
   done < <(printf '%s\n' "$HOME_DIR/.npmrc" "$HOME_DIR/.yarnrc" "$HOME_DIR/.yarnrc.yml" "$HOME_DIR/.pypirc" "$HOME_DIR/.config/pip/pip.conf"; files_named '^(\.npmrc|\.yarnrc|\.yarnrc\.yml|\.pypirc|pip\.conf)$')
   return 0
@@ -3089,20 +3307,20 @@ check_s26() {
 
 # §27 ビルドフック（build.rs / go:generate / build-backend / cmdclass）
 check_s27() {
-  log_section "§27" "ビルドフック"
+  log_section "§27"
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if fgrep_q '(Command::new|process::Command)' "$f" && fgrep_q '"(curl|wget|sh|bash|powershell|cmd)"|(curl|wget)' "$f"; then
-      high "" "$f" "build.rs がビルド時に外部コマンド（curl/wget/シェル）を起動"
+      high "" "$f" s27.build_rs_exec
     elif fgrep_q '(Command::new|process::Command)' "$f"; then
-      medium "" "$f" "build.rs がビルド時にプロセスを起動"
+      medium "" "$f" s27.build_rs_process
     elif fgrep_q '(include_bytes!|include_str!)' "$f"; then
-      low "" "$f" "build.rs がバイナリ/文字列を埋め込み（include_bytes!/include_str!）"
+      low "" "$f" s27.build_rs_include
     fi
   done < <(files_named '^build\.rs$')
   files_named '\.go$' | grep_l '^//go:generate[[:space:]]+(curl|wget|bash|sh[[:space:]]+-c)' | while IFS= read -r f; do
-    [ -n "$f" ] && high "" "$f" "//go:generate で外部コマンド（curl/bash/sh -c）"
+    [ -n "$f" ] && high "" "$f" s27.go_generate
   done
   local -a safeb; mapfile -t safeb < <(read_ioc '.build_hooks.py_build_backend_safe')
   while IFS= read -r f; do
@@ -3110,16 +3328,16 @@ check_s27() {
     local be
     be="$(grep -E '^[[:space:]]*build-backend[[:space:]]*=' "$f" 2>/dev/null | head -n1 | sed -E 's/.*=[[:space:]]*["'"'"']([^"'"'"']+)["'"'"'].*/\1/')"
     [ -n "$be" ] || continue
-    printf '%s\n' "${safeb[@]}" | grep_q -x -F -- "$be" || medium "" "$f" "pyproject.toml の build-backend が既知安全リスト外（$be）"
-    fgrep_q '^[[:space:]]*backend-path[[:space:]]*=' "$f" && high "" "$f" "pyproject.toml の backend-path でリポジトリ内ビルドバックエンドを使用"
+    printf '%s\n' "${safeb[@]}" | grep_q -x -F -- "$be" || medium "" "$f" s27.build_backend backend="$be"
+    fgrep_q '^[[:space:]]*backend-path[[:space:]]*=' "$f" && high "" "$f" s27.backend_path
   done < <(files_named '^pyproject\.toml$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     fgrep_q 'cmdclass' "$f" || continue
     if fgrep_q '(urllib|requests\.|subprocess|os\.system|socket|b64decode|exec\()' "$f"; then
-      high "" "$f" "setup.py の cmdclass に通信/実行処理（インストール時実行）"
+      high "" "$f" s27.cmdclass_exec
     else
-      medium "" "$f" "setup.py が cmdclass を上書き（インストール時に任意コード）"
+      medium "" "$f" s27.cmdclass
     fi
   done < <(files_named '^setup\.py$')
   return 0
@@ -3127,21 +3345,21 @@ check_s27() {
 
 # §28 コンテナ署名
 check_s28() {
-  log_section "§28" "コンテナ署名"
+  log_section "§28"
   local f
   local builds_images=0 verifies=0
   files_path '(/\.github/workflows/[^/]+\.ya?ml|\.gitlab-ci\.yml|/Jenkinsfile|\.sh)$' | grep_l '(docker[[:space:]]+push|docker/build-push-action|buildah[[:space:]]+push|ko[[:space:]]+publish)' | grep_q . && builds_images=1
   files_path '(\.ya?ml|\.sh|/Makefile|/Jenkinsfile)$' | grep_l 'cosign[[:space:]]+verify' | grep_q . && verifies=1
-  [ "$builds_images" -eq 1 ] && [ "$verifies" -eq 0 ] && medium "" "$ROOT" "コンテナイメージを公開しているが cosign verify の実行が見当たりません"
+  [ "$builds_images" -eq 1 ] && [ "$verifies" -eq 0 ] && medium "" "$ROOT" s28.no_verify
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     grep -E -i '^[[:space:]]*FROM[[:space:]]+' "$f" 2>/dev/null | awk '{print $2}' | grep -v -E '^(scratch|\$)' | grep_q -v '@sha256:' \
-      && medium "" "$f" "FROM がダイジェスト固定されていません（@sha256: 推奨）" "" "$(x_kind gha.unpinned)"
+      && medium "" "$f" s28.from_digest --x="$(x_kind gha.unpinned)"
   done < <(files_named '^(Dockerfile.*|.*\.dockerfile)$')
-  while IFS= read -r f; do [ -n "$f" ] && high "" "$f" "cosign 秘密鍵（cosign.key）がリポジトリ内にあります"; done < <(files_named '^cosign\.key$')
+  while IFS= read -r f; do [ -n "$f" ] && high "" "$f" s28.cosign_key; done < <(files_named '^cosign\.key$')
   files_named '\.ya?ml$' | grep_l 'imagePullPolicy:[[:space:]]*Always' | while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q 'image:[[:space:]]*[^[:space:]]+@sha256:' "$f" || medium "" "$f" "imagePullPolicy: Always かつダイジェスト未固定（可変タグを毎回取得）" "" "$(x_kind gha.unpinned)"
+    fgrep_q 'image:[[:space:]]*[^[:space:]]+@sha256:' "$f" || medium "" "$f" s28.pull_always --x="$(x_kind gha.unpinned)"
   done
   return 0
 }
@@ -3157,14 +3375,14 @@ k8s_manifests() {
 
 # §29 K8s・クラウド
 check_s29() {
-  log_section "§29" "K8s・クラウド"
+  log_section "§29"
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q 'automountServiceAccountToken:[[:space:]]*true' "$f" && medium "" "$f" "automountServiceAccountToken: true"
-    fgrep_q 'failurePolicy:[[:space:]]*Ignore' "$f" && medium "" "$f" "Admission Webhook の failurePolicy: Ignore（検査バイパス）"
-    fgrep_q '^[[:space:]]*hostPath:' "$f" && high "" "$f" "hostPath ボリューム（ノードのファイルシステムに到達）"
-    fgrep_q '169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200' "$f" && medium "" "$f" "マニフェストがメタデータサービスを参照"
+    fgrep_q 'automountServiceAccountToken:[[:space:]]*true' "$f" && medium "" "$f" s29.automount_token
+    fgrep_q 'failurePolicy:[[:space:]]*Ignore' "$f" && medium "" "$f" s29.failure_policy
+    fgrep_q '^[[:space:]]*hostPath:' "$f" && high "" "$f" s29.host_path
+    fgrep_q '169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200' "$f" && medium "" "$f" s29.metadata
   done < <(k8s_manifests)
   return 0
 }
@@ -3172,33 +3390,33 @@ check_s29() {
 # §30 macOS 永続化
 plist_label() { grep -A1 -E '<key>Label</key>' "$1" 2>/dev/null | grep -o -E '<string>[^<]*</string>' | head -n1 | sed -E 's#</?string>##g'; }
 check_s30() {
-  log_section "§30" "macOS永続化"
+  log_section "§30"
   local f lb
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     lb="$(plist_label "$f")"
     if [ -n "$lb" ] && ! printf '%s' "$lb" | grep_q '\.'; then
-      high "" "$f" "LaunchAgent/Daemon の Label がランダム文字列様（$lb）"
+      high "" "$f" s30.random_label label="$lb"
     fi
-    fgrep_q '<string>(/tmp/|/private/tmp/|/Users/Shared/|/var/tmp/)|<string>[^<]*/\.[^/<]+/[^<]*</string>' "$f" && high "" "$f" "LaunchAgent/Daemon が一時領域/隠しディレクトリのプログラムを起動"
-    fgrep_q '(curl|osascript|base64|python[0-9.]* -c|bash -c)' "$f" && high "" "$f" "LaunchAgent/Daemon の ProgramArguments に通信/スクリプト実行"
+    fgrep_q '<string>(/tmp/|/private/tmp/|/Users/Shared/|/var/tmp/)|<string>[^<]*/\.[^/<]+/[^<]*</string>' "$f" && high "" "$f" s30.tmp_program
+    fgrep_q '(curl|osascript|base64|python[0-9.]* -c|bash -c)' "$f" && high "" "$f" s30.program_arguments
   done < <(files_path '/Library/(LaunchAgents|LaunchDaemons)/[^/]+\.plist$|/LaunchAgents/[^/]+\.plist$'
            if [ "$OS_NAME" = "Darwin" ]; then ls "$HOME_DIR"/Library/LaunchAgents/*.plist 2>/dev/null; host_enabled && ls /Library/LaunchAgents/*.plist /Library/LaunchDaemons/*.plist 2>/dev/null; fi)
   while IFS= read -r f; do
-    [ -n "$f" ] && fgrep_q 'DYLD_INSERT_LIBRARIES' "$f" && high "" "$f" "DYLD_INSERT_LIBRARIES の設定（ライブラリインジェクション）"
+    [ -n "$f" ] && fgrep_q 'DYLD_INSERT_LIBRARIES' "$f" && high "" "$f" s30.dyld_insert
   done < <(home_rc_paths)
-  [ -f "$HOME_DIR/Library/Preferences/com.apple.security.plist" ] && info "" "$HOME_DIR/Library/Preferences/com.apple.security.plist" "com.apple.security.plist が存在（改変の有無を確認）"
+  [ -f "$HOME_DIR/Library/Preferences/com.apple.security.plist" ] && info "" "$HOME_DIR/Library/Preferences/com.apple.security.plist" s30.security_plist
   if [ "$OS_NAME" = "Darwin" ] && host_enabled; then
     local v
     v="$(safe_probe launchctl getenv DYLD_INSERT_LIBRARIES)"
-    [ -n "$v" ] && critical "" "" "launchctl setenv で DYLD_INSERT_LIBRARIES が設定されています"
+    [ -n "$v" ] && critical "" "" s30.launchctl_dyld
     safe_probe launchctl list | awk 'NR>1 {print $3}' | grep -v -E '\.' | grep -v -E '^-$' | while IFS= read -r lb; do
-      high "" "" "launchctl list にランダム Label 様のジョブ（$lb）"
+      high "" "" s30.launchctl_random label="$lb"
     done
     local li
     li="$(safe_probe osascript -e 'tell application "System Events" to get name of every login item')"
-    [ -n "$li" ] && info "" "" "ログイン項目: $li"
-    safe_probe profiles show -type configuration | grep_q -i 'attribute' && medium "" "" "構成プロファイルがインストールされています（profiles show で確認）"
+    [ -n "$li" ] && info "" "" s30.login_items items="$li"
+    safe_probe profiles show -type configuration | grep_q -i 'attribute' && medium "" "" s30.profiles
   fi
   intel_host_files
   return 0
@@ -3206,70 +3424,70 @@ check_s30() {
 
 # §31 Linux 永続化（/etc/ld.so.preload / LD_PRELOAD / systemd user / autostart / cron.d）
 check_s31() {
-  log_section "§31" "Linux永続化"
+  log_section "§31"
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    [ -s "$f" ] && grep -q -v -E '^[[:space:]]*(#|$)' "$f" && critical "ebpf-rootkit" "$f" "ld.so.preload が空ではありません（全プロセスへのライブラリ注入）" "" \
-      "$(x_text_locators "$f" -v '^[[:space:]]*(#|$)')"
+    [ -s "$f" ] && grep -q -v -E '^[[:space:]]*(#|$)' "$f" && critical "ebpf-rootkit" "$f" s31.ld_so_preload \
+      --x="$(x_text_locators "$f" -v '^[[:space:]]*(#|$)')"
   done < <(files_named '^ld\.so\.preload$'; host_enabled && [ -f /etc/ld.so.preload ] && echo /etc/ld.so.preload)
   while IFS= read -r f; do
-    [ -n "$f" ] && fgrep_q '(^|[[:space:]]|export[[:space:]]+)LD_PRELOAD=' "$f" && high "ebpf-rootkit" "$f" "シェル設定で LD_PRELOAD を設定（ライブラリ注入による永続化）" "" \
-      "$(x_text_locators "$f" '(^|[[:space:]]|export[[:space:]]+)LD_PRELOAD=')"
+    [ -n "$f" ] && fgrep_q '(^|[[:space:]]|export[[:space:]]+)LD_PRELOAD=' "$f" && high "ebpf-rootkit" "$f" s31.ld_preload_rc \
+      --x="$(x_text_locators "$f" '(^|[[:space:]]|export[[:space:]]+)LD_PRELOAD=')"
   done < <(home_rc_paths; files_named '^(\.bashrc|\.zshrc|\.profile|\.bash_profile|environment)$'; host_enabled && [ -f /etc/environment ] && echo /etc/environment)
   local unit
   while IFS= read -r unit; do
     [ -n "$unit" ] || continue
     local ure='^[[:space:]]*(ExecStart|ExecStartPre|Exec)[[:space:]]*=[^#]*(/tmp/|/dev/shm/|/var/tmp/|/\.[^/[:space:]]+/|curl|wget|base64|bash -c|sh -c)'
     if fgrep_q "$ure" "$unit"; then
-      high "ebpf-rootkit" "$unit" "自動起動エントリが一時領域/隠しパス/通信コマンドを実行" "" "$(x_text_locators "$unit" "$ure")"
+      high "ebpf-rootkit" "$unit" s31.autostart_suspicious --x="$(x_text_locators "$unit" "$ure")"
     elif fgrep_q 'Environment=.*LD_PRELOAD' "$unit"; then
-      high "ebpf-rootkit" "$unit" "systemd ユニットで LD_PRELOAD を設定" "" "$(x_text_locators "$unit" 'Environment=.*LD_PRELOAD')"
+      high "ebpf-rootkit" "$unit" s31.unit_ld_preload --x="$(x_text_locators "$unit" 'Environment=.*LD_PRELOAD')"
     else
-      info "" "$unit" "ユーザー自動起動エントリ"
+      info "" "$unit" s31.autostart
     fi
   done < <(files_path '/systemd/user/[^/]+\.service$|/autostart/[^/]+\.desktop$'
            ls "$HOME_DIR"/.config/systemd/user/*.service "$HOME_DIR"/.config/autostart/*.desktop 2>/dev/null)
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -v '^[[:space:]]*#' "$f" 2>/dev/null | grep_q -E '(curl|wget|base64|/tmp/|/dev/shm/|nc )' && high "ebpf-rootkit" "$f" "cron.d エントリが通信/一時領域を実行" "" \
-      "$(TL_EXCLUDE='[[:space:]]*#' x_text_locators "$f" '(curl|wget|base64|/tmp/|/dev/shm/|nc )')"
+    grep -v '^[[:space:]]*#' "$f" 2>/dev/null | grep_q -E '(curl|wget|base64|/tmp/|/dev/shm/|nc )' && high "ebpf-rootkit" "$f" s31.cron_d \
+      --x="$(TL_EXCLUDE='[[:space:]]*#' x_text_locators "$f" '(curl|wget|base64|/tmp/|/dev/shm/|nc )')"
   done < <(files_path '/cron\.d/[^/]+$'; host_enabled && ls /etc/cron.d/* 2>/dev/null)
   return 0
 }
 
 # §32 AI モデル供給網（pickle 系拡張子 / weights_only=False / --extra-index-url）
 check_s32() {
-  log_section "§32" "AIモデル供給網"
+  log_section "§32"
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     case "$f" in */node_modules/*|*/.git/*) continue ;; esac
-    medium "hf-supply-chain" "$f" "pickle 系モデル形式（${f##*.}）。読み込み時に任意コード実行の可能性（.safetensors 推奨）"
+    medium "hf-supply-chain" "$f" s32.pickle_model format="${f##*.}"
   done < <(files_named '\.(pkl|pickle|pt|pth)$' | grep -v -E '\.pth$' ; files_named '\.bin$' | grep -E '/(models?|checkpoints?|weights)/|pytorch_model[^/]*\.bin$')
   files_path '\.(py|ipynb)$' | grep_l 'weights_only[[:space:]]*=[[:space:]]*False' | while IFS= read -r f; do
-    [ -n "$f" ] && high "hf-supply-chain" "$f" "torch.load(..., weights_only=False)（pickle の任意コード実行）"
+    [ -n "$f" ] && high "hf-supply-chain" "$f" s32.torch_load
   done
   files_named '^(requirements.*\.txt|constraints.*\.txt|pip\.conf|\.pip\.conf)$' | grep_l '(--extra-index-url|extra-index-url)' | while IFS= read -r f; do
-    [ -n "$f" ] && high "hf-supply-chain" "$f" "--extra-index-url（PyPI 以外の索引との依存関係混乱）"
+    [ -n "$f" ] && high "hf-supply-chain" "$f" s32.extra_index_url
   done
   return 0
 }
 
 # §33 シェルフック
 check_s33() {
-  log_section "§33" "シェルフック"
+  log_section "§33"
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q '(^|[[:space:]])PROMPT_COMMAND=' "$f" && { fgrep_q 'PROMPT_COMMAND=.*(curl|wget|base64|nc |/dev/tcp)' "$f" && high "" "$f" "PROMPT_COMMAND に通信/難読化コマンド" || medium "" "$f" "PROMPT_COMMAND が設定されています（プロンプト表示ごとに実行）"; }
-    fgrep_q '^[[:space:]]*(function[[:space:]]+)?precmd[[:space:]]*\(\)' "$f" && fgrep_q '(curl|wget|base64|nc |/dev/tcp)' "$f" && high "" "$f" "zsh precmd フック定義と通信コマンドが共存"
-    fgrep_q '^[[:space:]]*(function[[:space:]]+)?command_not_found_hand?le?[[:space:]]*\(\)' "$f" && medium "" "$f" "command_not_found_handle を再定義（タイプミスでコード実行）"
+    fgrep_q '(^|[[:space:]])PROMPT_COMMAND=' "$f" && { fgrep_q 'PROMPT_COMMAND=.*(curl|wget|base64|nc |/dev/tcp)' "$f" && high "" "$f" s33.prompt_command_suspicious || medium "" "$f" s33.prompt_command; }
+    fgrep_q '^[[:space:]]*(function[[:space:]]+)?precmd[[:space:]]*\(\)' "$f" && fgrep_q '(curl|wget|base64|nc |/dev/tcp)' "$f" && high "" "$f" s33.precmd
+    fgrep_q '^[[:space:]]*(function[[:space:]]+)?command_not_found_hand?le?[[:space:]]*\(\)' "$f" && medium "" "$f" s33.command_not_found
   done < <(home_rc_paths)
   for f in "$HOME_DIR/.bash_logout" "$HOME_DIR/.zlogout"; do
     [ -f "$f" ] || continue
-    if fgrep_q '(curl|wget|rm -rf|base64|nc )' "$f"; then high "" "$f" "ログアウトフックに通信/破壊的コマンド"
-    elif grep -v -E '^[[:space:]]*(#|$|clear|if|fi|then|\[)' "$f" | grep_q .; then medium "" "$f" "ログアウトフックにコマンドがあります"
+    if fgrep_q '(curl|wget|rm -rf|base64|nc )' "$f"; then high "" "$f" s33.logout_suspicious
+    elif grep -v -E '^[[:space:]]*(#|$|clear|if|fi|then|\[)' "$f" | grep_q .; then medium "" "$f" s33.logout
     fi
   done
   return 0
@@ -3277,14 +3495,14 @@ check_s33() {
 
 # §34 ネットワーク設定（proxy / hosts / ProxyCommand）
 check_s34() {
-  log_section "§34" "ネットワーク設定"
+  log_section "§34"
   local f
   for f in "$HOME_DIR/.curlrc" "$HOME_DIR/.wgetrc"; do
-    [ -f "$f" ] && fgrep_q -i '^[[:space:]]*-?-?(proxy|https?_proxy|use_proxy)[[:space:]]*[=[:space:]]' "$f" && high "" "$f" "curl/wget のプロキシ設定（通信傍受の可能性）"
+    [ -f "$f" ] && fgrep_q -i '^[[:space:]]*-?-?(proxy|https?_proxy|use_proxy)[[:space:]]*[=[:space:]]' "$f" && high "" "$f" s34.curl_proxy
   done
   # npm config get proxy は npm（node ランタイム）を起動するため使用せず、.npmrc を静的に読む
   for f in "$HOME_DIR/.npmrc" "$RP/.npmrc"; do
-    [ -f "$f" ] && { [ "$f" = "$HOME_DIR/.npmrc" ] || in_root_regular "$f"; } && fgrep_q -i '^[[:space:]]*(https-)?proxy[[:space:]]*=' "$f" && high "" "$f" "npm のプロキシ設定（レジストリ通信の傍受）"
+    [ -f "$f" ] && { [ "$f" = "$HOME_DIR/.npmrc" ] || in_root_regular "$f"; } && fgrep_q -i '^[[:space:]]*(https-)?proxy[[:space:]]*=' "$f" && high "" "$f" s34.npm_proxy
   done
   local -a ph; mapfile -t ph < <(read_ioc '.protected_hosts')
   local hostsf
@@ -3294,37 +3512,37 @@ check_s34() {
     local h
     for h in "${ph[@]}"; do
       grep -v '^[[:space:]]*#' "$hostsf" | grep_q -i -E "[[:space:]]$(printf '%s' "$h" | sed 's/\./\\./g')([[:space:]]|$)" \
-        && high "" "$hostsf" "hosts でレジストリ/GitHub（$h）を上書き"
+        && high "" "$hostsf" s34.hosts_override host="$h"
     done
     network_iocs | cut -f1 | grep -v -E '^[0-9.]+$' | while IFS= read -r h; do
-      grep -v '^[[:space:]]*#' "$hostsf" | grep_q -i -F -- "$h" && critical "" "$hostsf" "hosts に C2 ドメイン（$h）"
+      grep -v '^[[:space:]]*#' "$hostsf" | grep_q -i -F -- "$h" && critical "" "$hostsf" s34.hosts_c2 host="$h"
     done
   done < <(host_enabled && echo /etc/hosts; files_named '^hosts$')
   for f in "$HOME_DIR/.ssh/config"; do
-    [ -f "$f" ] && fgrep_q -i '^[[:space:]]*ProxyCommand[[:space:]].*(\bnc\b|ncat|netcat|socat)' "$f" && high "" "$f" "ssh ProxyCommand に nc/socat（通信中継）"
+    [ -f "$f" ] && fgrep_q -i '^[[:space:]]*ProxyCommand[[:space:]].*(\bnc\b|ncat|netcat|socat)' "$f" && high "" "$f" s34.ssh_proxy
   done
   return 0
 }
 
 # §35 アンチフォレンジック（auditd / 履歴消去 / 履歴シンボリックリンク / mtime 逆行）
 check_s35() {
-  log_section "§35" "アンチフォレンジック"
-  log_info "noatime 環境の判定は §13 を参照（noatime ではハニーポットが無効）"
+  log_section "§35"
+  log_info log.noatime_see_s13
   if host_enabled; then
     if [ "$OS_NAME" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
       local st; st="$(systemctl is-active auditd 2>/dev/null)"
-      [ "$st" = "active" ] && safe "auditd 稼働中" || medium "" "" "auditd が稼働していません（${st:-unknown}）"
+      [ "$st" = "active" ] && safe log.safe.auditd || medium "" "" s35.auditd state="${st:-unknown}"
     elif [ "$OS_NAME" = "Darwin" ]; then
-      [ -f /etc/security/audit_control ] || medium "" "/etc/security/audit_control" "OpenBSM の設定がありません"
+      [ -f /etc/security/audit_control ] || medium "" "/etc/security/audit_control" s35.openbsm
     fi
   fi
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q '(HISTFILE=/dev/null|HISTSIZE=0([^0-9]|$)|HISTFILESIZE=0([^0-9]|$)|SAVEHIST=0([^0-9]|$)|unset[[:space:]]+HISTFILE)' "$f" && high "" "$f" "シェル履歴の無効化（HISTFILE=/dev/null / HISTSIZE=0）"
+    fgrep_q '(HISTFILE=/dev/null|HISTSIZE=0([^0-9]|$)|HISTFILESIZE=0([^0-9]|$)|SAVEHIST=0([^0-9]|$)|unset[[:space:]]+HISTFILE)' "$f" && high "" "$f" s35.history_disabled
   done < <(home_rc_paths)
   for f in "$HOME_DIR/.bash_history" "$HOME_DIR/.zsh_history"; do
-    [ -L "$f" ] && [ "$(readlink -- "$f")" = "/dev/null" ] && high "" "$f" "履歴ファイルが /dev/null へのシンボリックリンク"
+    [ -L "$f" ] && [ "$(readlink -- "$f")" = "/dev/null" ] && high "" "$f" s35.history_devnull
   done
   # mtime 逆行（birth time が取得できる環境のみ）
   local b m
@@ -3332,7 +3550,7 @@ check_s35() {
     [ -n "$f" ] || continue
     b="$(stat_birth "$f")"; m="$(stat_mtime "$f")"
     [ -n "$b" ] && [ -n "$m" ] && [ "$b" != "0" ] && [ "$b" != "-" ] || continue
-    [ "$m" -lt $(( b - 86400 )) ] 2>/dev/null && medium "" "$f" "mtime が作成時刻より1日以上古い（タイムスタンプ改ざん疑い）"
+    [ "$m" -lt $(( b - 86400 )) ] 2>/dev/null && medium "" "$f" s35.mtime_before_birth
   done < <(files_path '\.(sh|py|js|mjs|cjs|rb|pl|pth|so|dylib)$|/(\.bashrc|\.zshrc|\.profile|\.envrc)$' | head -n 5000; home_rc_paths)
   return 0
 }
@@ -3343,48 +3561,48 @@ check_s35() {
 
 # §36 HF 供給網
 check_s36() {
-  log_section "§36" "HF供給網"
+  log_section "§36"
   local f
   files_path '\.(py|ipynb|json|ya?ml)$' | grep_l 'trust_remote_code["'"'"']?[[:space:]]*[=:][[:space:]]*(True|true)' | while IFS= read -r f; do
-    [ -n "$f" ] && high "hf-supply-chain" "$f" "trust_remote_code=True（リモートのモデル/データセットコードを実行）"
+    [ -n "$f" ] && high "hf-supply-chain" "$f" s36.trust_remote_code
   done
   files_named '\.py$' | grep_l '(GeneratorBasedBuilder|DatasetBuilder|datasets\.load_dataset|_split_generators)' | grep_l '(subprocess|os\.system|eval\(|exec\(|__import__)' | while IFS= read -r f; do
-    [ -n "$f" ] && high "hf-dataset-poisoning" "$f" "データセットローダースクリプトに subprocess/eval/exec（コード実行経路）"
+    [ -n "$f" ] && high "hf-dataset-poisoning" "$f" s36.dataset_loader
   done
   files_named '\.py$' | grep_l '(def __reduce__|pickle\.loads?\(|dill\.loads?\(|cloudpickle\.loads?\()' | while IFS= read -r f; do
     [ -n "$f" ] || continue
     case "$f" in */site-packages/*|*/dist-packages/*|*/node_modules/*) continue ;; esac
-    medium "hf-supply-chain" "$f" "pickle 系デシリアライズ（__reduce__/pickle.loads/dill）"
+    medium "hf-supply-chain" "$f" s36.pickle
   done
   files_named '\.(ya?ml|json|jinja2?|j2)$' | grep_l '\{\{[^}]*(__class__|__globals__|__import__|cycler|lipsum|os\.popen)' | while IFS= read -r f; do
-    [ -n "$f" ] && high "hf-dataset-poisoning" "$f" "データセット設定にテンプレートインジェクション様の式"
+    [ -n "$f" ] && high "hf-dataset-poisoning" "$f" s36.template_injection
   done
   build_deps
   awk -F'\t' '$1=="pypi" && $2=="lerobot" {print $3"\t"$4}' "$DEPS_TSV" | tsv_us | while IFS="$US" read -r v f; do
-    high "hf-lerobot-rce" "$f" "lerobot ${v}: CVE-2026-25874（CVSS 9.8）の修正版を確認してください（ioc に修正版未定義）"
+    high "hf-lerobot-rce" "$f" s36.lerobot version="${v}"
   done
-  while IFS= read -r f; do [ -n "$f" ] && critical "hf-supply-chain" "$f" "transformers.pyz（正規配布物ではない偽装アーカイブ）"; done < <(files_named '^transformers\.pyz$')
+  while IFS= read -r f; do [ -n "$f" ] && critical "hf-supply-chain" "$f" s36.transformers_pyz; done < <(files_named '^transformers\.pyz$')
   return 0
 }
 
 # §37 MCP レジストリ
 check_s37() {
-  log_section "§37" "MCPレジストリ"
+  log_section "§37"
   local f
   files_path '\.(json|ya?ml|toml|js|ts|py|md)$' | grep_lF 'MCP-POISON' | while IFS= read -r f; do
-    [ -n "$f" ] && high "mcp-poisoning" "$f" "SPECTER MCP-POISON の痕跡"
+    [ -n "$f" ] && high "mcp-poisoning" "$f" s37.specter
   done
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q 'host\.docker\.internal' "$f" && high "mcp-poisoning" "$f" "MCP 設定が host.docker.internal を参照（コンテナからホストへの横移動）"
-    fgrep_q '64:ff9b(:1)?::' "$f" && high "mcp-poisoning" "$f" "MCP 設定が IPv6 NAT64 レンジ（64:ff9b::/96, 64:ff9b:1::/48）を参照（SSRF フィルタ回避）"
+    fgrep_q 'host\.docker\.internal' "$f" && high "mcp-poisoning" "$f" s37.host_docker_internal
+    fgrep_q '64:ff9b(:1)?::' "$f" && high "mcp-poisoning" "$f" s37.nat64
   done < <(mcp_config_files | sort -u; files_path '/(tool|server|mcp)\.json$')
   build_deps
   if [ "$HAVE_JQ" -eq 1 ]; then
     local ce cp cf cid
     while IFS="$US" read -r cid ce cp cf; do
       ZES_V_E="$ce" ZES_V_N="$cp" awk -F'\t' 'BEGIN { e = ENVIRON["ZES_V_E"]; n = ENVIRON["ZES_V_N"] } $1==e && $2==n {print $3"\t"$4}' "$DEPS_TSV" | sort -u | tsv_us | while IFS="$US" read -r v f; do
-        [ -n "$v" ] && version_lt "$v" "$cf" && high "mcp-poisoning" "$f" "${cp}@${v} は ${cid} の影響範囲（修正版 ${cf}）" "" "$(x_kind runtime.cve)"
+        [ -n "$v" ] && version_lt "$v" "$cf" && high "mcp-poisoning" "$f" s37.mcp_cve cve="${cid}" fixed="${cf}" package="${cp}" version="${v}" --x="$(x_kind runtime.cve)"
       done
     done < <(jq -r '.mcp_poisoning.mcp_cves[] | select(.package and .fixed) | [.id, .eco, .package, .fixed] | @tsv' "$IOC_FILE" | tsv_us)
   fi
@@ -3392,14 +3610,14 @@ check_s37() {
     ($1=="npm" && ($2=="@modelcontextprotocol/sdk" || $2 ~ /appium.*mcp|mcp.*appium/ || $2=="@modelcontextprotocol/server-everything" || $2 ~ /gitlab-mcp/)) ||
     ($1=="pypi" && ($2=="mcp" || $2=="mcp-server-fetch" || $2=="fastmcp")) ||
     ($1=="go" && $2 ~ /stacklok\/toolhive/) {print $2"\t"$3"\t"$4}' "$DEPS_TSV" | sort -u | tsv_us | while IFS="$US" read -r n v f; do
-    medium "mcp-poisoning" "$f" "MCP 関連依存 ${n}@${v}: CVE-2026-104850/104120/111767/59951/61559/52869/58500, GO-2026-5996/6002 の該当可否を確認（ioc に修正版未定義）"
+    medium "mcp-poisoning" "$f" s37.mcp_dependency package="${n}" version="${v}"
   done
   return 0
 }
 
 # §38 CI/CD 大量植え付け
 check_s38() {
-  log_section "§38" "CI/CD大量植え付け"
+  log_section "§38"
   local f n
   local th; th="$(read_ioc '.github_actions.secrets_ref_threshold')"; th="${th:-10}"
   if [ -n "$ROOT_GITDIR" ]; then
@@ -3407,7 +3625,7 @@ check_s38() {
     # パスは -z（NUL 区切り）で受け取る（非 ASCII・引用符を含む名前を C 形式で引用させない）
     if safe_git log --no-textconv --no-ext-diff --diff-filter=A --since="@$since" --name-only --format='' -z -- .github/workflows >"$TMP_DIR/s38-added.z"; then
       tr '\0' '\n' <"$TMP_DIR/s38-added.z" | grep -v '^$' | sort -u | while IFS= read -r n; do
-        [ -n "$n" ] && medium "ghostaction-oct2026" "$RP/$n" "直近30日に新規追加されたワークフロー（作成者・目的を監査）"
+        [ -n "$n" ] && medium "ghostaction-oct2026" "$RP/$n" s38.new_workflow
       done
     else
       record_error "§38" "git_log_failed"
@@ -3416,22 +3634,22 @@ check_s38() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     n="$(grep -o -a -i -E 'secrets\.[A-Za-z0-9_]+' "$f" 2>/dev/null | tr 'A-Z' 'a-z' | sort -u | wc -l | tr -d ' ')"
-    [ "${n:-0}" -gt "$th" ] && high "ghostaction-oct2026" "$f" "ワークフローが ${n} 種類の secrets.* を参照（閾値 ${th} 超、一括収集の疑い）"
-    fgrep_q -i 'tojson\([[:space:]]*secrets[[:space:]]*(\.[[:space:]]*\*[[:space:]]*)?\)' "$f" && critical "ghostaction-oct2026" "$f" "toJSON(secrets) で全シークレットを展開"
-    fgrep_q '(^|[[:space:];|])(env|printenv)[[:space:]]*(\||>|$)' "$f" && high "ghostaction-oct2026" "$f" "ワークフローで環境変数を一括出力（env/printenv）"
+    [ "${n:-0}" -gt "$th" ] && high "ghostaction-oct2026" "$f" s38.many_secrets n="${n}" threshold="${th}"
+    fgrep_q -i 'tojson\([[:space:]]*secrets[[:space:]]*(\.[[:space:]]*\*[[:space:]]*)?\)' "$f" && critical "ghostaction-oct2026" "$f" s38.tojson_secrets
+    fgrep_q '(^|[[:space:];|])(env|printenv)[[:space:]]*(\||>|$)' "$f" && high "ghostaction-oct2026" "$f" s38.env_dump
   done < <(workflow_files)
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -q -E '^[[:space:]]*-?[[:space:]]*remote:[[:space:]]*["'"'"']?https?://' "$f" && high "ghostaction-oct2026" "$f" "GitLab CI が remote include（外部 URL の再利用コンポーネント）"
+    grep -q -E '^[[:space:]]*-?[[:space:]]*remote:[[:space:]]*["'"'"']?https?://' "$f" && high "ghostaction-oct2026" "$f" s38.gitlab_remote_include
     if grep -q -E '^[[:space:]]*-?[[:space:]]*project:' "$f" && ! grep -q -E 'ref:[[:space:]]*["'"'"']?[0-9a-f]{40}' "$f"; then
-      medium "ghostaction-oct2026" "$f" "GitLab CI の project include が SHA 固定されていません"
+      medium "ghostaction-oct2026" "$f" s38.gitlab_project_include
     fi
   done < <(files_named '^\.gitlab-ci\.ya?ml$')
   files_path '/\.circleci/config\.ya?ml$' | grep_l '^[[:space:]]+[A-Za-z0-9_-]+:[[:space:]]*[A-Za-z0-9_-]+/[A-Za-z0-9_-]+@(volatile|dev:)' | while IFS= read -r f; do
-    [ -n "$f" ] && high "ghostaction-oct2026" "$f" "CircleCI orb が volatile/dev 参照"
+    [ -n "$f" ] && high "ghostaction-oct2026" "$f" s38.circleci_orb
   done
   files_named '^Jenkinsfile$' | grep_l "@Library\\(['\"][^'\"@]+['\"]\\)" | while IFS= read -r f; do
-    [ -n "$f" ] && medium "ghostaction-oct2026" "$f" "Jenkins 共有ライブラリがバージョン未固定"
+    [ -n "$f" ] && medium "ghostaction-oct2026" "$f" s38.jenkins_library
   done
   # GhostAction: 偽装フォント（拡張子はフォントだがマジックバイトが不一致）
   local magic
@@ -3439,11 +3657,11 @@ check_s38() {
     [ -n "$f" ] || continue
     magic="$(od -An -tx1 -N4 -- "$f" 2>/dev/null | tr -d ' \n')"
     case "$magic" in 00010000|4f54544f|74727565|74797031|774f4646|774f4632|"") ;;
-      *) high "ghostaction-oct2026" "$f" "フォント拡張子だが中身がフォントではない（偽装フォント）" ;;
+      *) high "ghostaction-oct2026" "$f" s38.fake_font ;;
     esac
   done < <(files_named '\.(ttf|otf|woff2?)$')
   files_path '/\.github/' | grep -E '\.(ttf|otf|woff2?)$' | while IFS= read -r f; do
-    medium "ghostaction-oct2026" "$f" ".github/ 配下にフォントファイル（GhostAction の隠蔽手口）"
+    medium "ghostaction-oct2026" "$f" s38.github_font
   done
   intel_workflow_strings
   return 0
@@ -3451,26 +3669,26 @@ check_s38() {
 
 # §39 メタデータ SSRF
 check_s39() {
-  log_section "§39" "メタデータSSRF"
+  log_section "§39"
   local f
   k8s_manifests >"$TMP_DIR/k8s.lst"
   files_path '\.(py|js|mjs|cjs|ts|go|rb|php|java|sh|tf|json|toml|ini|conf|env)$|/\.env[^/]*$' | grep -v -x -F -f "$TMP_DIR/k8s.lst" \
     | grep_l '169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200|fd00:ec2::254' | while IFS= read -r f; do
-    [ -n "$f" ] && medium "" "$f" "クラウドメタデータサービスへの参照（SSRF 経由の認証情報窃取に注意）"
+    [ -n "$f" ] && medium "" "$f" s39.metadata_ref
   done
   while IFS= read -r f; do
-    [ -n "$f" ] && fgrep_q 'AWS_EC2_METADATA_SERVICE_ENDPOINT[[:space:]]*=' "$f" && high "" "$f" "AWS_EC2_METADATA_SERVICE_ENDPOINT の上書き（メタデータ通信の横取り）"
+    [ -n "$f" ] && fgrep_q 'AWS_EC2_METADATA_SERVICE_ENDPOINT[[:space:]]*=' "$f" && high "" "$f" s39.metadata_endpoint
   done < <(home_rc_paths; files_named '^\.env(\.[A-Za-z0-9_-]+)?$|\.sh$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q 'http_tokens[[:space:]]*=[[:space:]]*"optional"' "$f" && high "" "$f" "IMDSv1 が有効（http_tokens = \"optional\"）"
+    fgrep_q 'http_tokens[[:space:]]*=[[:space:]]*"optional"' "$f" && high "" "$f" s39.imdsv1
     if fgrep_q 'resource[[:space:]]+"aws_(instance|launch_template)"' "$f" && ! fgrep_q 'http_tokens[[:space:]]*=[[:space:]]*"required"' "$f"; then
-      medium "" "$f" "EC2 で IMDSv2 が強制されていません（metadata_options.http_tokens = \"required\" を推奨）"
+      medium "" "$f" s39.imdsv2
     fi
   done < <(files_named '\.tf$')
   if host_enabled && command -v lsof >/dev/null 2>&1; then
     lsof -nP -i -a -c dockerd -c containerd 2>/dev/null | grep -E '169\.254\.169\.254|100\.100\.100\.200' | awk '{print $2}' | sort -u | while IFS= read -r pid; do
-      high "" "/proc/$pid" "dockerd/containerd からメタデータサービスへの接続（pid $pid）"
+      high "" "/proc/$pid" s39.dockerd_metadata pid="$pid"
     done
   fi
   return 0
@@ -3478,13 +3696,13 @@ check_s39() {
 
 # §40 eBPF / LD_PRELOAD ルートキット
 check_s40() {
-  log_section "§40" "eBPF/LD_PRELOAD"
+  log_section "§40"
   local f
   files_path '\.(sh|bash|py|c|go|rs|service)$' | grep_l '(>>?[[:space:]]*/etc/ld\.so\.preload|bpftool[[:space:]]+prog[[:space:]]+(load|attach)|bpf_probe_write_user|BPF_PROG_LOAD|insmod[[:space:]]|modprobe[[:space:]]+-f)' | while IFS= read -r f; do
-    [ -n "$f" ] && high "ebpf-rootkit" "$f" "ld.so.preload 書き込み / eBPF プログラムのロード / カーネルモジュール挿入"
+    [ -n "$f" ] && high "ebpf-rootkit" "$f" s40.preload_bpf_module
   done
   files_path '\.(sh|bash|py|c|go|rs|service|conf)$|/[^/.]+$' | grep_l '(quasar[ _-]?linux|\bQLNX\b|linkpro|voidlink)' -i | while IFS= read -r f; do
-    [ -n "$f" ] && critical "ebpf-rootkit" "$f" "Quasar Linux (QLNX) / LinkPro / VoidLink の痕跡"
+    [ -n "$f" ] && critical "ebpf-rootkit" "$f" s40.rootkit_names
   done
   host_enabled || return 0
   [ "$OS_NAME" = "Linux" ] || return 0
@@ -3492,22 +3710,22 @@ check_s40() {
   t="$(cat /proc/sys/kernel/tainted 2>/dev/null)"
   if [ -n "$t" ] && [ "$t" != "0" ]; then
     if [ $(( t & 4096 )) -ne 0 ] || [ $(( t & 8192 )) -ne 0 ]; then
-      high "ebpf-rootkit" "/proc/sys/kernel/tainted" "カーネルが out-of-tree/未署名モジュールで汚染されています（tainted=$t）"
+      high "ebpf-rootkit" "/proc/sys/kernel/tainted" s40.tainted tainted="$t"
     else
-      info "" "/proc/sys/kernel/tainted" "カーネル taint フラグ: $t"
+      info "" "/proc/sys/kernel/tainted" s40.taint_flags tainted="$t"
     fi
   fi
   if [ -d /sys/fs/bpf ]; then
     local pinned; pinned="$(find /sys/fs/bpf -mindepth 1 -maxdepth 3 2>/dev/null | head -n 50)"
-    [ -n "$pinned" ] && medium "ebpf-rootkit" "/sys/fs/bpf" "ピン留めされた BPF オブジェクトがあります（正規ツール由来か確認）"
+    [ -n "$pinned" ] && medium "ebpf-rootkit" "/sys/fs/bpf" s40.pinned_bpf
   fi
   local bp; bp="$(safe_probe bpftool prog list)"
   if [ -n "$bp" ]; then
-    printf '%s' "$bp" | grep_q -E '(getdents|tcp4_seq_show|tcp6_seq_show|udp4_seq_show|sys_bpf|kill)' && high "ebpf-rootkit" "" "ファイル/ソケット/プロセス隠蔽系フックの eBPF プログラム（bpftool prog list）"
+    printf '%s' "$bp" | grep_q -E '(getdents|tcp4_seq_show|tcp6_seq_show|udp4_seq_show|sys_bpf|kill)' && high "ebpf-rootkit" "" s40.bpf_hiding
   fi
   if [ -r /proc/modules ]; then
     awk '$NF ~ /\(O/ || $0 ~ /\(OE\)|\(E\)/ {print $1}' /proc/modules 2>/dev/null | while IFS= read -r m; do
-      medium "ebpf-rootkit" "/proc/modules" "out-of-tree/未署名カーネルモジュール: $m"
+      medium "ebpf-rootkit" "/proc/modules" s40.module module="$m"
     done
   fi
   local u
@@ -3515,7 +3733,7 @@ check_s40() {
     [ -f "$u" ] || continue
     case "${u##*/}" in systemd-*|dbus-*|udev*|journald*|networkd*|resolved*)
       grep -E '^[[:space:]]*ExecStart=' "$u" | grep_q -v -E '=(/usr)?/lib/systemd/|=/usr/bin/(dbus|udevadm)|=/usr/sbin/' \
-        && high "ebpf-rootkit" "$u" "systemd 標準ユニット名の偽装（ExecStart が標準パス外）" ;;
+        && high "ebpf-rootkit" "$u" s40.fake_unit ;;
     esac
   done
   return 0
@@ -3523,7 +3741,7 @@ check_s40() {
 
 # §41 AI アシスタント
 check_s41() {
-  log_section "§41" "AIアシスタント"
+  log_section "§41"
   local f v
   for f in "/Applications/Cursor.app/Contents/Info.plist" "$HOME_DIR/Applications/Cursor.app/Contents/Info.plist" "/usr/share/cursor/resources/app/package.json" "/opt/Cursor/resources/app/package.json"; do
     [ -f "$f" ] || continue
@@ -3532,21 +3750,21 @@ check_s41() {
     else v="$(grep -m1 -E '"version"' "$f" | grep -o -E '[0-9]+(\.[0-9]+)+')"; fi
     [ -n "$v" ] || continue
     if version_lt "$v" "2.5"; then
-      critical "" "$f" "Cursor ${v} は CVE-2026-26268（CVSS 9.9、2.5 で修正）と CVE-2026-50548（DuneSlide、CVSS 9.8、3.0 で修正）の影響範囲" "" "$(x_kind runtime.cve)"
+      critical "" "$f" s41.cursor_old version="${v}" --x="$(x_kind runtime.cve)"
     elif version_lt "$v" "3.0"; then
-      critical "" "$f" "Cursor ${v} は CVE-2026-50548（DuneSlide、CVSS 9.8）の影響範囲（3.0 で修正）" "" "$(x_kind runtime.cve)"
+      critical "" "$f" s41.cursor_duneslide version="${v}" --x="$(x_kind runtime.cve)"
     fi
   done
   local d cfix; cfix="$(read_ioc '.runtime_minimums.copilot_chat')"
   for d in "$HOME_DIR"/.vscode/extensions/github.copilot-chat-[0-9]*; do
     [ -d "$d" ] || continue
     v="${d##*/github.copilot-chat-}"; v="${v%%-*}"
-    [ -n "$cfix" ] && version_lt "$v" "$cfix" && high "" "$d" "GitHub Copilot Chat 拡張 ${v} は CVE-2025-62222（コマンドインジェクション、CVSS 8.8）の影響範囲（修正版 ${cfix}）" "" "$(x_kind runtime.cve)"
+    [ -n "$cfix" ] && version_lt "$v" "$cfix" && high "" "$d" s41.copilot_chat fixed="${cfix}" version="${v}" --x="$(x_kind runtime.cve)"
   done
   for d in "$HOME_DIR"/Library/Application\ Support/JetBrains/*/plugins/github-copilot-intellij "$HOME_DIR"/.local/share/JetBrains/*/github-copilot-intellij; do
-    [ -d "$d" ] && medium "" "$d" "JetBrains 版 Copilot: CVE-2026-50510 の修正版適用を確認"
+    [ -d "$d" ] && medium "" "$d" s41.copilot_jetbrains
   done
-  [ -f "$RP/git.exe" ] && critical "" "$RP/git.exe" "リポジトリルートの git.exe（Windows で IDE/エージェントが自動実行する未パッチ zero-day）"
+  [ -f "$RP/git.exe" ] && critical "" "$RP/git.exe" s41.git_exe
   local has_instr=0 has_hook=0 has_agent_hook=0 t
   ai_instruction_files | grep_q . && has_instr=1
   while IFS= read -r t; do
@@ -3554,15 +3772,15 @@ check_s41() {
   done <"$GIT_HOOKS_LIST"
   files_path '/\.(claude|cursor|gemini)/(settings(\.local)?|hooks)\.json$' | grep_l '"hooks"' | grep_q . && has_agent_hook=1
   if [ "$has_instr" -eq 1 ] && [ $(( has_hook + has_agent_hook )) -ge 1 ]; then
-    high "" "$ROOT" "AI 指示ファイルと Git/エージェントフックが同居（間接プロンプトインジェクション→フック実行の連鎖）"
+    high "" "$ROOT" s41.instructions_and_hooks
   fi
-  while IFS= read -r f; do [ -n "$f" ] && info "" "$f" "Cursor MCP 設定（§17 で検査）"; done < <(files_path '/\.cursor/mcp\.json$')
+  while IFS= read -r f; do [ -n "$f" ] && info "" "$f" s41.cursor_mcp; done < <(files_path '/\.cursor/mcp\.json$')
   return 0
 }
 
 # §42 拡張所有権移転（既知名・バージョン間のパーミッション昇格）
 check_s42() {
-  log_section "§42" "拡張所有権移転"
+  log_section "§42"
   local f name
   local -a known; mapfile -t known < <(if [ "$HAVE_JQ" -eq 1 ]; then jq -r '.browser_extensions.known_campaigns[].name' "$IOC_FILE"; else grep -o -E '"name": "[^"]+"' "$IOC_FILE" | sed -n '/known_campaigns/,$p' | sed -E 's/"name": "//; s/"$//'; fi)
   while IFS= read -r f; do
@@ -3571,7 +3789,7 @@ check_s42() {
     local k
     for k in "${known[@]}"; do
       [ -n "$name" ] || break
-      case "$k" in *"$name"*) high "" "$f" "既知の悪性/侵害拡張と同名（$name）" ; break ;; esac
+      case "$k" in *"$name"*) high "" "$f" s42.known_name name="$name" ; break ;; esac
     done
   done < <(extension_manifests | sort -u; ls "$HOME_DIR"/.vscode/extensions/*/package.json 2>/dev/null)
   # 同一拡張 ID の複数バージョン間で危険パーミッションが増えていないか
@@ -3585,7 +3803,7 @@ check_s42() {
       if [ "$first" -eq 0 ]; then
         # comm は使わない（busybox 等に無い）。前版に無く今版にある行
         added="$(awk 'NR == FNR { if ($0 != "") seen[$0] = 1; next } $0 != "" && !($0 in seen)' <(printf '%s\n' "$prev") <(printf '%s\n' "$cur") | sort -u | tr '\n' ' ')"
-        [ -n "${added// /}" ] && high "" "$idd/$vdir/manifest.json" "拡張の更新で危険パーミッションが追加（${added% }）。所有権移転型の悪性アップデート疑い"
+        [ -n "${added// /}" ] && high "" "$idd/$vdir/manifest.json" s42.perms_added permissions="${added% }"
       fi
       prev="$cur"; first=0
     done < <(ls -1 "$idd" 2>/dev/null | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n)
@@ -3596,16 +3814,16 @@ check_s42() {
 
 # §43 Sigstore / SLSA
 check_s43() {
-  log_section "§43" "Sigstore/SLSA"
+  log_section "§43"
   local f v
   local -a cmins; mapfile -t cmins < <(read_ioc '.runtime_minimums.cosign')
   if host_enabled; then
     v="$(safe_probe cosign version 2>&1 | grep -o -E 'v?[0-9]+\.[0-9]+\.[0-9]+' | head -n1)"
-    [ -n "$v" ] && version_branch_vulnerable "${v#v}" "${cmins[@]}" && high "" "$(command -v cosign)" "cosign ${v} は修正版（${cmins[*]}）未満（GHSA-fx35-mq7g-6g98 / CVE-2026-39395 / CVE-2026-22703。3.1.3 は仕様書の値で未確認）"
+    [ -n "$v" ] && version_branch_vulnerable "${v#v}" "${cmins[@]}" && high "" "$(command -v cosign)" s43.cosign_old fixed="${cmins[*]}" version="${v}"
   fi
   files_path '/\.github/workflows/[^/]+\.ya?ml$' | grep_l 'cosign-release:[[:space:]]*["'"'"']?v?[0-9]' | while IFS= read -r f; do
     v="$(grep -o -E 'cosign-release:[[:space:]]*["'"'"']?v?[0-9]+\.[0-9]+\.[0-9]+' "$f" | head -n1 | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+')"
-    [ -n "$v" ] && version_branch_vulnerable "$v" "${cmins[@]}" && high "" "$f" "cosign-installer の cosign ${v} は修正版（${cmins[*]}）未満"
+    [ -n "$v" ] && version_branch_vulnerable "$v" "${cmins[@]}" && high "" "$f" s43.cosign_installer_old fixed="${cmins[*]}" version="${v}"
   done
   # cosign verify / verify-blob の identity 指定漏れ（--key 使用時は対象外）
   local line
@@ -3613,30 +3831,30 @@ check_s43() {
     [ -n "$f" ] || continue
     awk '/cosign[[:space:]]+verify(-blob|-attestation|-blob-attestation)?([[:space:]]|$)/ { s=$0; while (s ~ /\\$/ && (getline n) > 0) { sub(/\\$/,"",s); s=s n } print s }' "$f" | while IFS= read -r line; do
       printf '%s' "$line" | grep_q -E -- '--key([[:space:]=]|$)' && continue
-      printf '%s' "$line" | grep_q -E -- '--certificate-identity(-regexp)?[[:space:]=]' || { high "" "$f" "cosign verify に --certificate-identity がありません（任意の署名者を受理）"; continue; }
-      printf '%s' "$line" | grep_q -E -- '--certificate-oidc-issuer(-regexp)?[[:space:]=]' || high "" "$f" "cosign verify に --certificate-oidc-issuer がありません"
+      printf '%s' "$line" | grep_q -E -- '--certificate-identity(-regexp)?[[:space:]=]' || { high "" "$f" s43.no_identity; continue; }
+      printf '%s' "$line" | grep_q -E -- '--certificate-oidc-issuer(-regexp)?[[:space:]=]' || high "" "$f" s43.no_issuer
     done
   done < <(files_path '\.(sh|bash|ya?ml|mk)$|/Makefile$|/Jenkinsfile$' | grep_l 'cosign[[:space:]]+verify')
   files_path '\.(sh|bash|ya?ml)$' | grep_l 'rekor-cli[[:space:]]+(get|search)' | while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q '(cosign[[:space:]]+verify|slsa-verifier[[:space:]]+verify)' "$f" || medium "" "$f" "Rekor エントリの存在確認のみで検証扱い（署名・証明書の検証なし）"
+    fgrep_q '(cosign[[:space:]]+verify|slsa-verifier[[:space:]]+verify)' "$f" || medium "" "$f" s43.rekor_only
   done
   files_path '\.(sh|bash|ya?ml)$' | grep_l 'slsa-verifier[[:space:]]+verify-' | while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q -- '--source-uri' "$f" || high "" "$f" "slsa-verifier に --source-uri がありません（来歴の出所を検証していない）"
+    fgrep_q -- '--source-uri' "$f" || high "" "$f" s43.no_source_uri
   done
   local ver
-  while IFS=$'\t' read -r ver f; do [ -n "$ver" ] && version_lt "${ver#v}" "1.8.5" && high "" "$f" "Fulcio ${ver} は CVE-2026-22772（metaRegex SSRF）の影響範囲（<1.8.5）"; done < <(detect_service_version 'projectsigstore/fulcio')
+  while IFS=$'\t' read -r ver f; do [ -n "$ver" ] && version_lt "${ver#v}" "1.8.5" && high "" "$f" s43.fulcio version="${ver}"; done < <(detect_service_version 'projectsigstore/fulcio')
   build_deps
   awk -F'\t' '$1=="gem" && $2=="sigstore" {print $3"\t"$4}' "$DEPS_TSV" | tsv_us | while IFS="$US" read -r v f; do
-    version_lt "$v" "0.2.3" && high "" "$f" "sigstore-ruby ${v} は CVE-2026-31830（検証バイパス）の影響範囲（<0.2.3）"
+    version_lt "$v" "0.2.3" && high "" "$f" s43.sigstore_ruby version="${v}"
   done
   return 0
 }
 
 # §44 決済 SDK タイポスクワット（レーベンシュタイン距離）
 check_s44() {
-  log_section "§44" "決済SDKタイポ"
+  log_section "§44"
   build_deps
   read_ioc '.payment_sdks' >"$TMP_DIR/pay.lst"
   awk -F'\t' 'NR==FNR { sdk[$0]=1; next }
@@ -3652,28 +3870,28 @@ check_s44() {
     ($1=="npm" || $1=="pypi") && !($2 in sdk) && length($2)>=5 {
       for (s in sdk) { if (length(s)<5) continue; dd=lev($2,s); if (dd>=1 && dd<=2) { print dd "\t" $2 "\t" s "\t" $4; break } } }' "$TMP_DIR/pay.lst" "$DEPS_TSV" \
   | sort -u | while IFS=$'\t' read -r dd n s f; do
-      if [ "$dd" = "1" ]; then high "typosquat-payment-sdk" "$f" "決済SDK ${s} の近似名パッケージ ${n}（距離 1）"
-      else medium "typosquat-payment-sdk" "$f" "決済SDK ${s} の近似名パッケージ ${n}（距離 2）"; fi
+      if [ "$dd" = "1" ]; then high "typosquat-payment-sdk" "$f" s44.typosquat_d1 package="${n}" sdk="${s}"
+      else medium "typosquat-payment-sdk" "$f" s44.typosquat_d2 package="${n}" sdk="${s}"; fi
     done
   return 0
 }
 
 # §45 インフォスティーラー
 check_s45() {
-  log_section "§45" "インフォスティーラー"
+  log_section "§45"
   local f n
   files_path '\.(m?js|cjs|ts|py|sh)$' | grep_l '(bun\.sh/install|oven-sh/bun/releases/download|bun-(linux|darwin)-(x64|aarch64)\.zip)' | while IFS= read -r f; do
-    [ -n "$f" ] && high "teampcp-mini-shai-hulud" "$f" "Bun バイナリの取得処理（Bun 経由ペイロード）"
+    [ -n "$f" ] && high "teampcp-mini-shai-hulud" "$f" s45.bun_binary
   done
   files_path '\.(m?js|cjs|ts|py|sh)$' | grep_l 'api\.github\.com/(user/repos|repos/[^"'"'"' ]+/(contents|git/(blobs|trees|refs))|gists)' \
     | grep_l '(POST|PUT|PATCH|method:[[:space:]]*["'"'"'](POST|PUT)|requests\.(post|put)|-X[[:space:]]*(POST|PUT))' | while IFS= read -r f; do
-    [ -n "$f" ] && high "post-shaihulud" "$f" "GitHub API への書き込み（リポジトリ作成/コンテンツ書き込み/Gist）による持ち出し疑い"
+    [ -n "$f" ] && high "post-shaihulud" "$f" s45.github_api_write
   done
   local now; now="$(now_epoch)"
   for f in "$HOME_DIR/.config/gh/hosts.yml" "$HOME_DIR/.npmrc" "$HOME_DIR/.pypirc"; do
     [ -f "$f" ] || continue
     local m; m="$(stat_mtime "$f")"
-    [ -n "$m" ] && [ $(( now - m )) -lt $(( 7*86400 )) ] && medium "post-shaihulud" "$f" "認証情報ファイルが直近7日以内に更新（身に覚えがなければトークン差し替え/窃取を疑う）"
+    [ -n "$m" ] && [ $(( now - m )) -lt $(( 7*86400 )) ] && medium "post-shaihulud" "$f" s45.credential_recent
   done
   local -a envs; mapfile -t envs < <(read_ioc '.ci_env_vars')
   local th; th="$(read_ioc '.ci_env_harvest_threshold')"; th="${th:-20}"
@@ -3681,18 +3899,18 @@ check_s45() {
   files_path '\.(m?js|cjs|ts|py|sh|go|rs)$' | tr '\n' '\0' | xargs -0 grep -l -a -F -f "$TMP_DIR/cienv.pat" -- /dev/null 2>/dev/null | while IFS= read -r f; do
     [ -n "$f" ] || continue
     n="$(grep -o -a -F -w -f "$TMP_DIR/cienv.pat" -- "$f" 2>/dev/null | sort -u | wc -l | tr -d ' ')"
-    [ "${n:-0}" -ge "$th" ] && high "post-shaihulud" "$f" "CI/クラウド認証情報の環境変数を ${n} 種類参照（一括収集の疑い）"
+    [ "${n:-0}" -ge "$th" ] && high "post-shaihulud" "$f" s45.ci_env_harvest n="${n}"
   done
   files_path '\.(m?js|cjs|ts|py|sh)$' | grep_l '(shai[-_ ]?hulud|miasma|sckit|iron-?worm|PRIVCOLLECT|letters9813)' -i | while IFS= read -r f; do
-    [ -n "$f" ] && high "post-shaihulud" "$f" "インフォスティーラー系統（Mini Shai-Hulud/Miasma/sckit/IronWorm）の識別子"
+    [ -n "$f" ] && high "post-shaihulud" "$f" s45.infostealer_ids
   done
   return 0
 }
 
 # §46 Git 来歴
 check_s46() {
-  log_section "§46" "Git来歴"
-  [ -n "$ROOT_GITDIR" ] || { log_info "Git リポジトリではありません（または .git を解決できません。errors[] を参照）"; return 0; }
+  log_section "§46"
+  [ -n "$ROOT_GITDIR" ] || { log_info log.not_git; return 0; }
   local out n
   # %G? は署名を検証する（gpg.*.program を起動しうる）ため使わない。署名の有無は生のヘッダ（gpgsig）で判定
   out="$(safe_git log -n 200 --no-textconv --no-ext-diff --format='%at%x09%ae%x09%H')" || { record_error "§46" "git_log_failed"; return 0; }
@@ -3701,7 +3919,7 @@ check_s46() {
   raw="$(safe_git log -n 200 --no-textconv --no-ext-diff --pretty=raw)" || { record_error "§46" "git_log_failed"; return 0; }
   local now; now="$(now_epoch)"
   printf '%s\n' "$out" | awk -F'\t' -v now="$now" '$1 >= now-86400 {c[$2]++} END {for (a in c) if (c[a] > 50) print a "\t" c[a]}' | while IFS=$'\t' read -r _ n; do
-    medium "" "$RP/.git" "直近24時間に同一作者で ${n} コミット（短時間大量コミット）"
+    medium "" "$RP/.git" s46.burst n="${n}"
   done
   local total unsigned
   total="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
@@ -3712,23 +3930,23 @@ check_s46() {
       inhdr && /^$/ { inhdr=0; next }
       inhdr && /^gpgsig(-sha256)? / { print c }' | sort -u)"
   unsigned="$(printf '%s\n' "$out" | ZES_SL="$signed_list" awk -F'\t' 'BEGIN { n=split(ENVIRON["ZES_SL"], a, "\n"); for (i=1; i<=n; i++) s[a[i]]=1 } !($3 in s)' | wc -l | tr -d ' ')"
-  [ "$total" -gt 0 ] && info "" "$RP/.git" "直近 ${total} コミット中 ${unsigned} 件が署名なし"
+  [ "$total" -gt 0 ] && info "" "$RP/.git" s46.unsigned total="${total}" unsigned="${unsigned}"
   safe_git for-each-ref --format='%(refname)' refs/notes | while IFS= read -r n; do
-    [ -n "$n" ] && medium "" "$RP/.git" "Git notes（${n}）が存在（来歴情報の書き換えに注意）"
+    [ -n "$n" ] && medium "" "$RP/.git" s46.notes ref="${n}"
   done
   safe_git for-each-ref --format='%(refname)%09%(objecttype)%09%(*objecttype)' refs/tags | while IFS=$'\t' read -r n t pt; do
-    if [ "$t" = "tag" ] && [ -n "$pt" ] && [ "$pt" != "commit" ]; then high "" "$RP/.git" "タグ ${n} がコミット以外（${pt}）を指しています"
-    elif [ "$t" != "tag" ] && [ "$t" != "commit" ]; then high "" "$RP/.git" "タグ ${n} がコミット以外（${t}）を指しています"; fi
+    if [ "$t" = "tag" ] && [ -n "$pt" ] && [ "$pt" != "commit" ]; then high "" "$RP/.git" s46.tag_not_commit tag="${n}" type="${pt}"
+    elif [ "$t" != "tag" ] && [ "$t" != "commit" ]; then high "" "$RP/.git" s46.tag_not_commit tag="${n}" type="${t}"; fi
   done
   if in_root_regular "$RP/.gitmodules"; then
     local origin_host
     origin_host="$(git_cfg_get remote origin url | sed -E 's#^[a-z+]+://([^@/]+@)?##; s#^[^@]+@##; s#[:/].*##')"
     grep -E '^[[:space:]]*url[[:space:]]*=' "$RP/.gitmodules" | sed -E 's/.*=[[:space:]]*//' | while IFS= read -r n; do
       case "$n" in
-        http://*|git://*) high "" "$RP/.gitmodules" "サブモジュールが平文プロトコル（$n）" ;;
+        http://*|git://*) high "" "$RP/.gitmodules" s46.submodule_plain url="$n" ;;
         ./*|../*) ;;
         *) local h; h="$(printf '%s' "$n" | sed -E 's#^[a-z+]+://([^@/]+@)?##; s#^[^@]+@##; s#[:/].*##')"
-           [ -n "$origin_host" ] && [ "$h" != "$origin_host" ] && medium "" "$RP/.gitmodules" "サブモジュールが外部ホスト（$h）を参照" ;;
+           [ -n "$origin_host" ] && [ "$h" != "$origin_host" ] && medium "" "$RP/.gitmodules" s46.submodule_host host="$h" ;;
       esac
     done
   fi
@@ -3737,23 +3955,23 @@ check_s46() {
 
 # §47 認証情報フロー
 check_s47() {
-  log_section "§47" "認証情報フロー"
+  log_section "§47"
   local f
   for f in "$HOME_DIR/.bash_history" "$HOME_DIR/.zsh_history" "$HOME_DIR/.local/share/fish/fish_history"; do
     [ -f "$f" ] && [ ! -L "$f" ] || continue
-    fgrep_q 'export[[:space:]]+[A-Za-z0-9_]*(_TOKEN|_KEY|_SECRET|PASSWORD)=' "$f" && high "" "$f" "シェル履歴に export *_TOKEN=/*_KEY=/*_SECRET=（平文の認証情報。ローテーション対象）" "" "$(x_kind secret.token)"
+    fgrep_q 'export[[:space:]]+[A-Za-z0-9_]*(_TOKEN|_KEY|_SECRET|PASSWORD)=' "$f" && high "" "$f" s47.history_export --x="$(x_kind secret.token)"
   done
   local now; now="$(now_epoch)"
   for f in "$HOME_DIR/.aws/sso/cache" "$HOME_DIR/.azure" "$HOME_DIR/.config/gcloud/credentials.db"; do
     [ -e "$f" ] || continue
     local m; m="$(stat_mtime "$f")"
-    [ -n "$m" ] && [ $(( now - m )) -lt 86400 ] && info "" "$f" "クラウド認証キャッシュが直近24時間に更新"
+    [ -n "$m" ] && [ $(( now - m )) -lt 86400 ] && info "" "$f" s47.cloud_cache
   done
   files_named '^(\.env\.ci|\.envrc)$' | grep_l '(_TOKEN|_KEY|_SECRET|PASSWORD)[[:space:]]*=[[:space:]]*[^[:space:]$]' | while IFS= read -r f; do
-    [ -n "$f" ] && high "" "$f" "CI/direnv 用ファイルに平文の認証情報" "" "$(x_kind secret.token)"
+    [ -n "$f" ] && high "" "$f" s47.ci_plaintext --x="$(x_kind secret.token)"
   done
   tr '\n' '\0' <"$FILES_LIST" | xargs -0 grep -l -a -E -e '(ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36})' -- /dev/null 2>/dev/null | while IFS= read -r f; do
-    [ -n "$f" ] && critical "" "$f" "GitHub トークン（ghp_/github_pat_ 等）がファイルに含まれます（内容は出力しません。即時失効）" "" "$(x_kind secret.token)"
+    [ -n "$f" ] && critical "" "$f" s47.github_token --x="$(x_kind secret.token)"
   done
   return 0
 }
@@ -3776,10 +3994,10 @@ iso8601_epoch() {
 
 # §48 SBOM 整合性
 check_s48() {
-  log_section "§48" "SBOM整合性"
+  log_section "§48"
   local f
   local -a sboms; mapfile -t sboms < <(files_named '(\.spdx\.json|\.cdx\.json|^bom\.json$|^sbom\.json$|\.spdx$|^cyclonedx\.json$)')
-  [ "${#sboms[@]}" -gt 0 ] && [ -n "${sboms[0]}" ] || { log_info "SBOM が見つかりません"; return 0; }
+  [ "${#sboms[@]}" -gt 0 ] && [ -n "${sboms[0]}" ] || { log_info log.no_sbom; return 0; }
   if [ "$HAVE_JQ" -ne 1 ]; then record_error "§48" "jq_unavailable"; return 0; fi
   build_deps
   local has_prov=0 has_verify=0
@@ -3801,21 +4019,21 @@ check_s48() {
       mism="$(awk -F'\t' 'NR == FNR { v[$1] = v[$1] SUBSEP $2; next }
           ($1 in v) { k = split(substr(v[$1], 2), a, SUBSEP); for (i = 1; i <= k; i++) if (a[i] != $2) n++ } END { print n + 0 }' "$TMP_DIR/sbom.tsv" "$TMP_DIR/lock.tsv")"
       if [ "$missing" -gt 0 ] || [ "$mism" -gt 0 ]; then
-        high "" "$f" "SBOM とロックファイルが不一致（SBOM 未記載 ${missing} 件 / バージョン相違 ${mism} 件）"
+        high "" "$f" s48.sbom_mismatch mismatched="${mism}" missing="${missing}"
       else
-        safe "SBOM とロックファイルが一致（$f）"
+        safe log.safe.sbom_match path="$f"
       fi
       if [ -n "$created" ]; then
         local lf lm
         while IFS= read -r lf; do
           lm="$(stat_mtime "$lf")"
           local ce; ce="$(iso8601_epoch "$created")"
-          [ -n "$ce" ] && [ -n "$lm" ] && [ "$lm" -gt $(( ce + 60 )) ] && { medium "" "$f" "SBOM 生成日時（$created）がロックファイル更新より古い"; break; }
+          [ -n "$ce" ] && [ -n "$lm" ] && [ "$lm" -gt $(( ce + 60 )) ] && { medium "" "$f" s48.sbom_older created="$created"; break; }
         done < <(ZES_V_D="$dir/" awk -F'\t' 'BEGIN { d = ENVIRON["ZES_V_D"] } index($4,d)==1 {print $4}' "$DEPS_TSV" | sort -u)
       fi
     fi
   done
-  [ "$has_prov" -eq 0 ] && [ "$has_verify" -eq 0 ] && medium "" "$ROOT" "SBOM はあるが provenance / in-toto レイアウト / attestation 検証（cosign verify-attestation・slsa-verifier）が見当たりません"
+  [ "$has_prov" -eq 0 ] && [ "$has_verify" -eq 0 ] && medium "" "$ROOT" s48.no_provenance
   return 0
 }
 
@@ -4150,23 +4368,15 @@ sp_policies() {
     else bad="JSON: $prob"; fi
     sp="$(jq -n -c '{contract_path:null, contract_version:null, level:null, signed:false, author:null, declared_effects:[], observed_effects:[], policy_decision:null, l2_tested:false, divergence:[], diff_anomaly:false}')"
     if [ -n "$bad" ]; then
-      medium "skillpact-invalid" "$f" "SkillPact ポリシーを検証できません（${bad}）。ZES はポリシーの allow/ask/deny 判定を行いません" "$sp"
+      medium "skillpact-invalid" "$f" s49.policy_invalid problems="$bad" --sp="$sp"
     else
-      log_info "SkillPact ポリシーを検出（構造は妥当。allow/ask/deny の評価は ZES では未実装）: $f"
+      log_info log.skillpact_policy path="$f"
     fi
   done
 }
 
-sp_effect_label() {
-  case "$1" in
-    exec) printf 'exec（他のプログラムの実行）' ;; network) printf 'network（外部ホストとの通信）' ;;
-    spend) printf 'spend（課金・決済）' ;; send) printf 'send（メール・投稿・メッセージの送信）' ;;
-    read) printf 'read（機密ファイル: ~/.ssh・.env・認証情報など）' ;; write) printf 'write（ファイルの書き込み）' ;;
-  esac
-}
-
 check_skillpact() {
-  log_section "§49" "SkillPact 契約（実験的）"
+  log_section "§49"
   if [ "$HAVE_JQ" -ne 1 ]; then record_error "§49" "jq_unavailable"; return 0; fi
   SP_RULES="$(jq -c '.skillpact' "$IOC_FILE")"
   sp_policies
@@ -4190,15 +4400,15 @@ check_skillpact() {
     if [ -z "$cpath" ]; then
       # 契約なし: SkillPact を使わないスキルは対象外。影響の大きい効果が見える場合のみ参考 INFO
       if [ -f "$dir/SKILL.md" ] && printf '%s' "$obs" | jq -e '.exec or .network or .spend or .send' >/dev/null; then
-        info "skillpact-undeclared" "$dir" "このスキルには SkillPact 契約（skill.contract.json）がないため、宣言との比較は行いません（参考: コードに見える効果 ${obs_txt}）" \
-          "$(sp_field '{}' "$obs" "" false)"
+        info "skillpact-undeclared" "$dir" s49.undeclared effects="$obs_txt" \
+          --sp="$(sp_field '{}' "$obs" "" false)"
       fi
       continue
     fi
     n_contracts=$((n_contracts + 1))
     local prob; prob="$(sp_ijson_problem "$cpath")"
     if [ -n "$prob" ]; then
-      medium "skillpact-invalid" "$cpath" "SkillPact 契約を検証できません（CONTRACT_JSON: ${prob}）。宣言を読めないため乖離判定は行いません" "$(sp_field '{}' "$obs" "$cpath" false)"
+      medium "skillpact-invalid" "$cpath" s49.contract_unparseable problem="$prob" --sp="$(sp_field '{}' "$obs" "$cpath" false)"
       record_error "§49" "contract_unparseable:$cpath"
       continue
     fi
@@ -4216,7 +4426,7 @@ check_skillpact() {
     a="$(jq -c --argjson R "$SP_RULES" --argjson files "$files_json" --argjson links "$links_json" --argjson hashes "$hashes_json" \
           --arg fm "$fm" --argjson obs "$obs" "$SP_JQ_LIB $SP_ANALYZE" "$cpath" 2>/dev/null)"
     if [ -z "$a" ]; then
-      medium "skillpact-invalid" "$cpath" "SkillPact 契約を検証できません（解析に失敗）。乖離判定は行いません" "$(sp_field '{}' "$obs" "$cpath" false)"
+      medium "skillpact-invalid" "$cpath" s49.analysis_failed --sp="$(sp_field '{}' "$obs" "$cpath" false)"
       record_error "§49" "contract_analysis_failed:$cpath"
       continue
     fi
@@ -4230,47 +4440,74 @@ check_skillpact() {
     fi
     local da=false; [ "$diff" != "null" ] && da=true
     local sp; sp="$(sp_field "$a" "$obs" "$cpath" "$da")"
-    local sig_note=""
-    printf '%s' "$a" | jq -e '.signed' >/dev/null && sig_note="（契約に署名がありますが ZES は署名を検証しません。署名の有無で重大度は変えません）"
+    # Sentences are picked by case (one code per effect / reason / signature), not assembled: ZES does not verify
+    #   signatures and a signature never changes the severity, but a signed contract gets its own *.signed code
+    local signed=0
+    printf '%s' "$a" | jq -e '.signed' >/dev/null && signed=1
 
     local vs cv errs
-    vs="$(printf '%s' "$a" | jq -r '.vstatus')"; cv="$(printf '%s' "$a" | jq -r '.cv // "未指定"')"
+    vs="$(printf '%s' "$a" | jq -r '.vstatus')"; cv="$(printf '%s' "$a" | jq -r '.cv // "unspecified"')"
     if [ "$vs" != "ok" ]; then
-      medium "skillpact-invalid" "$cpath" "SkillPact 契約の contract_version「${cv}」には対応していません（ZES の対応: 0.1〜0.8）。宣言を解釈できないため乖離判定は行いません" "$sp"
+      medium "skillpact-invalid" "$cpath" s49.unsupported_version version="$cv" --sp="$sp"
       continue
     fi
     errs="$(printf '%s' "$a" | jq -r '.errors | join(",")')"
-    [ -n "$errs" ] && medium "skillpact-invalid" "$cpath" "SkillPact 契約を検証できません（ZES の部分検査: ${errs}）。L1 とは見なしません" "$sp"
+    [ -n "$errs" ] && medium "skillpact-invalid" "$cpath" s49.partial_check_errors errors="$errs" --sp="$sp"
 
-    local eff why sens durable lv txt
+    local eff why sens durable lv dc
     while IFS=$'\t' read -r eff why sens durable; do
       [ -n "$eff" ] || continue
       case "$eff" in exec|network|spend|send) lv=HIGH ;; *) lv=MEDIUM ;; esac
       if [ "$durable" = "true" ]; then
-        txt="コードに作業領域外への永続的な書き込み（crontab・.bashrc・authorized_keys など）が見えますが、契約の write は"
-        [ "$why" = "none" ] && txt="${txt}宣言されていません（permissions.write: none）" || txt="${txt} \$WORKDIR / \$OUTPUT / \$TMPDIR 内に限られています"
+        if [ "$why" = "none" ]; then dc=s49.divergence.write_durable_none; else dc=s49.divergence.write_durable_scoped; fi
       elif [ "$sens" = "true" ]; then
-        txt="コードが $(sp_effect_label read)を読む可能性がありますが、契約の read は"
-        [ "$why" = "none" ] && txt="${txt}宣言されていません（permissions.read: none）" || txt="${txt}その範囲を含みません"
+        if [ "$why" = "none" ]; then dc=s49.divergence.read_sensitive_none; else dc=s49.divergence.read_sensitive_scoped; fi
       else
-        txt="コードに $(sp_effect_label "$eff")が見えますが、契約は ${eff} を宣言していません（permissions.${eff}: none）"
+        case "$eff" in
+          exec) dc=s49.divergence.exec ;; network) dc=s49.divergence.network ;; spend) dc=s49.divergence.spend ;;
+          send) dc=s49.divergence.send ;; read) dc=s49.divergence.read ;; write) dc=s49.divergence.write ;;
+          *) continue ;;
+        esac
       fi
-      emit "$lv" "skillpact-divergence" "$dir" "${txt}${sig_note}" "$sp"
+      if [ "$signed" -eq 1 ]; then
+        case "$dc" in
+          s49.divergence.write_durable_none) dc=s49.divergence.write_durable_none.signed ;;
+          s49.divergence.write_durable_scoped) dc=s49.divergence.write_durable_scoped.signed ;;
+          s49.divergence.read_sensitive_none) dc=s49.divergence.read_sensitive_none.signed ;;
+          s49.divergence.read_sensitive_scoped) dc=s49.divergence.read_sensitive_scoped.signed ;;
+          s49.divergence.exec) dc=s49.divergence.exec.signed ;;
+          s49.divergence.network) dc=s49.divergence.network.signed ;;
+          s49.divergence.spend) dc=s49.divergence.spend.signed ;;
+          s49.divergence.send) dc=s49.divergence.send.signed ;;
+          s49.divergence.read) dc=s49.divergence.read.signed ;;
+          s49.divergence.write) dc=s49.divergence.write.signed ;;
+        esac
+      fi
+      emit "$lv" "skillpact-divergence" "$dir" "$dc" --sp="$sp"
     done < <(printf '%s' "$a" | jq -r '.divergence[] | [.effect, .why, (.sensitive // false), (.durable // false)] | @tsv')
 
     if [ "$da" = true ]; then
-      local dl dtxt
+      # jq returns the values; the sentence is chosen by the author-key comparison (same / changed / unsigned)
+      local dl pver ppath chg ident
       dl="$(printf '%s' "$diff" | jq -r 'if any(.widened[]; .effect | IN("exec", "network", "spend", "send")) then "HIGH" else "MEDIUM" end')"
-      dtxt="$(printf '%s' "$diff" | jq -r '"前版 \(.prev_ver)（\(.prev_path)）から権限が拡大していますが（\([.widened[].text] | join(" / "))）、skill.version の major が上がっていません（SkillPact §17）。作者署名鍵: " + (if .ident == "same" then "前版と同一（未検証。正規の鍵で署名された静かな拡大はアカウント侵害の兆候）" elif .ident == "changed" then "前版と異なる（未検証）" else "署名なし" end)')"
-      emit "$dl" "skillpact-account-compromise" "$cpath" "$dtxt" "$sp"
+      pver="$(printf '%s' "$diff" | jq -r '"\(.prev_ver)"')"; ppath="$(printf '%s' "$diff" | jq -r '"\(.prev_path)"')"
+      chg="$(printf '%s' "$diff" | jq -r '[.widened[].text] | join(" / ")')"; ident="$(printf '%s' "$diff" | jq -r '.ident')"
+      case "$ident" in
+        same) emit "$dl" "skillpact-account-compromise" "$cpath" s49.account_compromise.same changes="$chg" prev_path="$ppath" prev_version="$pver" --sp="$sp" ;;
+        changed) emit "$dl" "skillpact-account-compromise" "$cpath" s49.account_compromise.changed changes="$chg" prev_path="$ppath" prev_version="$pver" --sp="$sp" ;;
+        *) emit "$dl" "skillpact-account-compromise" "$cpath" s49.account_compromise.unsigned changes="$chg" prev_path="$ppath" prev_version="$pver" --sp="$sp" ;;
+      esac
     fi
     local nf; nf="$(grep -c -F "\"contract_path\":\"$(json_escape "$cpath")\"" "$FINDINGS_FILE" 2>/dev/null)"
     if [ "${nf:-0}" -eq 0 ]; then
-      log_info "$(printf '%s' "$a" | jq -r '"SkillPact 契約（\(.name // "?")@\(.sver // "?")、contract \(.cv)）: 宣言とコードの静的解析に乖離なし。L1 相当（ZES の部分検査）。L2/L3 は ZES では検証しません（L3 でも安全を意味しません）。署名: " + (if .signed then "あり（未検証）" else "なし" end)')（$dir）"
+      local ln lv2 lcv
+      ln="$(printf '%s' "$a" | jq -r '"\(.name // "?")"')"; lv2="$(printf '%s' "$a" | jq -r '"\(.sver // "?")"')"; lcv="$(printf '%s' "$a" | jq -r '"\(.cv)"')"
+      if [ "$signed" -eq 1 ]; then log_info log.skillpact_l1_signed cv="$lcv" name="$ln" path="$dir" version="$lv2"
+      else log_info log.skillpact_l1_unsigned cv="$lcv" name="$ln" path="$dir" version="$lv2"; fi
     fi
   done < <(sp_skill_dirs)
-  [ "$n_skills" -eq 0 ] && log_info "スキル（SKILL.md / skill.contract.json）が見つかりません"
-  [ "$n_skills" -gt 0 ] && [ "$n_contracts" -eq 0 ] && log_info "SkillPact 契約（skill.contract.json）のあるスキルはありません（§49 は契約付きスキルのみ比較します）"
+  [ "$n_skills" -eq 0 ] && log_info log.no_skills
+  [ "$n_skills" -gt 0 ] && [ "$n_contracts" -eq 0 ] && log_info log.no_contracts
   return 0
 }
 check_s49() { check_skillpact; return 0; }
@@ -4315,13 +4552,14 @@ main() {
   if [ "$ib" != "$INCIDENT_BUNDLE" ]; then
     record_error "core" "incident_bundle_mismatch:${ib:-none}"
   fi
+  msg log.banner version="$ZES_VERSION" spec="$ZES_SPEC_VERSION"
   zes_enc "$ROOT"
-  printf '%sZero-Exec Shield v%s（仕様 v%s）%s  bundle=%s  mode=%s  root=%s  os=%s  jq=%s\n' "$C_CYN" "$ZES_VERSION" "$ZES_SPEC_VERSION" "$C_OFF" "$INCIDENT_BUNDLE" "$MODE" "$ENC_TERM" "$OS_NAME" "$HAVE_JQ" >&3
+  printf '%s%s%s  bundle=%s  mode=%s  root=%s  os=%s  jq=%s\n' "$C_CYN" "$RENDERED" "$C_OFF" "$INCIDENT_BUNDLE" "$MODE" "$ENC_TERM" "$OS_NAME" "$HAVE_JQ" >&3
   # 無害化で外した PATH エントリ（相対・空・検査ルート配下）。検査ルート内の偽 jq / git / coreutils は起動しない
   local e
   for e in "${PATH_DROPPED[@]}"; do record_error "core" "path_entry_dropped:$e"; done
-  [ "$HAVE_JQ" -eq 1 ] || log_info "jq が見つかりません。grep フォールバックで実行します（§48/§49 は未確定扱い）"
-  [ "$ROOT" = "/" ] && log_info "--root /: ホスト全体を走査します（擬似ファイルシステムは開かずに errors[] に記録。PATH の検査ルート配下判定は行いません）"
+  [ "$HAVE_JQ" -eq 1 ] || log_info log.no_jq
+  [ "$ROOT" = "/" ] && log_info log.root_host
   CURRENT_MODULE="core"
   build_inventory
   git_discover
@@ -4341,7 +4579,8 @@ main() {
   [ "$FATAL" -eq 1 ] && status="error"
   local c h m
   c="$(grep -c '"level":"CRITICAL"' "$FINDINGS_FILE")"; h="$(grep -c '"level":"HIGH"' "$FINDINGS_FILE")"; m="$(grep -c '"level":"MEDIUM"' "$FINDINGS_FILE")"
-  printf '\n%s== 結果 ==%s CRITICAL=%s HIGH=%s MEDIUM=%s status=%s\n' "$C_CYN" "$C_OFF" "$c" "$h" "$m" "$status" >&3
+  msg log.result
+  printf '\n%s%s%s CRITICAL=%s HIGH=%s MEDIUM=%s status=%s\n' "$C_CYN" "$RENDERED" "$C_OFF" "$c" "$h" "$m" "$status" >&3
   if [ "$JSON_OUT" -eq 1 ]; then emit_json "$status"; fi
   [ "$status" = "error" ] && return 2
   return 0
