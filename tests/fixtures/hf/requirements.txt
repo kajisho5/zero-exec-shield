@@ -1,0 +1,2 @@
+# ZES test fixture: lerobot は CVE（脆弱版）であり侵害パッケージではない → HIGH（CRITICAL ではない）
+lerobot==0.5.0

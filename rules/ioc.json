@@ -9,7 +9,7 @@
   },
   "packages": [
     { "campaign": "litellm-oct2026", "eco": "pypi", "name": "litellm", "match": "versions", "bad_versions": ["1.107.0"], "safe_version": "1.106.2", "note": "cook.pth/cook.py/sitecustomize.py" },
-    { "campaign": "emudhra-ca-oct2026", "eco": "pypi", "name": "certifi", "match": "versions", "bad_versions": [">=2019.3.9 <2026.10.19"], "safe_version": "2026.10.19", "note": "GHSA-6q48-6c7w-9gw2。emSign ECC Root CA G3 を削除（eMudhra 事案）。LiteLLM とは無関係" },
+    { "campaign": "emudhra-ca-oct2026", "eco": "pypi", "name": "certifi", "match": "vulnerable_versions", "bad_versions": [">=2019.3.9 <2026.10.19"], "safe_version": "2026.10.19", "note": "GHSA-6q48-6c7w-9gw2。emSign ECC Root CA G3 を削除（eMudhra 事案）。LiteLLM とは無関係" },
     { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "@tanstack/*", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "42pkg/84ver。router_init.js/tanstack_runner.js/vite_setup.mjs" },
     { "campaign": "teampcp-mini-shai-hulud", "eco": "pypi", "name": "mistralai", "match": "versions", "bad_versions": ["2.4.6"], "safe_version": "2.4.5", "note": "" },
     { "campaign": "teampcp-mini-shai-hulud", "eco": "pypi", "name": "guardrails-ai", "match": "versions", "bad_versions": ["0.10.1"], "safe_version": "0.10.0", "note": "" },
@@ -44,7 +44,7 @@
     { "campaign": "namastex-worm", "eco": "npm", "name": "Namastex Labs関連", "match": "none", "bad_versions": [], "safe_version": null, "note": "侵害版。npm→PyPI→暗号資産。具体的パッケージ名未定義のため自動照合しない" },
     { "campaign": "css-nesting-transform", "eco": "npm", "name": "css-nesting-transform", "match": "versions", "bad_versions": ["1.0.0"], "safe_version": null, "note": "MAL-2026-17804（npm 公開 2026-10-07）。whoami/id/uname を webhook に送る偵察型" },
     { "campaign": "hf-dataset-poisoning", "eco": "huggingface", "name": "datasets", "match": "none", "bad_versions": [], "safe_version": null, "note": "悪性データセット（2026-07-16）。§36で検査" },
-    { "campaign": "hf-lerobot-rce", "eco": "pypi", "name": "lerobot", "match": "versions", "bad_versions": ["<=0.5.1"], "safe_version": null, "note": "CVE-2026-25874。CVSS は 9.3（GHSA）と 9.8（CSA）でソース間不一致。公表時点で修正版なし" },
+    { "campaign": "hf-lerobot-rce", "eco": "pypi", "name": "lerobot", "match": "vulnerable_versions", "bad_versions": ["<=0.5.1"], "safe_version": null, "note": "CVE-2026-25874。CVSS は 9.3（GHSA）と 9.8（CSA）でソース間不一致。公表時点で修正版なし" },
     { "campaign": "megalodon-ci", "eco": "github-actions", "name": "-", "match": "none", "bad_versions": [], "safe_version": null, "note": "5,561リポジトリ。§38で検査" },
     { "campaign": "sckit-memos", "eco": "npm/pypi", "name": "OpenClaw/MemoryOS", "match": "none", "bad_versions": [], "safe_version": null, "note": "2026-09-23。§25/§45で検査" },
     { "campaign": "redhat-cloud-services", "eco": "npm", "name": "@redhat-cloud-services/*", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "MAL-2026-5141。OIDC publisher侵害" },
