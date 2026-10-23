@@ -25,6 +25,18 @@
       "path": "site-packages/cook.py"
     },
     {
+      "campaign": "litellm-1-107-0-cook-pth",
+      "level": "CRITICAL",
+      "module": "§30",
+      "path": "site-packages/cook.pth"
+    },
+    {
+      "campaign": "litellm-1-107-0-cook-pth",
+      "level": "CRITICAL",
+      "module": "§30",
+      "path": "site-packages/cook.py"
+    },
+    {
       "campaign": "emudhra-ca-oct2026",
       "level": "HIGH",
       "module": "§6",
