@@ -72,6 +72,40 @@ done <"$TMP/execs.tsv"
 
 for c in /tmp/zes-canary-*; do [ -e "$c" ] && ng "カナリアファイルが作成されました（フィクスチャが実行された）: $c"; done
 
+# 検査対象リポジトリの .git/config に仕込まれたプログラム設定を起動しない（§46/§38 の git 呼び出し）
+#   x509 形式の gpgsig を持つ HEAD コミットを生成し、gpg.*.program 等をマーカースクリプトに向ける。
+#   フィクスチャには入れ子の .git を置けないため、テスト時に一時ディレクトリへ作成する。
+if command -v git >/dev/null 2>&1; then
+  GR="$TMP/gitrepo"
+  mkdir -p "$GR"
+  printf '#!/bin/sh\n: >"%s/git-marker"\nexit 1\n' "$TMP" >"$TMP/marker.sh"
+  chmod +x "$TMP/marker.sh"
+  (
+    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+    cd "$GR" && git init -q . && echo inert >README && git add README \
+      && tree="$(git write-tree)" \
+      && printf 'tree %s\nauthor a <a@example.invalid> 1792800000 +0000\ncommitter a <a@example.invalid> 1792800000 +0000\ngpgsig -----BEGIN SIGNED MESSAGE-----\n MIIBzeszes\n -----END SIGNED MESSAGE-----\n\nx509 signed\n' "$tree" >"$TMP/commit.txt" \
+      && c="$(git hash-object -t commit -w "$TMP/commit.txt")" && git update-ref HEAD "$c" \
+      && for k in gpg.program gpg.openpgp.program gpg.x509.program gpg.ssh.program gpg.ssh.defaultKeyCommand \
+                  core.fsmonitor core.sshCommand core.gitProxy core.editor core.pager core.askPass \
+                  sequence.editor credential.helper diff.external core.alternateRefsCommand; do
+           git config "$k" "$TMP/marker.sh"
+         done \
+      && git config log.showSignature true && git config core.hooksPath "$TMP/hooks"
+  ) || ng "テスト用 git リポジトリを作成できません"
+  mkdir -p "$TMP/hooks" && for h in post-checkout post-index-change reference-transaction; do cp "$TMP/marker.sh" "$TMP/hooks/$h"; done
+  ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" \
+    strace -f -qq -s 512 -e trace=execve -o "$TMP/trace-git.txt" \
+    "$REPO/zes-scan.sh" --full --root "$GR" --json >"$TMP/out-git.json" 2>"$TMP/scan-err-git.txt"
+  [ -e "$TMP/git-marker" ] && ng "検査対象 .git/config のプログラム設定（gpg.x509.program 等）が実行されました"
+  grep -q -F "$TMP/marker.sh" "$TMP/trace-git.txt" && ng "マーカースクリプトが execve されました（.git/config 経由）"
+  jq -e '[.findings[] | select(.module == "§46" and (.detail | test("1 コミット中 0 件が署名なし")))] | length == 1' "$TMP/out-git.json" >/dev/null 2>&1 \
+    || ng "§46 が gpgsig ヘッダ付きコミットを署名ありとして数えていません"
+  echo "git 設定経由の実行チェック: 完了"
+else
+  echo "SKIP: git が無いため .git/config 経由の実行チェックを省略"
+fi
+
 echo "起動された実行ファイル（種類）:"
 cut -f1 "$TMP/execs.tsv" | awk -F/ '{print $NF}' | sort | uniq -c | sort -rn | awk '{printf "  %6d %s\n", $1, $2}'
 if [ "$FAIL" -eq 0 ]; then

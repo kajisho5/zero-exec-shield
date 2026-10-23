@@ -301,14 +301,23 @@ safe_probe() {
   ( cd / && GOTOOLCHAIN=local GOFLAGS='' PYTHONSTARTUP='' PYTHONPATH='' "$rp" "$@" </dev/null 2>/dev/null )
 }
 
-# git は検査対象リポジトリの設定経由でコマンドを起動しうるため、危険な設定を無効化して呼ぶ
+# git は検査対象リポジトリの設定（.git/config）経由でコマンドを起動しうるため、危険な設定を無効化して呼ぶ
+#   コマンドライン -c はリポジトリ設定より優先される。プログラムを値に取る設定は全て無害化する:
+#   署名検証（gpg.program / gpg.openpgp.program / gpg.x509.program / gpg.ssh.program / gpg.ssh.defaultKeyCommand）、
+#   ssh・プロキシ（core.sshCommand / core.gitProxy）、エディタ・ページャ・認証（core.editor / sequence.editor /
+#   core.pager / core.askPass / credential.helper）、diff（diff.external、textconv は --no-textconv を呼び出し側で指定）
+#   ※ 署名の有無は検証させずに生のコミットオブジェクトのヘッダから判定する（§46）
 safe_git() {
   command -v git >/dev/null 2>&1 || return 127
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat GIT_EXTERNAL_DIFF='' \
-  GIT_SSH_COMMAND=/bin/false GIT_ASKPASS=/bin/false \
+  GIT_SSH_COMMAND=/bin/false GIT_SSH=/bin/false GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false GIT_EDITOR=/bin/false \
+  GIT_SEQUENCE_EDITOR=/bin/false GIT_PROXY_COMMAND=/bin/false GIT_OPTIONAL_LOCKS=0 \
     git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.pager=cat -c log.showSignature=false \
-        -c gpg.program=/bin/false -c gpg.ssh.program=/bin/false -c diff.external= -c core.sshCommand=/bin/false \
-        -c protocol.allow=never -C "$ROOT" --no-pager "$@" </dev/null 2>/dev/null
+        -c gpg.program=/bin/false -c gpg.openpgp.program=/bin/false -c gpg.x509.program=/bin/false \
+        -c gpg.ssh.program=/bin/false -c gpg.ssh.defaultKeyCommand=/bin/false \
+        -c diff.external= -c core.sshCommand=/bin/false -c core.gitProxy=/bin/false \
+        -c core.editor=/bin/false -c sequence.editor=/bin/false -c core.askPass=/bin/false -c credential.helper= \
+        -c core.alternateRefsCommand=/bin/false -c protocol.allow=never -C "$ROOT" --no-pager "$@" </dev/null 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -2114,7 +2123,7 @@ check_s38() {
   if [ -d "$ROOT/.git" ]; then
     local since; since="$(( $(now_epoch) - 30*86400 ))"
     local out
-    if out="$(safe_git log --diff-filter=A --since="@$since" --name-only --format='' -- .github/workflows)"; then
+    if out="$(safe_git log --no-textconv --no-ext-diff --diff-filter=A --since="@$since" --name-only --format='' -- .github/workflows)"; then
       printf '%s\n' "$out" | sort -u | while IFS= read -r n; do
         [ -n "$n" ] && medium "ghostaction-oct2026" "$ROOT/$n" "直近30日に新規追加されたワークフロー（作成者・目的を監査）"
       done
@@ -2400,15 +2409,24 @@ check_s46() {
   log_section "§46" "Git来歴"
   [ -d "$ROOT/.git" ] || { log_info "Git リポジトリではありません"; return 0; }
   local out n
-  out="$(safe_git log -n 200 --format='%at%x09%ae%x09%G?')" || { record_error "§46" "git_log_failed"; return 0; }
+  # %G? は署名を検証する（gpg.*.program を起動しうる）ため使わない。署名の有無は生のヘッダ（gpgsig）で判定
+  out="$(safe_git log -n 200 --no-textconv --no-ext-diff --format='%at%x09%ae%x09%H')" || { record_error "§46" "git_log_failed"; return 0; }
   [ -n "$out" ] || return 0
+  local raw
+  raw="$(safe_git log -n 200 --no-textconv --no-ext-diff --pretty=raw)" || { record_error "§46" "git_log_failed"; return 0; }
   local now; now="$(now_epoch)"
   printf '%s\n' "$out" | awk -F'\t' -v now="$now" '$1 >= now-86400 {c[$2]++} END {for (a in c) if (c[a] > 50) print a "\t" c[a]}' | while IFS=$'\t' read -r _ n; do
     medium "" "$ROOT/.git" "直近24時間に同一作者で ${n} コミット（短時間大量コミット）"
   done
   local total unsigned
   total="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
-  unsigned="$(printf '%s\n' "$out" | awk -F'\t' '$3=="N"' | wc -l | tr -d ' ')"
+  # pretty=raw: "commit <sha>" で区切られ、ヘッダは行頭から、本文は 4 字下げ（本文中の偽ヘッダとは区別できる）
+  local signed_list
+  signed_list="$(printf '%s\n' "$raw" | awk '
+      /^commit [0-9a-f]+/ { c=$2; inhdr=1; next }
+      inhdr && /^$/ { inhdr=0; next }
+      inhdr && /^gpgsig(-sha256)? / { print c }' | sort -u)"
+  unsigned="$(printf '%s\n' "$out" | ZES_SL="$signed_list" awk -F'\t' 'BEGIN { n=split(ENVIRON["ZES_SL"], a, "\n"); for (i=1; i<=n; i++) s[a[i]]=1 } !($3 in s)' | wc -l | tr -d ' ')"
   [ "$total" -gt 0 ] && info "" "$ROOT/.git" "直近 ${total} コミット中 ${unsigned} 件が署名なし"
   safe_git for-each-ref --format='%(refname)' refs/notes | while IFS= read -r n; do
     [ -n "$n" ] && medium "" "$ROOT/.git" "Git notes（${n}）が存在（来歴情報の書き換えに注意）"
