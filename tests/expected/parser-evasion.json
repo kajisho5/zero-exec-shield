@@ -61,6 +61,18 @@
       "path": "h-egg-nover/site-packages/mistralai.egg-info"
     },
     {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": "k-case/.github/workflows/prt.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": "k-quoted/.github/workflows/prt.yml"
+    },
+    {
       "campaign": "overlord-fake-zoom-dotnet",
       "level": "CRITICAL",
       "module": "§30",

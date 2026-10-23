@@ -710,7 +710,7 @@ intel_actions() {
     [ -n "$act" ] || continue
     while IFS= read -r f; do
       [ -n "$f" ] || continue
-      grep -i -E -o "uses:[[:space:]]*[\"']?$(printf '%s' "$act" | sed 's/[.[\*^$+?(){}|]/\\&/g')@[^\"'[:space:]#,}]+" "$f" 2>/dev/null | sed -E 's/.*@//' | sort -u | while IFS= read -r ref; do
+      workflow_text "$f" | grep -i -E -o "uses:[[:space:]]*[\"']?$(printf '%s' "$act" | sed 's/[.[\*^$+?(){}|]/\\&/g')@[^\"'[:space:]#,}]+" 2>/dev/null | sed -E 's/.*@//' | sort -u | while IFS= read -r ref; do
         if printf '%s\n' "$bad" | tr ',' '\n' | grep -q -x -F -- "$ref"; then
           critical "$camp" "$f" "侵害が報告されたアクション ${act}@${ref}"
         elif [ -n "$safe" ] && ! printf '%s\n' "$safe" | tr ',' '\n' | grep -q -x -F -- "$ref" && ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
@@ -1674,6 +1674,25 @@ check_s20() {
 
 # GitHub Actions ワークフロー一覧
 workflow_files() { files_path '/\.github/workflows/[^/]+\.ya?ml$'; }
+# ワークフロー本文の正規化（CRLF・BOM 除去、"uses: >-" / "uses: |" のブロックスカラーを 1 行に畳む）
+#   uses: >-
+#     actions/checkout@v4      →   uses: actions/checkout@v4
+workflow_text() {
+  text_lines "$1" | awk '
+    pend != "" {
+      if ($0 ~ /^[[:space:]]*$/) next
+      match($0, /^[[:space:]]*/)
+      if (RLENGTH > pind) { v = $0; sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+#.*$/, "", v); sub(/[[:space:]]+$/, "", v); print pend v; pend = ""; next }
+      print pend; pend = ""
+    }
+    /uses:[[:space:]]*[>|][-+0-9]*[[:space:]]*(#.*)?$/ {
+      match($0, /^[[:space:]]*/); pind = RLENGTH
+      if ($0 ~ /^[[:space:]]*-[[:space:]]/) { t = $0; sub(/^[[:space:]]*-[[:space:]]+/, "", t); pind = length($0) - length(t) - 1 }
+      pend = $0; sub(/[>|][-+0-9]*[[:space:]]*(#.*)?$/, "", pend); next
+    }
+    { print }
+    END { if (pend != "") print pend }'
+}
 
 # §21 GitHub Actions 危険パターン
 check_s21() {
@@ -1681,19 +1700,19 @@ check_s21() {
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if fgrep_q '(^|[^A-Za-z0-9_])pull_request_target([^A-Za-z0-9_]|$)' "$f" && fgrep_q 'actions/checkout@' "$f" && fgrep_q '\$\{\{[[:space:]]*secrets\.' "$f"; then
+    if fgrep_q '(^|[^A-Za-z0-9_])pull_request_target([^A-Za-z0-9_]|$)' "$f" && fgrep_q -i 'actions/checkout@' "$f" && fgrep_q '\$\{\{[[:space:]]*secrets\.' "$f"; then
       # actions/checkout ステップごとに ref の有無と参照先を判定
       local refs
       refs="$(awk '
         function flush(){ if (inchk) { print (ref=="" ? "noref" : ref) } inchk=0; ref="" }
-        /uses:[[:space:]]*actions\/checkout@/ { flush(); inchk=1; match($0,/^[[:space:]]*/); ind=RLENGTH; next }
+        tolower($0) ~ /uses:[[:space:]]*["'"'"']?actions\/checkout@/ { flush(); inchk=1; match($0,/^[[:space:]]*/); ind=RLENGTH; next }
         inchk {
           match($0,/^[[:space:]]*/)
           if ($0 ~ /^[[:space:]]*-[[:space:]]/ && RLENGTH <= ind) { flush(); next }
           if ($0 ~ /^[[:space:]]*ref:/) { r=$0; sub(/^[[:space:]]*ref:[[:space:]]*/,"",r)
             ref = (r ~ /github\.(event\.pull_request\.head|head_ref)/) ? "prhead" : "otherref" }
         }
-        END{ flush() }' "$f")"
+        END{ flush() }' < <(workflow_text "$f"))"
       if printf '%s\n' "$refs" | grep -q -x 'prhead'; then
         critical "ghostaction-oct2026" "$f" "pull_request_target + PR head の checkout + secrets 参照（pwn request）"
       fi
@@ -1713,7 +1732,7 @@ check_s22() {
   local f line act ref
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -E -o '^[[:space:]-]*(\{([^}#]*,)?[[:space:]]*)?uses:[[:space:]]*["'"'"']?[^"'"'"'[:space:]#,}]+' "$f" 2>/dev/null | sed -E 's/.*uses:[[:space:]]*["'"'"']?//' | sort -u | while IFS= read -r line; do
+    workflow_text "$f" | grep -E -o '^[[:space:]-]*(\{([^}#]*,)?[[:space:]]*)?uses:[[:space:]]*["'"'"']?[^"'"'"'[:space:]#,}]+' 2>/dev/null | sed -E 's/.*uses:[[:space:]]*["'"'"']?//' | sort -u | while IFS= read -r line; do
       case "$line" in ./*|docker://*) continue ;; esac
       act="${line%@*}"; ref="${line##*@}"; act="${act,,}"
       [ "$act" != "$line" ] || { high "ghostaction-oct2026" "$f" "uses: ${line} がバージョン未指定"; continue; }
