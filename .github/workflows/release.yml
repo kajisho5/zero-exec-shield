@@ -1,5 +1,5 @@
-# main の CHANGELOG.md 先頭の版（"## X.Y.Z — YYYY-MM-DD"）に対応するタグ vX.Y.Z が無ければ、
-# タグと GitHub Release を作る。リリースノートは CHANGELOG のその版の節。外部 Action は使わない（gh はランナー標準）。
+# If there is no tag vX.Y.Z for the first version in CHANGELOG.md on main ("## X.Y.Z — YYYY-MM-DD"),
+# create the tag and a GitHub Release. The release notes are the section of that version in CHANGELOG. No external Actions are used (gh is standard on the runner).
 name: release
 on:
   push:
@@ -22,11 +22,11 @@ jobs:
       - name: CHANGELOG から版とリリースノートを取り出す
         id: ver
         run: |
-          # 先頭の "## " 見出しが版でなければ（"## Unreleased" など）失敗させる。下の古い版へ黙って戻らない
+          # Fail if the first "## " heading is not a version ("## Unreleased" etc.). Never silently fall back to an older version below
           line="$(grep -m1 -E '^## ' CHANGELOG.md || true)"
           ver="$(printf '%s\n' "$line" | sed -n -E 's/^## ([0-9]+\.[0-9]+\.[0-9]+)( — [0-9]{4}-[0-9]{2}-[0-9]{2})?$/\1/p')"
           if [ -z "$ver" ]; then echo "::error file=CHANGELOG.md::先頭の見出しが \"## X.Y.Z — YYYY-MM-DD\" ではありません: ${line:-（見出しなし）}"; exit 1; fi
-          # その版の見出しの次の行から、次の "## " 見出しの手前まで
+          # From the line after the heading of that version up to just before the next "## " heading
           awk -v v="$ver" 'BEGIN{p=0} /^## /{ if (p) exit; if (index($0, "## " v " ")==1) {p=1; next} } p' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
       - name: タグと Release を作成（既にあれば何もしない）

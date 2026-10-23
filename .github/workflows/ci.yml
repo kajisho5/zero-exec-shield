@@ -1,4 +1,4 @@
-# ZES の回帰テスト。外部 Action はコミット SHA で固定（タグは書き換えられうるため）。
+# ZES regression tests. External Actions are pinned to a commit SHA (tags can be rewritten).
 name: ci
 on:
   push:
@@ -30,8 +30,8 @@ jobs:
   ui:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
-    # ブラウザと OS 依存パッケージを含む公式イメージで実行する（@playwright/test と同じ版、ダイジェストで固定）。
-    # apt のミラーが遅いと playwright install --with-deps だけで 10〜40 分かかり、ジョブが時間切れになっていた
+    # Run in the official image that includes the browsers and OS-dependent packages (same version as @playwright/test, pinned by digest).
+    # With a slow apt mirror, playwright install --with-deps alone took 10-40 minutes and the job timed out
     container:
       image: mcr.microsoft.com/playwright:v1.56.1-noble@sha256:f1e7e01021efd65dd1a2c56064be399f3e4de00fd021ac561325f2bfbb2b837a
       options: --user 1001
@@ -49,7 +49,7 @@ jobs:
         run: npm ci
       - name: unit tests
         run: npm test
-      # コンテナに git が無くても比べられるよう、ビルド前のコミット済み index.html を退避して cmp で比べる
+      # Save the committed index.html before the build and compare with cmp, so the comparison works even without git in the container
       - name: build（型検査・単一ファイル化・外部通信なしの静的検査を含む）
         run: cp ../index.html "$RUNNER_TEMP/index.committed.html" && npm run build
       - name: コミット済みの index.html がソースから再現できること
