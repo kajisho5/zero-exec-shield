@@ -5,7 +5,7 @@
 #
 # 絶対原則（Master Spec §1）
 #   - Zero-Execution: 検査対象のランタイム・スクリプトを一切起動しない
-#   - 静的・受動的解析のみ（find / grep / readlink / stat / curl -sI / ps / lsof / uname / docker version）
+#   - 静的・受動的解析のみ（find / grep / readlink / stat / curl -sI / ps / lsof / uname / docker --version）
 #   - 内容非読取: 検出時もファイル内容は出力せず、パスとメタ情報のみ提示
 #   - fail-closed: 検査できなかったモジュールは errors[] に記録し、0件扱いしない
 #   - Bash 4+ / set -u / jq 優先・grep フォールバック / macOS・Linux 両対応
@@ -351,6 +351,7 @@ version_matches_spec() {
 refang() { printf '%s' "$1" | sed -e 's/\[\.\]/./g' -e 's/^hxxp/http/'; }
 
 # 対象バイナリが検査ルート内・一時領域にある場合は起動しない（偽装バイナリ対策）
+#   プローブはバージョン表示等のローカルで完結する引数のみで呼ぶ（ネットワーク接続しうる呼び出しは使わない）
 safe_probe() {
   local bin="$1"; shift
   local p rp
@@ -358,7 +359,12 @@ safe_probe() {
   rp="$(resolve_path "$p")" || return 127
   case "$rp" in "$ROOT"/*|/tmp/*|/var/tmp/*|/dev/shm/*) return 126 ;; esac
   case "$rp" in "$HOME_DIR"/*) [ "$HOST_CHECKS" = "1" ] || return 126 ;; esac
-  ( cd / && GOTOOLCHAIN=local GOFLAGS='' PYTHONSTARTUP='' PYTHONPATH='' "$rp" "$@" </dev/null 2>/dev/null )
+  # 環境は引き継がない（env -i）。検査対象 HOME の設定（~/.docker/config.json の context → ssh 実行、~/.kube/config の
+  # exec プラグイン等）や DOCKER_HOST / KUBECONFIG 等を読ませないため、空の HOME と最小の変数だけを渡す
+  local ph="$TMP_DIR/probe-home"
+  mkdir -p -- "$ph/.docker" 2>/dev/null || return 126
+  ( cd / && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$ph" DOCKER_CONFIG="$ph/.docker" XDG_CONFIG_HOME="$ph" \
+      TMPDIR="$TMP_DIR" LC_ALL=C GOTOOLCHAIN=local "$rp" "$@" </dev/null 2>/dev/null )
 }
 
 # git は検査対象リポジトリの設定（.git/config）経由でコマンドを起動しうる。また include.path / includeIf は
@@ -2118,7 +2124,9 @@ check_s23() {
   log_section "§23" "コンテナランタイム"
   if host_enabled; then
     local dv kv
-    dv="$(safe_probe docker version --format '{{.Client.Version}}')"
+    # docker version はデーモン（DOCKER_HOST / context。ssh:// なら ssh を起動）へ接続するため使わず、
+    # クライアントのみで完結する docker --version を読む
+    dv="$(safe_probe docker --version | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+[^ ,]*' | head -n1)"
     if [ -n "$dv" ]; then
       local dfix; dfix="$(infra_fixed docker CVE-2026-17106 | head -n1)"
       if [ -z "$dfix" ]; then medium "" "$(command -v docker)" "Docker ${dv}: CVE-2026-17106（CopyEscape）の修正版を公式で確認してください（ioc に修正版未定義）"

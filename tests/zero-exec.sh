@@ -25,6 +25,14 @@ if ! strace -f -qq -s 512 -e trace=execve -o "$TMP/trace.txt" true 2>"$TMP/strac
 fi
 
 # ホスト検査も有効にして（プローブを含めて）監視する。外向き通信のみ無効化。
+#   検査対象 HOME（ZES_HOME / HOME）と環境に ssh:// の Docker context / DOCKER_HOST を仕込み、プローブが
+#   それを読んで ssh を起動しないことも確認する（プローブは env -i の空 HOME で起動されるべき）
+DH="$TMP/docker-home"
+ctx="$(printf '%s' zes-evil | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+mkdir -p "$DH/.docker/contexts/meta/$ctx"
+printf '{"currentContext":"zes-evil"}\n' >"$DH/.docker/config.json"
+printf '{"Name":"zes-evil","Metadata":{},"Endpoints":{"docker":{"Host":"ssh://zes@ssh.example.invalid","SkipTLSVerify":false}}}\n' >"$DH/.docker/contexts/meta/$ctx/meta.json"
+HOME="$DH" DOCKER_HOST="ssh://zes@ssh.example.invalid" DOCKER_CONTEXT=zes-evil DOCKER_CONFIG="$DH/.docker" \
 ZES_HOST_CHECKS=1 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" \
   strace -f -qq -s 512 -e trace=execve -o "$TMP/trace.txt" \
   "$REPO/zes-scan.sh" --full --root "$FIX" --json >"$TMP/out.json" 2>"$TMP/scan-err.txt"
@@ -56,7 +64,10 @@ while IFS=$'\t' read -r exe argv; do
     go)
       ng "go を起動（バージョンは GOROOT/VERSION を静的に読むこと）: $argv" ;;
     docker)
-      printf '%s' "$argv" | jq -e '.[1] == "version"' >/dev/null 2>&1 || ng "docker を許可外の引数で起動: $argv" ;;
+      # docker version はデーモン（ssh:// の context なら ssh）へ接続するため、クライアントのみの --version だけを許可
+      printf '%s' "$argv" | jq -e '.[1:] == ["--version"]' >/dev/null 2>&1 || ng "docker を許可外の引数で起動: $argv" ;;
+    ssh)
+      printf '%s' "$argv" | jq -e '.[1:] == ["-V"]' >/dev/null 2>&1 || ng "ssh を許可外の引数で起動: $argv" ;;
     cosign)
       printf '%s' "$argv" | jq -e '.[1:] == ["version"]' >/dev/null 2>&1 || ng "cosign を許可外の引数で起動: $argv" ;;
     bpftool)

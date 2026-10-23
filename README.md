@@ -73,7 +73,7 @@ chmod +x zes-scan.sh
 |---|---|
 | `ZES_IOC` | ioc.json のパス（既定 `rules/ioc.json`） |
 | `ZES_HOME` | ホーム配下を対象とする検査（§10〜§14 等）の基点（既定 `$HOME`） |
-| `ZES_HOST_CHECKS=0` | ホスト状態検査（ps / lsof / /proc / uname / docker version / systemctl / mount 等）を無効化 |
+| `ZES_HOST_CHECKS=0` | ホスト状態検査（ps / lsof / /proc / uname / docker --version / systemctl / mount 等）を無効化 |
 | `ZES_OFFLINE=1` | 外向き通信（§4 `--url`、§6 eMudhra 接続試験）を無効化（`errors[]` に `skipped_offline`） |
 | `ZES_SKILLPACT_CACHE` | `--skillpact-cache` と同じ |
 
@@ -261,7 +261,7 @@ SkillPact v0.8 の公式スキーマは一次情報で確認できていませ�
   - `runOn: folderOpen` → §7 / エージェントフック（`.claude/settings.json` の hooks）→ §17
   - `/etc/ld.so.preload`・シェル設定の `LD_PRELOAD` → §31 / ロード系スクリプト・eBPF・カーネル taint → §40
   - `noatime` → §13（§35 は参照のみ）
-  - `docker cp` の使用・TeamCity・Artifactory → §16 / `docker version`・`uname -r`・特権コンテナ → §23
+  - `docker cp` の使用・TeamCity・Artifactory → §16 / `docker --version`・`uname -r`・特権コンテナ → §23
   - `trust_remote_code=True` → §36 / pickle 系拡張子・`weights_only=False`・`--extra-index-url` → §32
   - ブラウザ拡張の権限・`update_url` → §24 / 既知名・バージョン間の権限昇格（所有権移転）→ §42
   - Bun 取得: `package.json` 等 → §15 / JS・Python コード → §45
