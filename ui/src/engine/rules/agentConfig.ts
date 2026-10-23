@@ -40,7 +40,7 @@ function collectServers(obj: unknown, out: { name: string; command: string; args
 }
 
 export function mcpRules(ctx: RuleCtx): void {
-  ctx.checks.add('s17-mcp-command').add('s17-symjack').add('s7-folderopen').add('s20-injection').add('s20-runtime-gate').add('s37-host-docker');
+  ctx.checks.add('s17-mcp-command').add('s17-symjack').add('s17-setup-mjs').add('s7-folderopen').add('s20-injection').add('s20-runtime-gate').add('s37-host-docker');
   for (const f of readable(ctx).filter((x) => MCP_CONFIG.test(x.relPath))) {
     let servers: { name: string; command: string; args: string[] }[] = [];
     let parseError = false;
@@ -75,6 +75,12 @@ export function mcpRules(ctx: RuleCtx): void {
     const decoy = decoys.some((d) => (d.endsWith('/') ? rel.startsWith(d) : f.name.toLowerCase().startsWith(d)));
     if (decoy && f.size === 0) {
       push(ctx, { level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, detail: 'デコイ名かつ 0 バイト：SymJack 疑い（要手動確認。CLI で readlink -f）', ruleId: 's17-symjack' });
+    }
+  }
+  // ChainDrop: setup.mjs がエージェント/IDE 設定ディレクトリを参照（MCP 設定改ざん。CLI check_s17 と同じ）
+  for (const f of readable(ctx).filter((x) => x.name === 'setup.mjs')) {
+    if (/\.(claude|vscode|cursor)(\/|\b)/.test(f.text)) {
+      push(ctx, { level: 'CRITICAL', module: '§17', campaign: 'chaindrop-keyv', path: f.relPath, detail: 'setup.mjs がエージェント/IDE 設定ディレクトリを参照（MCP 設定改ざん）', ruleId: 's17-setup-mjs', evidenceSha: f.sha256 });
     }
   }
   for (const f of readable(ctx).filter((x) => /(^|\/)\.(vscode|claude|cursor)\/tasks\.json$/.test(x.relPath))) {

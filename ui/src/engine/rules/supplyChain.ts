@@ -186,8 +186,12 @@ export function packageRules(ctx: RuleCtx): void {
   ctx.checks.add('s2-install-scripts').add('s15-preinstall').add('s15-lockfile').add('s15-tanstack-git');
   const pre = ctx.ioc.worm_iocs.chaindrop.preinstall;
   for (const f of readable(ctx).filter((x) => x.name === 'package.json')) {
+    // CLI check_s15 と同じく、package.json のどこか（任意の scripts を含む）に "node setup.mjs" があれば検出（JSON の妥当性に依らない）
+    if (pre && f.text.includes(pre)) {
+      push(ctx, { level: 'CRITICAL', module: '§15', campaign: 'chaindrop-keyv', path: f.relPath, detail: `ChainDrop の preinstall フック（${pre}）`, ruleId: 's15-preinstall', evidenceSha: f.sha256 });
+    }
     let j: { scripts?: Record<string, unknown> };
-    try { j = JSON.parse(f.text); } catch { continue; }
+    try { j = JSON.parse(f.text.replace(/^\uFEFF/, '')); } catch { continue; }
     const scripts = j.scripts ?? {};
     const hooks = ['preinstall', 'install', 'postinstall'].map((k) => scripts[k]).filter((v): v is string => typeof v === 'string');
     if (hooks.length) {
@@ -196,9 +200,6 @@ export function packageRules(ctx: RuleCtx): void {
       } else if (!f.relPath.includes('node_modules/')) {
         push(ctx, { level: 'MEDIUM', module: '§2', campaign: null, path: f.relPath, detail: 'install ライフサイクルスクリプトが定義されています（ignore-scripts 推奨）', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
       }
-    }
-    if (scripts['preinstall'] === pre) {
-      push(ctx, { level: 'CRITICAL', module: '§15', campaign: 'chaindrop-keyv', path: f.relPath, detail: `ChainDrop の preinstall フック（${pre}）`, ruleId: 's15-preinstall', evidenceSha: f.sha256 });
     }
   }
   for (const f of readable(ctx).filter((x) => /^(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(x.name))) {

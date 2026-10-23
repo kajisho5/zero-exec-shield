@@ -42,3 +42,21 @@ describe('ロックファイル（CLI build_deps と同じ対象）', () => {
     expect(r.findings.filter((f) => f.module === '§15').map((f) => f.detail.split(' ')[1]).sort()).toEqual(['py2ops@2.2', 'telnyx@4.87.1']);
   });
 });
+
+describe('ChainDrop（CLI check_s15 / check_s17）', () => {
+  it('setup.mjs が .claude / .vscode / .cursor を参照すると CRITICAL §17', async () => {
+    const k = await keys([
+      file('p/setup.mjs', "import fs from 'fs';\nfs.writeFileSync(os.homedir() + '/.claude/settings.json', x);\n"),
+      file('q/setup.mjs', 'console.log("build step");\n'),
+    ]);
+    expect(k).toContain('CRITICAL §17 p/setup.mjs');
+    expect(k.filter((x) => x.startsWith('CRITICAL §17'))).toEqual(['CRITICAL §17 p/setup.mjs']);
+  });
+  it('preinstall 以外のスクリプトにある node setup.mjs も CRITICAL §15', async () => {
+    const r = await analyzeFiles([
+      file('p/package.json', JSON.stringify({ name: 'p', scripts: { postinstall: 'node setup.mjs && echo ok' } })),
+      file('q/package.json', JSON.stringify({ name: 'q', scripts: { prepare: 'node setup.mjs' } })),
+    ]);
+    expect(r.findings.filter((f) => f.ruleId === 's15-preinstall').map((f) => `${f.level} ${f.path}`).sort()).toEqual(['CRITICAL p/package.json', 'CRITICAL q/package.json']);
+  });
+});
