@@ -1,0 +1,71 @@
+[
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.pkg_compromised_safe",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "keyv",
+      "safe_version": "latest 5.x",
+      "version": "6.0.0"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.preinstall",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "hook": "node setup.mjs"
+    },
+    "path": "package.json"
+  },
+  {
+    "campaign": "solana-typosquat",
+    "code": "s15.pkg_compromised",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "@solana-labs/web3js",
+      "version": "1.0.2"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.worm_file",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {
+      "name": "Math_Symbol.js"
+    },
+    "path": "Math_Symbol.js"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.worm_setup",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {},
+    "path": "setup.mjs"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s17.setup_mjs",
+    "level": "CRITICAL",
+    "module": "§17",
+    "params": {},
+    "path": "setup.mjs"
+  },
+  {
+    "campaign": null,
+    "code": "s2.lifecycle_suspicious",
+    "level": "HIGH",
+    "module": "§2",
+    "params": {},
+    "path": "package.json"
+  }
+]

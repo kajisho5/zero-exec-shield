@@ -6,6 +6,8 @@
 #   チェックアウトの umask に依存する）は照合しない。
 #   The (level, module, campaign, path) sets are the safety net of the 0.5.0 message refactor (findings 1.2: code /
 #   params / English detail / id v2): no finding may be lost or added. The i18n section checks detail = render(en, params).
+#   tests/expected-codes/*.json (written by tests/gen-expected-codes.sh) hold the code / params of every finding; the UI
+#   parity test (ui/tests/unit/cli-parity.test.ts) compares the browser engine with them.
 #
 # Usage: tests/run-tests.sh [--update] [--sync-campaigns]
 #   --update          期待値を現在の出力で再生成（差分は必ず目視レビューすること）
@@ -140,6 +142,11 @@ for e in "$EXP"/*.json; do
   jq -S '.findings' "$e" >"$TMP/expected.json"
   if diff -u "$TMP/expected.json" "$TMP/actual.json" >"$TMP/diff.txt"; then ok "$name ($mode): $(jq length "$TMP/actual.json") 件一致"
   else ng "$name ($mode): 期待値と不一致" "$(head -n 40 "$TMP/diff.txt")"; fi
+  # Second layer: code / params of every finding (tests/expected-codes, compared with the UI engine by cli-parity.test.ts)
+  jq -S --arg r "$root/" --arg rr "$root" --arg h "$FIX/_home" -f "$TESTS_DIR/expected-codes.jq" "$TMP/out.json" >"$TMP/actual-codes.json"
+  if [ ! -f "$TESTS_DIR/expected-codes/$name.json" ]; then ng "$name: tests/expected-codes/$name.json がありません（tests/gen-expected-codes.sh $name）"
+  elif diff -u "$TESTS_DIR/expected-codes/$name.json" "$TMP/actual-codes.json" >"$TMP/diff-codes.txt"; then ok "$name: code / params が tests/expected-codes と一致"
+  else ng "$name: code / params が tests/expected-codes と不一致（意図した変更なら tests/gen-expected-codes.sh $name）" "$(head -n 40 "$TMP/diff-codes.txt")"; fi
 done
 
 # ---------------------------------------------------------------------------

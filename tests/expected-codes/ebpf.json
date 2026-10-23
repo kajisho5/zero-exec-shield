@@ -1,0 +1,10 @@
+[
+  {
+    "campaign": "ebpf-rootkit",
+    "code": "s40.preload_bpf_module",
+    "level": "HIGH",
+    "module": "§40",
+    "params": {},
+    "path": "ld_preload.sh"
+  }
+]

@@ -1,0 +1,101 @@
+[
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.pkg_compromised",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "@cacheable/memory",
+      "version": "2.2.1"
+    },
+    "path": "pnpm-v5/pnpm-lock.yaml"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.pkg_compromised",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "flat-cache",
+      "version": "6.1.24"
+    },
+    "path": "pnpm-v5/pnpm-lock.yaml"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.pkg_compromised_safe",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "keyv",
+      "safe_version": "latest 5.x",
+      "version": "6.0.0"
+    },
+    "path": "pnpm-v5/pnpm-lock.yaml"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.pkg_compromised",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "cacheable",
+      "version": "2.5.1"
+    },
+    "path": "pnpm-v6/pnpm-lock.yaml"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.pkg_compromised",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "cache-manager",
+      "version": "7.2.10"
+    },
+    "path": "yarn-berry-alias/yarn.lock"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.pkg_compromised_safe",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "keyv",
+      "safe_version": "latest 5.x",
+      "version": "6.0.0"
+    },
+    "path": "yarn-berry-alias/yarn.lock"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.pkg_compromised",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "@cacheable/memory",
+      "version": "2.2.1"
+    },
+    "path": "yarn-v1-alias/yarn.lock"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s15.pkg_compromised_safe",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "keyv",
+      "safe_version": "latest 5.x",
+      "version": "6.0.0"
+    },
+    "path": "yarn-v1-alias/yarn.lock"
+  }
+]

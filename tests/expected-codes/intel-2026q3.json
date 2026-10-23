@@ -1,0 +1,363 @@
+[
+  {
+    "campaign": "mcp-server-name-squat-canary",
+    "code": "s15.pkg_compromised",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "mcp-server-github",
+      "version": "0.0.1"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": "proc-macro1-rust-dropper-aug2026",
+    "code": "s15.pkg_compromised_safe",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "cargo",
+      "package": "arrayref",
+      "safe_version": "0.3.9",
+      "version": "0.3.10"
+    },
+    "path": "Cargo.lock"
+  },
+  {
+    "campaign": "emudhra-ca-oct2026",
+    "code": "s15.pkg_vulnerable_fixed",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {
+      "ecosystem": "cargo",
+      "fixed_version": "1.0.10",
+      "package": "webpki-roots",
+      "version": "1.0.9"
+    },
+    "path": "Cargo.lock"
+  },
+  {
+    "campaign": "emudhra-ca-oct2026",
+    "code": "s15.pkg_vulnerable_fixed",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {
+      "ecosystem": "packagist",
+      "fixed_version": "1.4.16 / 1.6.0",
+      "package": "composer/ca-bundle",
+      "version": "1.4.15"
+    },
+    "path": "composer.lock"
+  },
+  {
+    "campaign": "mcp-ts-sdk-oct-2026",
+    "code": "s15.pkg_vulnerable_fixed",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "fixed_version": "1.32.0 / 2.3.0",
+      "package": "@modelcontextprotocol/sdk",
+      "version": "1.31.0"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": "sigstore-fulcio-cve-2026-49478",
+    "code": "s15.pkg_vulnerable_fixed",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {
+      "ecosystem": "go",
+      "fixed_version": "1.8.6",
+      "package": "github.com/sigstore/fulcio",
+      "version": "v1.8.5"
+    },
+    "path": "go.sum"
+  },
+  {
+    "campaign": "sigstore-js-cve-2026-48815",
+    "code": "s15.pkg_vulnerable_fixed",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "fixed_version": "4.1.1",
+      "package": "sigstore",
+      "version": "4.0.0"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": "trinitite-7nohe-issue-comment-aug2026",
+    "code": "intel.file_name",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {
+      "name": "sysvinit-detect-fash.sh"
+    },
+    "path": "scripts/sysvinit-detect-fash.sh"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "CRITICAL",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-20896",
+      "cvss": "9.8",
+      "fixed": "1.26.3",
+      "product": "gitea",
+      "version": "1.26.1"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "CRITICAL",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-60004",
+      "cvss": "9.8",
+      "fixed": "1.27.1",
+      "product": "gitea",
+      "version": "1.26.1"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "CRITICAL",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-70426",
+      "cvss": "9.0",
+      "fixed": "2.576 2.568.2",
+      "product": "jenkins",
+      "version": "2.560"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable",
+    "level": "HIGH",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-111497",
+      "fixed": "22.23.4 24.22.1 26.12.1",
+      "product": "nodejs",
+      "version": "22.20.0"
+    },
+    "path": "Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "HIGH",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-56848",
+      "cvss": "7.5",
+      "fixed": "22.23.2 24.18.1 26.5.1",
+      "product": "nodejs",
+      "version": "22.20.0"
+    },
+    "path": "Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "HIGH",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-17603",
+      "cvss": "8.8",
+      "fixed": "3.95.0",
+      "product": "nexus-repository",
+      "version": "3.90.0"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "HIGH",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-53435",
+      "cvss": "8.8",
+      "fixed": "2.568 2.555.3",
+      "product": "jenkins",
+      "version": "2.560"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_vulnerable_cvss",
+    "level": "HIGH",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-84645",
+      "cvss": "8.8",
+      "fixed": "2.580 2.568.3",
+      "product": "jenkins",
+      "version": "2.560"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": "macsync-icloud-calendar-finder-backdoor",
+    "code": "s18.network_ioc",
+    "level": "CRITICAL",
+    "module": "§18",
+    "params": {
+      "iocs": "toria.apple03cloudstore.com"
+    },
+    "path": "src/beacon.js"
+  },
+  {
+    "campaign": "codfish-semantic-release-action-jun2026",
+    "code": "intel.action_compromised",
+    "level": "CRITICAL",
+    "module": "§22",
+    "params": {
+      "action": "codfish/semantic-release-action",
+      "ref": "v4"
+    },
+    "path": ".github/workflows/release.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s22.unpinned",
+    "level": "HIGH",
+    "module": "§22",
+    "params": {
+      "ref": "codfish/semantic-release-action@v4"
+    },
+    "path": ".github/workflows/release.yml"
+  },
+  {
+    "campaign": null,
+    "code": "s28.from_digest",
+    "level": "MEDIUM",
+    "module": "§28",
+    "params": {},
+    "path": "Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s3.gitlab_vulnerable",
+    "level": "CRITICAL",
+    "module": "§3",
+    "params": {
+      "cve": "CVE-2026-110264",
+      "cvss": "10.0",
+      "first_fixed": "19.5.1",
+      "fixed": "19.5.1 19.4.3 19.3.6 19.2.9 19.1.9 19.0.10 18.11.13",
+      "version": "19.4.2"
+    },
+    "path": "docker-compose.yml"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s37.mcp_dependency",
+    "level": "MEDIUM",
+    "module": "§37",
+    "params": {
+      "package": "@modelcontextprotocol/sdk",
+      "version": "1.31.0"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": "codfish-semantic-release-action-jun2026",
+    "code": "intel.ci_pattern",
+    "level": "CRITICAL",
+    "module": "§38",
+    "params": {
+      "campaign": "codfish-semantic-release-action-jun2026"
+    },
+    "path": ".github/workflows/release.yml"
+  },
+  {
+    "campaign": null,
+    "code": "s4.php_vulnerable",
+    "level": "CRITICAL",
+    "module": "§4",
+    "params": {
+      "fixed": "8.5.12 8.4.27 8.3.36 8.2.35",
+      "version": "8.3.10"
+    },
+    "path": "Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s4.php_image",
+    "level": "INFO",
+    "module": "§4",
+    "params": {
+      "image": "php:8.3.10-apache"
+    },
+    "path": "Dockerfile"
+  },
+  {
+    "campaign": "emudhra-ca-oct2026",
+    "code": "s6.runtime_trusts",
+    "level": "HIGH",
+    "module": "§6",
+    "params": {
+      "fixed": "22.23.4 24.22.1 26.12.1",
+      "name": "Node.js",
+      "version": "22.20.0"
+    },
+    "path": ".nvmrc"
+  },
+  {
+    "campaign": "emudhra-ca-oct2026",
+    "code": "s6.runtime_trusts",
+    "level": "HIGH",
+    "module": "§6",
+    "params": {
+      "fixed": "22.23.4 24.22.1 26.12.1",
+      "name": "Node.js",
+      "version": "22.20.0"
+    },
+    "path": "Dockerfile"
+  },
+  {
+    "campaign": "emudhra-ca-oct2026",
+    "code": "s6.ca_apk",
+    "level": "HIGH",
+    "module": "§6",
+    "params": {
+      "min": "20261020-r0",
+      "version": "20250911-r0"
+    },
+    "path": "lib/apk/db/installed"
+  },
+  {
+    "campaign": "emudhra-ca-oct2026",
+    "code": "s6.ca_debian",
+    "level": "HIGH",
+    "module": "§6",
+    "params": {
+      "version": "20240203"
+    },
+    "path": "var/lib/dpkg/status"
+  },
+  {
+    "campaign": "actions-cool-reactivation-sep2026",
+    "code": "intel.campaign_string",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {
+      "campaign": "actions-cool-reactivation-sep2026"
+    },
+    "path": ".claude/settings.json"
+  }
+]

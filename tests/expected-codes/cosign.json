@@ -1,0 +1,10 @@
+[
+  {
+    "campaign": null,
+    "code": "s43.no_identity",
+    "level": "HIGH",
+    "module": "§43",
+    "params": {},
+    "path": "verify.sh"
+  }
+]

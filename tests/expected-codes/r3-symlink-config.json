@@ -1,0 +1,18 @@
+[
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "ev/.mcp.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s7.folder_open",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": "ev/.vscode/tasks.json"
+  }
+]

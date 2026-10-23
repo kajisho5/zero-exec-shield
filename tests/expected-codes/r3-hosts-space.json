@@ -1,0 +1,12 @@
+[
+  {
+    "campaign": null,
+    "code": "s34.hosts_override",
+    "level": "HIGH",
+    "module": "§34",
+    "params": {
+      "host": "registry.npmjs.org"
+    },
+    "path": "my etc/hosts"
+  }
+]

@@ -1,0 +1,66 @@
+[
+  {
+    "campaign": null,
+    "code": "s7.invisible_chars",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": ".claude/agents/reviewer.md"
+  },
+  {
+    "campaign": null,
+    "code": "s7.invisible_chars",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": ".clinerules/style.md"
+  },
+  {
+    "campaign": null,
+    "code": "s7.invisible_chars",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": ".github/instructions/review.instructions.md"
+  },
+  {
+    "campaign": null,
+    "code": "s7.invisible_chars",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": ".windsurfrules"
+  },
+  {
+    "campaign": null,
+    "code": "s7.invisible_chars",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": "AGENTS.md"
+  },
+  {
+    "campaign": null,
+    "code": "s7.invisible_chars",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": "CLAUDE.local.md"
+  },
+  {
+    "campaign": null,
+    "code": "s7.invisible_chars",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": "GEMINI.md"
+  },
+  {
+    "campaign": null,
+    "code": "s7.invisible_chars",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": "vs-run/CLAUDE.md"
+  }
+]

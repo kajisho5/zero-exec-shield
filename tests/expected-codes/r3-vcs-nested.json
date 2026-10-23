@@ -1,0 +1,30 @@
+[
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s18.network_ioc",
+    "level": "CRITICAL",
+    "module": "§18",
+    "params": {
+      "iocs": "npm-cache.com"
+    },
+    "path": "lib/.hg/q.js"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s18.network_ioc",
+    "level": "CRITICAL",
+    "module": "§18",
+    "params": {
+      "iocs": "npm-cache.com"
+    },
+    "path": "lib/.svn/p.js"
+  },
+  {
+    "campaign": null,
+    "code": "s2.lifecycle_defined",
+    "level": "MEDIUM",
+    "module": "§2",
+    "params": {},
+    "path": "package.json"
+  }
+]

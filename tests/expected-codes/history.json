@@ -1,0 +1,42 @@
+[
+  {
+    "campaign": null,
+    "code": "s12.pip_require_virtualenv",
+    "level": "MEDIUM",
+    "module": "§12",
+    "params": {},
+    "path": null
+  },
+  {
+    "campaign": null,
+    "code": "s12.pythonnousersite",
+    "level": "MEDIUM",
+    "module": "§12",
+    "params": {},
+    "path": null
+  },
+  {
+    "campaign": null,
+    "code": "s12.npm_ignore_scripts",
+    "level": "MEDIUM",
+    "module": "§12",
+    "params": {},
+    "path": ".npmrc"
+  },
+  {
+    "campaign": null,
+    "code": "s18.history_c2",
+    "level": "CRITICAL",
+    "module": "§18",
+    "params": {},
+    "path": ".zsh_history"
+  },
+  {
+    "campaign": null,
+    "code": "s18.history_curl_sh",
+    "level": "HIGH",
+    "module": "§18",
+    "params": {},
+    "path": ".zsh_history"
+  }
+]

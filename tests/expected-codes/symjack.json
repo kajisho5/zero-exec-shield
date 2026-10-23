@@ -1,0 +1,12 @@
+[
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.symjack",
+    "level": "CRITICAL",
+    "module": "§17",
+    "params": {
+      "target": "../.claude/settings.json"
+    },
+    "path": "docs/vid-settings.mp4"
+  }
+]

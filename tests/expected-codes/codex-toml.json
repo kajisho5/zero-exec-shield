@@ -1,0 +1,82 @@
+[
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "a-dotted-top/.codex/config.toml"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "b-spaced-header/.codex/config.toml"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "c-quoted-header/.codex/config.toml"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "d-dotted-under-table/.codex/config.toml"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "e-escapes/.codex/config.toml"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "f-bracket-in-args/.codex/config.toml"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "g-multiline-strings/.codex/config.toml"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "h-string-args/.codex/config.toml"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "i-inline-nested/.codex/config.toml"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "j-subtables/.codex/config.toml"
+  }
+]

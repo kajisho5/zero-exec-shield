@@ -1,0 +1,140 @@
+[
+  {
+    "campaign": "jscrambler-jul2026",
+    "code": "s15.pkg_compromised_safe",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "jscrambler",
+      "safe_version": "8.22.0",
+      "version": "8.16.0"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": "teampcp-mini-shai-hulud",
+    "code": "s15.pkg_compromised_safe",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "npm",
+      "package": "intercom-client",
+      "safe_version": "7.0.3",
+      "version": "7.0.4"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": "teampcp-mini-shai-hulud",
+    "code": "s15.pkg_compromised_safe",
+    "level": "CRITICAL",
+    "module": "§15",
+    "params": {
+      "ecosystem": "pypi",
+      "package": "guardrails-ai",
+      "safe_version": "0.10.0",
+      "version": "0.10.1"
+    },
+    "path": "py-normalized/requirements.txt"
+  },
+  {
+    "campaign": "mcp-python-sdk-jul-2026",
+    "code": "s15.pkg_vulnerable_fixed",
+    "level": "HIGH",
+    "module": "§15",
+    "params": {
+      "ecosystem": "pypi",
+      "fixed_version": "1.28.1",
+      "package": "mcp",
+      "version": "1.27.1"
+    },
+    "path": "py/requirements.txt"
+  },
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s18.network_ioc",
+    "level": "CRITICAL",
+    "module": "§18",
+    "params": {
+      "iocs": "0xe1f2395ee43e45a1556ec6438a88c31b83493103"
+    },
+    "path": "relay.js"
+  },
+  {
+    "campaign": "teampcp-mini-shai-hulud",
+    "code": "s18.legit_infra",
+    "level": "MEDIUM",
+    "module": "§18",
+    "params": {
+      "iocs": "seed1.getsession.org"
+    },
+    "path": "relay.js"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s22.poisoned_tag",
+    "level": "CRITICAL",
+    "module": "§22",
+    "params": {
+      "ref": "aquasecurity/trivy-action@0.28.0"
+    },
+    "path": ".github/workflows/scan.yml"
+  },
+  {
+    "campaign": "ghostaction-oct2026",
+    "code": "s22.trivy_version",
+    "level": "CRITICAL",
+    "module": "§22",
+    "params": {},
+    "path": ".github/workflows/scan.yml"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s37.mcp_cve",
+    "level": "HIGH",
+    "module": "§37",
+    "params": {
+      "cve": "CVE-2026-58500",
+      "fixed": "1.85.10",
+      "package": "appium-mcp",
+      "version": "1.85.9"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s37.mcp_cve",
+    "level": "HIGH",
+    "module": "§37",
+    "params": {
+      "cve": "CVE-2026-52869",
+      "fixed": "1.27.2",
+      "package": "mcp",
+      "version": "1.27.1"
+    },
+    "path": "py/requirements.txt"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s37.mcp_dependency",
+    "level": "MEDIUM",
+    "module": "§37",
+    "params": {
+      "package": "appium-mcp",
+      "version": "1.85.9"
+    },
+    "path": "package-lock.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s37.mcp_dependency",
+    "level": "MEDIUM",
+    "module": "§37",
+    "params": {
+      "package": "mcp",
+      "version": "1.27.1"
+    },
+    "path": "py/requirements.txt"
+  }
+]

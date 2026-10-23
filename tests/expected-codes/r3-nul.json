@@ -1,0 +1,20 @@
+[
+  {
+    "campaign": "chaindrop-keyv",
+    "code": "s18.network_ioc",
+    "level": "CRITICAL",
+    "module": "§18",
+    "params": {
+      "iocs": "npm-cache.com"
+    },
+    "path": "p.js"
+  },
+  {
+    "campaign": null,
+    "code": "s47.github_token",
+    "level": "CRITICAL",
+    "module": "§47",
+    "params": {},
+    "path": "t.sh"
+  }
+]

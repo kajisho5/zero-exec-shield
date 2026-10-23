@@ -1,0 +1,25 @@
+[
+  {
+    "campaign": null,
+    "code": "s4.php_vulnerable_eol",
+    "level": "CRITICAL",
+    "module": "§4",
+    "params": {
+      "fixed": "8.5.12 8.4.27 8.3.36 8.2.35",
+      "version": "8.1.2"
+    },
+    "path": "crlf/.tool-versions"
+  },
+  {
+    "campaign": "emudhra-ca-oct2026",
+    "code": "s6.runtime_trusts",
+    "level": "HIGH",
+    "module": "§6",
+    "params": {
+      "fixed": "22.23.4 24.22.1 26.12.1",
+      "name": "Node.js",
+      "version": "18.0.0"
+    },
+    "path": "crlf/.tool-versions"
+  }
+]

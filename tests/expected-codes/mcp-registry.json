@@ -1,0 +1,18 @@
+[
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s20.imperative_external",
+    "level": "HIGH",
+    "module": "§20",
+    "params": {},
+    "path": "tool.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s20.prompt_injection",
+    "level": "HIGH",
+    "module": "§20",
+    "params": {},
+    "path": "tool.json"
+  }
+]

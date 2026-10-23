@@ -1,0 +1,18 @@
+[
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": ".mcp.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.npx",
+    "level": "MEDIUM",
+    "module": "§17",
+    "params": {},
+    "path": ".mcp.json"
+  }
+]

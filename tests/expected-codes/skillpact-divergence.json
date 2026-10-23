@@ -1,0 +1,26 @@
+[
+  {
+    "campaign": "skillpact-divergence",
+    "code": "s49.divergence.network",
+    "level": "HIGH",
+    "module": "§49",
+    "params": {},
+    "path": "net-tool"
+  },
+  {
+    "campaign": "skillpact-divergence",
+    "code": "s49.divergence.read_sensitive_scoped",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {},
+    "path": "net-tool"
+  },
+  {
+    "campaign": "skillpact-divergence",
+    "code": "s49.divergence.write_durable_scoped",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {},
+    "path": "persist-tool"
+  }
+]
