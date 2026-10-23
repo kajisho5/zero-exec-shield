@@ -301,23 +301,107 @@ safe_probe() {
   ( cd / && GOTOOLCHAIN=local GOFLAGS='' PYTHONSTARTUP='' PYTHONPATH='' "$rp" "$@" </dev/null 2>/dev/null )
 }
 
-# git は検査対象リポジトリの設定（.git/config）経由でコマンドを起動しうるため、危険な設定を無効化して呼ぶ
-#   コマンドライン -c はリポジトリ設定より優先される。プログラムを値に取る設定は全て無害化する:
+# git は検査対象リポジトリの設定（.git/config）経由でコマンドを起動しうる。また include.path / includeIf は
+# 任意のファイル（FIFO 等）を読ませて走査を無期限に停止させうる。そこで git には検査対象の .git/config を一切読ませない:
+#   $TMP_DIR/git-shadow に最小の GIT_DIR を作り（config は ZES が書く。objects / refs / packed-refs / reftable は
+#   元リポジトリへのシンボリックリンク、HEAD / shallow は通常ファイルのみ複製）、GIT_DIR としてそれを使う。
+#   元の config からは repositoryformatversion / extensions.objectformat / extensions.refstorage だけを
+#   git を使わずに静的に読み（git_cfg_get）、partialclone 等の拡張は引き継がない（遅延フェッチをさせない）。
+# 加えて、プログラムを値に取る設定はコマンドライン -c でも無害化し（多重防御）、全体を timeout で打ち切る:
 #   署名検証（gpg.program / gpg.openpgp.program / gpg.x509.program / gpg.ssh.program / gpg.ssh.defaultKeyCommand）、
 #   ssh・プロキシ（core.sshCommand / core.gitProxy）、エディタ・ページャ・認証（core.editor / sequence.editor /
 #   core.pager / core.askPass / credential.helper）、diff（diff.external、textconv は --no-textconv を呼び出し側で指定）
 #   ※ 署名の有無は検証させずに生のコミットオブジェクトのヘッダから判定する（§46）
+#   ※ refs 配下の FIFO 等で git が停止した場合は ZES_GIT_TIMEOUT 秒（既定 60）で打ち切り、errors[] に git_timeout を記録
+GIT_TIMEOUT="${ZES_GIT_TIMEOUT:-60}"
+case "$GIT_TIMEOUT" in ''|*[!0-9]*) GIT_TIMEOUT=60 ;; esac
+
+# git_cfg_get SECTION SUBSECTION KEY … $ROOT/.git/config の値を git を起動せずに読む（最後の値。include は辿らない）
+#   通常ファイル以外（FIFO・デバイス）は読まない。[sec "sub"] と旧形式 [sec.sub] の両方に対応
+git_cfg_get() {
+  local cfg="$ROOT/.git/config"
+  [ -f "$cfg" ] || return 1
+  head -c 1048576 -- "$cfg" 2>/dev/null | ZES_S="$1" ZES_SS="$2" ZES_K="$3" awk '
+    BEGIN { ws = tolower(ENVIRON["ZES_S"]); wss = ENVIRON["ZES_SS"]; wk = tolower(ENVIRON["ZES_K"]); found = 0 }
+    { line = $0; sub(/\r$/, "", line) }
+    line ~ /^[[:space:]]*\[/ {
+      h = line; sub(/^[[:space:]]*\[[[:space:]]*/, "", h); sub(/\][^]]*$/, "", h)
+      if (match(h, /[[:space:]]+"/)) { sec = tolower(substr(h, 1, RSTART - 1)); ss = substr(h, RSTART + RLENGTH); sub(/"[[:space:]]*$/, "", ss); gsub(/\\\\/, "\001", ss); gsub(/\\/, "", ss); gsub(/\001/, "\\", ss) }
+      else if (index(h, ".")) { sec = tolower(substr(h, 1, index(h, ".") - 1)); ss = tolower(substr(h, index(h, ".") + 1)) }
+      else { sec = tolower(h); ss = "" }
+      sub(/[[:space:]]+$/, "", sec); next }
+    sec == ws && ss == wss {
+      l = line; sub(/^[[:space:]]+/, "", l)
+      if (!match(l, /^[A-Za-z][A-Za-z0-9-]*/)) next
+      k = tolower(substr(l, 1, RLENGTH)); if (k != wk) next
+      r = substr(l, RLENGTH + 1); sub(/^[[:space:]]*/, "", r)
+      if (r == "") { v = "true"; found = 1; next }
+      if (substr(r, 1, 1) != "=") next
+      r = substr(r, 2); v = ""; inq = 0
+      for (i = 1; i <= length(r); i++) { c = substr(r, i, 1)
+        if (c == "\\" && i < length(r)) { i++; c = substr(r, i, 1); v = v (c == "n" ? "\n" : c == "t" ? "\t" : c == "b" ? "" : c); continue }
+        if (c == "\"") { inq = !inq; continue }
+        if (!inq && (c == "#" || c == ";")) break
+        v = v c }
+      sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); found = 1 }
+    END { if (found) print v; else exit 1 }'
+}
+
+# 検査対象 .git から ZES 管理の最小 GIT_DIR を作る（作成済みなら何もしない）
+git_shadow_prepare() {
+  local g="$ROOT/.git" d="$TMP_DIR/git-shadow" x rfv of rs
+  [ -f "$d/config" ] && return 0
+  [ -d "$g" ] && [ -f "$g/HEAD" ] || return 1
+  rm -rf -- "$d" && mkdir -p -- "$d" || return 1
+  head -c 4096 -- "$g/HEAD" >"$d/HEAD" 2>/dev/null || return 1
+  [ -f "$g/shallow" ] && { cp -- "$g/shallow" "$d/shallow" 2>/dev/null || return 1; }
+  for x in objects refs packed-refs reftable; do
+    if [ -e "$g/$x" ] || [ -L "$g/$x" ]; then ln -s -- "$g/$x" "$d/$x" || return 1; fi
+  done
+  [ -e "$d/refs" ] || mkdir -p -- "$d/refs"
+  rfv="$(git_cfg_get core '' repositoryformatversion)"; of="$(git_cfg_get extensions '' objectformat)"; rs="$(git_cfg_get extensions '' refstorage)"
+  case "${rfv:-0}" in 0|1) ;; *) return 1 ;; esac
+  {
+    printf '[core]\n\trepositoryformatversion = %s\n\tbare = false\n' "${rfv:-0}"
+    if [ -n "$of$rs" ]; then
+      printf '[extensions]\n'
+      case "$of" in '') ;; sha1|sha256) printf '\tobjectformat = %s\n' "$of" ;; *) return 1 ;; esac
+      case "$rs" in '') ;; files|reftable) printf '\trefstorage = %s\n' "$rs" ;; *) return 1 ;; esac
+    fi
+  } >"$d/config.tmp" && mv -- "$d/config.tmp" "$d/config"
+}
+
+# run_timeout SECONDS CMD... … coreutils timeout があれば使い、無ければ bash のウォッチドッグで打ち切る（124 を返す）
+run_timeout() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then timeout -k 5 "$secs" "$@"; return $?; fi
+  "$@" 0<&0 &
+  local pid=$! w rc mark="$TMP_DIR/timeout.$BASHPID.$RANDOM"
+  ( sleep "$secs"; : >"$mark"; kill -TERM "$pid" 2>/dev/null && { sleep 5; kill -KILL "$pid" 2>/dev/null; } ) >/dev/null 2>&1 &
+  w=$!
+  wait "$pid"; rc=$?
+  kill "$w" 2>/dev/null; wait "$w" 2>/dev/null
+  if [ -e "$mark" ]; then rm -f -- "$mark"; return 124; fi
+  return "$rc"
+}
+
 safe_git() {
   command -v git >/dev/null 2>&1 || return 127
-  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat GIT_EXTERNAL_DIFF='' \
+  git_shadow_prepare || { record_error "${CURRENT_MODULE:-core}" "git_dir_unreadable"; return 1; }
+  local rc
+  GIT_DIR="$TMP_DIR/git-shadow" GIT_WORK_TREE="$ROOT" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_COUNT=0 \
+  GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat GIT_EXTERNAL_DIFF='' \
   GIT_SSH_COMMAND=/bin/false GIT_SSH=/bin/false GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false GIT_EDITOR=/bin/false \
   GIT_SEQUENCE_EDITOR=/bin/false GIT_PROXY_COMMAND=/bin/false GIT_OPTIONAL_LOCKS=0 \
-    git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.pager=cat -c log.showSignature=false \
+    run_timeout "$GIT_TIMEOUT" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.pager=cat -c log.showSignature=false \
         -c gpg.program=/bin/false -c gpg.openpgp.program=/bin/false -c gpg.x509.program=/bin/false \
         -c gpg.ssh.program=/bin/false -c gpg.ssh.defaultKeyCommand=/bin/false \
         -c diff.external= -c core.sshCommand=/bin/false -c core.gitProxy=/bin/false \
         -c core.editor=/bin/false -c sequence.editor=/bin/false -c core.askPass=/bin/false -c credential.helper= \
         -c core.alternateRefsCommand=/bin/false -c protocol.allow=never -C "$ROOT" --no-pager "$@" </dev/null 2>/dev/null
+  rc=$?
+  [ "$rc" -eq 124 ] && record_error "${CURRENT_MODULE:-core}" "git_timeout"
+  return "$rc"
 }
 
 # ---------------------------------------------------------------------------
@@ -2718,7 +2802,7 @@ check_s46() {
   done
   if [ -f "$ROOT/.gitmodules" ]; then
     local origin_host
-    origin_host="$(safe_git config --get remote.origin.url | sed -E 's#^[a-z+]+://([^@/]+@)?##; s#^[^@]+@##; s#[:/].*##')"
+    origin_host="$(git_cfg_get remote origin url | sed -E 's#^[a-z+]+://([^@/]+@)?##; s#^[^@]+@##; s#[:/].*##')"
     grep -E '^[[:space:]]*url[[:space:]]*=' "$ROOT/.gitmodules" | sed -E 's/.*=[[:space:]]*//' | while IFS= read -r n; do
       case "$n" in
         http://*|git://*) high "" "$ROOT/.gitmodules" "サブモジュールが平文プロトコル（$n）" ;;

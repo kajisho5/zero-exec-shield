@@ -211,6 +211,25 @@ bad="$(ZES_HOST_CHECKS=1 ZES_OFFLINE=1 ZES_HOME="$TMP/host-home" "$SCAN" --full 
   | jq -r '[.findings[] | select(.path != null and (.path | startswith("/") | not)) | .path] | join(",")' 2>/dev/null)"
 [ -z "$bad" ] && ok "ホスト検査の findings[].path が絶対パスか null" || ng "ホスト検査で絶対パスでない path: $bad"
 
+# 検査対象 .git/config の include.path（FIFO）で走査が停止しない / git が停止したら timeout で errors[] に記録
+if command -v git >/dev/null 2>&1 && command -v mkfifo >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+  for k in inc pr; do
+    ( export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+      mkdir -p "$TMP/git-$k" && cd "$TMP/git-$k" && git init -q . && echo inert >README && git add README \
+        && git -c user.name=a -c user.email=a@example.invalid commit -q -m init ) >/dev/null 2>&1
+  done
+  mkfifo "$TMP/git-inc/.git/hang.fifo" && printf '[include]\n\tpath = hang.fifo\n[includeIf "gitdir:/"]\n\tpath = hang.fifo\n' >>"$TMP/git-inc/.git/config"
+  out="$(ZES_GIT_TIMEOUT=10 timeout 120 env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --full --root "$TMP/git-inc" --json 2>/dev/null)"
+  printf '%s' "$out" | jq -e '([.findings[] | select(.module == "§46" and (.detail | test("1 コミット中")))] | length == 1) and ([.errors[] | select(.reason | test("^git_"))] | length == 0)' >/dev/null 2>&1 \
+    && ok "検査対象 .git/config の include.path（FIFO）を読まずに §46 を完走" || ng "include.path（FIFO）で走査が停止または §46 が失敗"
+  mkfifo "$TMP/git-pr/.git/packed-refs"
+  out="$(ZES_GIT_TIMEOUT=2 timeout 120 env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --full --root "$TMP/git-pr" --json 2>/dev/null)"
+  printf '%s' "$out" | jq -e '[.errors[] | select(.module == "§46" and .reason == "git_timeout")] | length >= 1' >/dev/null 2>&1 \
+    && ok "git が停止した場合は timeout で打ち切り errors[] に git_timeout を記録" || ng "git の停止が errors[] に記録されていません"
+else
+  printf '  SKIP git/mkfifo/timeout が無いため .git の FIFO チェックを省略\n'
+fi
+
 # 引数検証（fail-closed）
 "$SCAN" --root /nonexistent-zes-dir >/dev/null 2>&1; [ $? -eq 64 ] && ok "存在しない --root を拒否" || ng "存在しない --root を受理"
 "$SCAN" --quick --url 'file:///etc/passwd' >/dev/null 2>&1; [ $? -eq 64 ] && ok "http(s) 以外の --url を拒否" || ng "不正な --url を受理"
