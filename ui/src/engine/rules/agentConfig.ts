@@ -1,40 +1,25 @@
 // §7 / §17 / §20 / §37: MCP・エージェント設定、SymJack、IDE フック、ツール定義の注入語
 import { push, readable, type RuleCtx } from '../context';
 import type { McpServerView } from '../types';
+import { parseCodexToml } from '../toml';
 import { clip, parseJsonc } from '../util';
+
+export { parseCodexToml };
 
 const MCP_CONFIG = /(^|\/)(\.mcp\.json|mcp\.json|\.cursor\/mcp\.json|\.vscode\/mcp\.json|\.claude\/settings(\.local)?\.json|\.gemini\/settings\.json|claude_desktop_config\.json|\.claude\.json|\.codeium\/windsurf\/mcp_config\.json|\.codex\/config\.toml)$/;
 const HIGH_CMD = /(^|[\s"/])(curl|wget)([\s"]|$)|bash -c|sh -c|powershell(\.exe)? .*-(e|enc|encodedcommand)\s|node -e|python[0-9.]* -c|base64/;
 const MED_CMD = /(^|[\s"/])(npx|uvx|bunx|pnpm dlx)([\s"]|$)/;
 
-/** `.codex/config.toml` の [mcp_servers.<name>] テーブルから command / args だけを読む最小パーサ（§13-8）。 */
-export function parseCodexToml(text: string): { name: string; command: string; args: string[] }[] {
-  const out: { name: string; command: string; args: string[] }[] = [];
-  let cur: { name: string; command: string; args: string[] } | null = null;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/\s+#.*$/, '').trim();
-    const h = /^\[mcp_servers\.("?)([^\]"]+)\1\]$/.exec(line);
-    if (h) {
-      cur = { name: h[2] ?? '', command: '', args: [] };
-      out.push(cur);
-      continue;
-    }
-    if (/^\[/.test(line)) { cur = null; continue; }
-    if (!cur) continue;
-    const c = /^command\s*=\s*"((?:[^"\\]|\\.)*)"$/.exec(line);
-    if (c) cur.command = c[1] ?? '';
-    const a = /^args\s*=\s*\[(.*)\]$/.exec(line);
-    if (a) cur.args = [...(a[1] ?? '').matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1] ?? '');
-  }
-  return out;
-}
-
 function collectServers(obj: unknown, out: { name: string; command: string; args: string[] }[], name = ''): void {
   if (Array.isArray(obj)) { obj.forEach((v) => collectServers(v, out, name)); return; }
   if (!obj || typeof obj !== 'object') return;
   const o = obj as Record<string, unknown>;
-  if (typeof o['command'] === 'string') {
-    out.push({ name, command: o['command'], args: Array.isArray(o['args']) ? o['args'].map(String) : [] });
+  // CLI の jq 式と同じ: command を持つ全オブジェクト。args は配列（要素ごと）でも文字列（1 引数）でもよい
+  if ('command' in o) {
+    const str = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
+    const a = o['args'];
+    const args = a === undefined || a === null || a === false ? [] : Array.isArray(a) ? a.map(str) : [str(a)];
+    out.push({ name, command: str(o['command']), args });
   }
   for (const [k, v] of Object.entries(o)) if (v && typeof v === 'object') collectServers(v, out, k);
 }
@@ -44,8 +29,11 @@ export function mcpRules(ctx: RuleCtx): void {
   for (const f of readable(ctx).filter((x) => MCP_CONFIG.test(x.relPath))) {
     let servers: { name: string; command: string; args: string[] }[] = [];
     let parseError = false;
-    if (f.relPath.endsWith('.toml')) servers = parseCodexToml(f.text);
-    else {
+    if (f.relPath.endsWith('.toml')) {
+      const r = parseCodexToml(f.text);
+      servers = r.servers;
+      for (const p of r.problems) ctx.errors.push({ module: '§17', reason: `codex_toml_unparsed:${p}:${f.relPath}` });
+    } else {
       // VS Code 等はコメント・末尾カンマを許すため JSONC として読む
       try { collectServers(parseJsonc(f.text), servers); } catch { parseError = true; }
     }
