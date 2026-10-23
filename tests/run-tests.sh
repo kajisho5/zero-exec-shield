@@ -156,10 +156,24 @@ else
   printf '  SKIP schemas/findings.schema.json の検証（python3 の jsonschema が未導入）\n'
 fi
 
-# 決定的 ID（再スキャンで同一）
-run_scan "$FIX/skillpact-divergence" skillpact "$FIX/_home" | jq -r '[.findings[].id] | sort | join(",")' >"$TMP/id1"
-run_scan "$FIX/skillpact-divergence" skillpact "$FIX/_home" | jq -r '[.findings[].id] | sort | join(",")' >"$TMP/id2"
-cmp -s "$TMP/id1" "$TMP/id2" && [ -s "$TMP/id1" ] && ok "findings[].id が決定的" || ng "findings[].id が再スキャンで変化"
+# 決定的 ID（再スキャンで同一）。負荷の高いときにだけ変わる競合（パイプ末尾の grep -q と pipefail で上流が SIGPIPE）を
+#   拾うため、同じフィクスチャを並列に 8 回ずつ走査し、id・evidence・locators の多重集合が全て同じことを確かめる
+det_ok=1; det_msg=""
+for nm in skillpact-divergence browser-ext mcp chaindrop; do
+  dm="$(jq -r '.mode' "$EXP/$nm.json")"
+  for i in 1 2 3 4 5 6 7 8; do
+    ( run_scan "$FIX/$nm" "$dm" "$FIX/_home" 2>/dev/null | jq -c '[.findings[].id] | sort' >"$TMP/det-$nm-$i" ) &
+  done
+  wait
+  for i in 2 3 4 5 6 7 8; do
+    cmp -s "$TMP/det-$nm-1" "$TMP/det-$nm-$i" || { det_ok=0; det_msg="$det_msg $nm#$i"; }
+  done
+  [ "$(jq length "$TMP/det-$nm-1" 2>/dev/null || echo 0)" -gt 0 ] || { det_ok=0; det_msg="$det_msg $nm:empty"; }
+done
+[ "$det_ok" -eq 1 ] && ok "findings[].id が決定的（4 フィクスチャ × 並列 8 回で同一）" || ng "findings[].id 等が再スキャンで変化:$det_msg"
+# パイプの末尾で grep -q を使わない（上流が SIGPIPE で失敗すると pipefail で「一致したのに偽」になる。grep_q を使う）
+n="$(grep -c -E '\|[[:space:]]*grep[[:space:]]+(-[A-Za-z]*q|[^|]*[[:space:]]-[A-Za-z]*q)([[:space:]]|$)' "$SCAN")"
+[ "$n" = "0" ] && ok "zes-scan.sh のパイプ末尾に grep -q が無い（grep_q で入力を読み切る）" || ng "zes-scan.sh のパイプ末尾に grep -q が $n 箇所"
 
 # findings.skillpact フィールド（§49 の全 finding に付与）
 n="$(run_scan "$FIX" skillpact "$FIX/_home" | jq '[.findings[] | select(.module == "§49" and (has("skillpact") | not))] | length')"
