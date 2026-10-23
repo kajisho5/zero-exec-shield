@@ -1,0 +1,128 @@
+{
+ "description": "Cases for render(template, params) shared by the CLI (tests/run-tests.sh) and the UI. params_hex / expected_hex hold raw bytes (not valid UTF-8) for the CLI only.",
+ "cases": [
+  {
+   "name": "plain",
+   "template": "Known malicious file (SHA-256 match)",
+   "params": {},
+   "expected": "Known malicious file (SHA-256 match)"
+  },
+  {
+   "name": "two placeholders",
+   "template": "{package}@{version}",
+   "params": {
+    "package": "keyv",
+    "version": "6.0.0"
+   },
+   "expected": "keyv@6.0.0"
+  },
+  {
+   "name": "value containing a placeholder is not expanded again",
+   "template": "{a} and {b}",
+   "params": {
+    "a": "{b}",
+    "b": "x"
+   },
+   "expected": "{b} and x"
+  },
+  {
+   "name": "missing value stays literal",
+   "template": "{a} {missing}",
+   "params": {
+    "a": "1"
+   },
+   "expected": "1 {missing}"
+  },
+  {
+   "name": "ampersand (bash 5.2 patsub_replacement)",
+   "template": "[{v}]",
+   "params": {
+    "v": "a&b&&c"
+   },
+   "expected": "[a&b&&c]"
+  },
+  {
+   "name": "backslash",
+   "template": "{v}",
+   "params": {
+    "v": "C:\\new\\{x}\\\\"
+   },
+   "expected": "C:\\new\\{x}\\\\"
+  },
+  {
+   "name": "dollar and shell syntax",
+   "template": "x={v}",
+   "params": {
+    "v": "$HOME ${PATH} $(id) `id` $&"
+   },
+   "expected": "x=$HOME ${PATH} $(id) `id` $&"
+  },
+  {
+   "name": "newline and tab in a value",
+   "template": "<{v}>",
+   "params": {
+    "v": "a\nb\tc"
+   },
+   "expected": "<a\nb\tc>"
+  },
+  {
+   "name": "BiDi and invisible characters",
+   "template": "({v})",
+   "params": {
+    "v": "‮abc⁦x​"
+   },
+   "expected": "(‮abc⁦x​)"
+  },
+  {
+   "name": "Japanese template",
+   "template": "侵害パッケージ {package}@{version} を検出（{ecosystem}）",
+   "params": {
+    "package": "keyv",
+    "version": "6.0.0",
+    "ecosystem": "npm"
+   },
+   "expected": "侵害パッケージ keyv@6.0.0 を検出（npm）"
+  },
+  {
+   "name": "braces that are not placeholders",
+   "template": "${{ {a} }} {A} {a-b} {} {{a}}",
+   "params": {
+    "a": "x"
+   },
+   "expected": "${{ x }} {A} {a-b} {} {x}"
+  },
+  {
+   "name": "same placeholder twice",
+   "template": "{n}/{n}",
+   "params": {
+    "n": "0"
+   },
+   "expected": "0/0"
+  },
+  {
+   "name": "empty value",
+   "template": "[{v}]",
+   "params": {
+    "v": ""
+   },
+   "expected": "[]"
+  },
+  {
+   "name": "unused parameter",
+   "template": "none",
+   "params": {
+    "v": "x"
+   },
+   "expected": "none"
+  },
+  {
+   "name": "invalid UTF-8 in a value (bytes as hex; the CLI normalises the whole detail afterwards)",
+   "template": "[{v}]",
+   "params": {},
+   "params_hex": {
+    "v": "61ff62c3"
+   },
+   "expected_hex": "5b61ff62c35d"
+  }
+ ]
+}

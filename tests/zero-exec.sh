@@ -110,7 +110,7 @@ if command -v git >/dev/null 2>&1; then
     "$REPO/zes-scan.sh" --full --root "$GR" --json >"$TMP/out-git.json" 2>"$TMP/scan-err-git.txt"
   [ -e "$TMP/git-marker" ] && ng "検査対象 .git/config のプログラム設定（gpg.x509.program 等）が実行されました"
   grep -q -F "$TMP/marker.sh" "$TMP/trace-git.txt" && ng "マーカースクリプトが execve されました（.git/config 経由）"
-  jq -e '[.findings[] | select(.module == "§46" and (.detail | test("1 コミット中 0 件が署名なし")))] | length == 1' "$TMP/out-git.json" >/dev/null 2>&1 \
+  jq -e '[.findings[] | select(.module == "§46" and .code == "s46.unsigned" and .params == {"total": "1", "unsigned": "0"})] | length == 1' "$TMP/out-git.json" >/dev/null 2>&1 \
     || ng "§46 が gpgsig ヘッダ付きコミットを署名ありとして数えていません"
   echo "git 設定経由の実行チェック: 完了"
 else

