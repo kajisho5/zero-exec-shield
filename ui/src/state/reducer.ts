@@ -70,7 +70,8 @@ export function reducer(s: ScanState, a: Action): ScanState {
     case 'IMPORT_FINDINGS':
       return { ...s, imported: a.doc, phase: s.phase === 'idle' ? 'done' : s.phase };
     case 'SET_TAB':
-      return { ...s, ui: { ...s.ui, activeTab: a.tab } };
+      // モジュールはタブごとに違う。前のタブのモジュールで絞ったままにしない（選択欄は「すべて」なのに全行が消える）
+      return { ...s, ui: { ...s.ui, activeTab: a.tab, moduleFilter: a.tab === s.ui.activeTab ? s.ui.moduleFilter : null } };
     case 'TOGGLE_SEVERITY': {
       const next = new Set(s.ui.severityFilter);
       if (next.has(a.severity)) next.delete(a.severity);

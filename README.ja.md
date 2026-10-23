@@ -27,7 +27,7 @@ cd zero-exec-shield
 ./zes-scan.sh --quick --root /path/to/project --json > findings.json
 ```
 
-人間向けのログは標準エラー、`findings.json` は標準出力に出ます。ほかのモード:
+人間向けのログは標準エラー、`findings.json` は標準出力に出ます。`PATH` に信頼できないディレクトリ（`.` やプロジェクトの `node_modules/.bin` など）が入っている可能性がある場合は、`bash zes-scan.sh` のように Bash を明示して（または絶対パスで）起動してください。`#!/usr/bin/env bash` の行は、ZES が `PATH` を無害化する前に `PATH` から `bash` を探します（[安全設計](#安全設計)）。ほかのモード:
 
 ```bash
 ./zes-scan.sh --full --root /path/to/project --json          # 全モジュール §1〜§49
@@ -65,7 +65,7 @@ ZES_OFFLINE=1 ZES_HOST_CHECKS=0 ./zes-scan.sh --full --root . --json   # ファ�
 
 フォルダをページにドロップする（またはフォルダ選択）と、ブラウザ内で検査します。ページを読み込んだ後の通信はありません。テキスト貼り付け判定、findings.json の書き出し、CLI の findings.json の読み込み表示もできます。
 
-18 タブ構成です。総合（重大度サマリ・フィルタ・検索）、SkillPact、MCP / GitHub Actions / ブラウザ拡張ビューア、キャンペーン・分野別のタブがあります。ホスト側の情報（プロセス・接続・カーネル・マウント・インストール済みツールの版）はブラウザでは検査できないため、該当タブには「0 件」ではなく CLI の案内を表示します。
+18 タブ構成です。総合（重大度サマリ・フィルタ・検索）、SkillPact、MCP / GitHub Actions / ブラウザ拡張ビューア、キャンペーン・分野別のタブがあります。「すべてのタブ」はタブ検索です（タブ名や § 番号で絞り込み）。ライトとダークのテーマがあり、選ぶまでは OS の設定に従います。640px 未満では検出一覧がカード型になり、押すと詳細が下からのシートで開きます。ホスト側の情報（プロセス・接続・カーネル・マウント・インストール済みツールの版）はブラウザでは検査できないため、該当タブには「0 件」ではなく CLI の案内を表示します。
 
 ## 検査する内容
 
@@ -99,10 +99,11 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
 ## 安全設計
 
 - **ゼロ実行。** 検査対象のファイルを実行せず、そのランタイムも起動しません（`npm install`・`pip install`、対象コードに対する `node`・`python` など）。パッケージの版はロックファイルとメタデータから、Go の版は `GOROOT/VERSION` から、npm のプロキシ設定は `.npmrc` から読みます。
-- **固定のプローブのみ。** ホスト検査が有効な場合は、決められたインストール済みツールだけを版確認の引数で起動します（例: `python3 -I -S -V`、`php -n -v`、`docker --version`、`git --version`）。プローブは `env -i` と空の一時 `HOME` で起動し、検査ルート内と `/tmp`・`/var/tmp`・`/dev/shm` にあるバイナリは起動しません。git は ZES が用意した影の `GIT_DIR` で動かすため、検査対象リポジトリの `.git/config` を git に読ませません。git の呼び出しはすべてタイムアウト付きです。
+- **`PATH` の無害化。** 外部コマンドを起動する前に、`PATH` の相対パス・空のエントリ（`.`・`::`）を外し、検査ルートが決まった時点で、実パスが検査ルート配下のエントリ（`node_modules/.bin` 等）も外します。外したエントリは `errors[]` に `path_entry_dropped:<エントリ>` として記録します。`jq` と `git` は 1 度だけ絶対パスに解決し、常にその絶対パスで起動します。`--root /` の場合はホスト自体が検査対象のため、検査ルート配下の条件は適用しません。
+- **固定のプローブのみ。** ホスト検査が有効な場合は、決められたインストール済みツールだけを版確認の引数で起動します（例: `python3 -I -S -V`、`php -n -v`、`docker --version`、`git --version`）。プローブは `env -i` と空の一時 `HOME` で起動し、検査ルート内と `/tmp`・`/var/tmp`・`/dev/shm`・`/private/tmp`・`/private/var/folders`・`$TMPDIR` にあるバイナリは起動しません。git は ZES が用意した影の `GIT_DIR` で動かすため、検査対象リポジトリの `.git/config` を git に読ませません。git の呼び出しはすべてタイムアウト付きです。Git の設定は代わりにテキストとして静的に検査します（検査ルートの `.git`、`gitdir:` ファイルの参照先、入れ子のリポジトリの `config`・`config.worktree` と、すべての `include.path` / `includeIf` の参照先、それぞれのフック）。
 - **テストで確認。** [`tests/zero-exec.sh`](tests/zero-exec.sh) が `strace` のもとで全モジュールを実行し、フィクスチャの実行、対象ランタイムの起動、許可外の引数でのプローブが 1 回でもあれば失敗します。2 つのフィクスチャは、実行されると `/tmp/zes-canary-*` を作るカナリアです。
 - **ファイル内容を出力しない。** 検出にはパス・ルールの文言・SHA-256（`evidence_hash`）だけを含めます。一部の文言には、版・イメージタグ・HTTP ヘッダなどの短い抽出値が入ります。シークレットの値は出力しません。
-- **fail-closed。** 検査できなかったモジュール（`jq` がない、ロックファイルを解析できない、タイムアウト、オフライン）は `errors[]` に記録し、`status` を `partial` にします。`findings[]` が空でも `errors[]` が空でなければ「安全」ではありません。
+- **fail-closed。** 検査できなかったモジュール（`jq` がない、ロックファイルを解析できない、タイムアウト、オフライン）は `errors[]` に記録し、`status` を `partial` にします。`findings[]` が空でも `errors[]` が空でなければ「安全」ではありません。読めないディレクトリ・ファイル、シンボリックリンクで検査ルートの外へ出るパス、擬似ファイルシステム（`/proc`・`/sys` 等。ツリー内にバインドマウントされたものを含む）上のファイルは読まずに記録します。例外は `archive_not_inspected` で、既知の[制限事項](#制限事項)を示すため `status` を変えません。
 - **通信。** CLI が外部に接続するのは `--url` と §6 の eMudhra 接続試験（`rules/ioc.json` に載っているテスト用ホストへの HTTPS）だけです。`ZES_OFFLINE=1` で両方とも止まります。
 - **ブラウザ UI。** JS・CSS・`rules/ioc.json` を 1 ファイルにインライン化しています。CSP は `default-src 'none'; connect-src 'none'` で、スクリプトとスタイルはビルド時に計算した SHA-256 だけを許可します（`unsafe-inline` なし）。成果物に通信 API・外部 URL・外部読み込みがあれば、[`ui/scripts/verify-no-network.mjs`](ui/scripts/verify-no-network.mjs) がビルドを失敗させます。ファイル内容は判定にのみ使い、画面に出すのはパス・ルール・固定文言・ハッシュと、120 文字までの一部の設定値（MCP の `command`/`args`、Actions の `uses:`、拡張のパーミッション名）だけです。
 
@@ -137,8 +138,26 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
 - `id` は内容から決定的に生成します（再スキャンで同じ検出なら同じ ID）。同じ ID は 1 回だけ出力します。
 - `campaign` はキャンペーンに紐づかない一般検査では `null`。`path` は絶対パスか `null`（ファイルのないホスト検査の結果）です。
 - `errors[].reason` の例: `skipped_offline` / `network_timeout` / `jq_unavailable` / `module_failed` / `lockfile_parse_failed:<path>` / `git_timeout` / `special_file:<path>` / `non_utf8_path:<path>` / `incident_bundle_mismatch:<値>`。
+- 0.3.1 で追加した理由:
+
+  | 理由 | 意味 |
+  |---|---|
+  | `path_entry_dropped:<エントリ>` | `PATH` の相対・空（`<empty>`）・検査ルート配下のエントリを外した |
+  | `unreadable:<path>` | ディレクトリ・ファイルを読めない（権限） |
+  | `inventory_error:<メッセージ>` / `inventory_incomplete:find_exit_<n>` | `find` がパスに結び付けられない問題を報告した |
+  | `inventory_failed` | 検査ルートの中を 1 件も列挙できない（`status` は `error`） |
+  | `special_filesystem:<path>` | 擬似ファイルシステム（procfs・sysfs・devtmpfs 等）上のファイル・ディレクトリを開かなかった |
+  | `find_fstype_unsupported` | `find` に `-fstype` が無い（BusyBox）ため、ルート内の擬似ファイルシステムを除外できない |
+  | `path_leaves_root:<path>` | ZES がルート内に組み立てたパス（`.git/config`・フック）の実体がルート外のため読まなかった |
+  | `symlink_leaves_root:<path>` | 設定ファイル名（`.mcp.json`・`.vscode/tasks.json`・ワークフロー・`package.json` 等）のシンボリックリンクがルート外を指す |
+  | `gitfile_unparsed:<path>` / `gitdir_unresolved:<path>` / `gitdir_outside_root:<path>` / `git_commondir_unresolved:<path>` | `.git` ファイル・worktree の参照をルート内で辿れない |
+  | `git_include_unresolved:<config>` / `git_include_too_deep:<config>` | `include.path` / `includeIf` の参照先が無い・ルートと `ZES_HOME` の外・10 段を超える入れ子 |
+  | `yaml_alias_unresolved:<path>` | ワークフローが YAML のエイリアス（`*name`）を使っている（ZES は解決しない） |
+  | `lockfile_unparsed:<path>` | ZES が解析しない形式のロックファイル（`bun.lockb`） |
+  | `archive_not_inspected:<path>` | アーカイブ（`.whl`・`.tgz`・`.tar.gz`・`.zip`・`.jar`・`.war`・`.pyz`・`.egg`・`.gem`・`.crate`・`.nupkg`・`.vsix`・`.crx`・`.xpi`）を展開していない。`status` は変えない |
 - 文字列はすべて valid な UTF-8 です。制御文字は `\u00XX` でエスケープします。ファイル名の不正な UTF-8 バイトは `\xHH` というテキストに置き換え、そのパスを `errors[]` に `non_utf8_path` として記録します。FIFO・ソケット・デバイスファイルは開かず、`special_file` として記録します。
-- ブラウザ UI が書き出す findings.json のパスは、投入フォルダからの相対パスに `/` を前置したものです。`status` は常に `partial` で、`errors[]` に `ui:host_checks_not_performed` を記録します。
+- ブラウザ UI が書き出す findings.json のパスは、投入フォルダからの相対パスに `/` を前置したものです。`errors[]` に `ui:host_checks_not_performed` を記録します。`status` は `partial` で、取り込んだ CLI の findings.json が `status: error` だった場合は `error` です。
+- ブラウザ UI が生成する `id` は、上の CLI の式とは別の作り方です（`module|campaign|path|規則 ID` から生成し、`path` は相対パス）。UI の中でだけ安定し（同じフォルダを投入し直せば同じ `id`）、同じファイルの CLI の `id` とは一致しません。揃えると既存の `id` が変わるため、このままにしています。CLI の findings.json から取り込んだ finding の `id` はそのまま保ちます。
 
 後段のツールが依存してよい性質は、[docs/skill-contracts.md](docs/skill-contracts.md) の §9 にまとめています。
 
@@ -147,7 +166,7 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
 | コード | 意味 |
 |---|---|
 | `0` | 完了。`status` が `ok` または `partial`（`--help` も 0） |
-| `2` | `status` が `error` |
+| `2` | `status` が `error`。検査ルートの中を列挙できない（`inventory_failed`。読み取り権限の無いディレクトリ等）か、モードの全モジュールが異常終了した（`module_failed`） |
 | `64` | 引数・環境のエラー（不明な引数、`--root` がディレクトリでない、Bash 4 未満、`rules/ioc.json` を読めない） |
 
 重大度による非 0 終了はしません。CRITICAL があれば CI を失敗させる例:
@@ -164,10 +183,12 @@ jq -e '[.findings[] | select(.level == "CRITICAL")] | length == 0' findings.json
 - **静的なヒューリスティック。** 検出はパターンと版の照合です。誤検知も見逃しもあります。検出 0 件は、マシンやプロジェクトが安全である証明ではありません。
 - **IoC データは古くなる。** `rules/ioc.json` は時点のスナップショット（incident bundle `ZES-2026-OCT-EMERGENCY-V5.2`）で、定期的な更新が必要です。一次情報で確認できなかった値は [docs/ioc-verification.md](docs/ioc-verification.md) に注記しています。
 - **ディストリビューションのバックポート。** カーネル・ツール・PHP の版は upstream の修正版と比べます。ディストリビューションのパッケージはバックポートで修正済みのことが多いため、これらの結果は HIGH を上限とし、ベンダーのアドバイザリでの確認が必要です。dpkg の PHP はベンダーの修正版と比べます。RHEL 系は rpm DB を静的に読めないため、案内を出すだけです。
+- **アーカイブは展開しない。** `.whl`・`.tgz`・`.zip`・`.jar` などは生のバイト列として走査するだけで、中のファイルは取り出さず検査しません。各アーカイブを `errors[]` に `archive_not_inspected` として記録します。健全なリポジトリにもアーカイブはよくある（`gradle-wrapper.jar` 等）ため、この記録だけでは `status` を `partial` にしません。想定外のアーカイブがないか一覧を確認してください。
+- **YAML のエイリアス・バイナリのロックファイル・worktree。** ワークフローの YAML のアンカー・タグは解釈しますが、エイリアス（`*name`）は解決しません（`yaml_alias_unresolved`）。`bun.lockb` は解析しません（`lockfile_unparsed`）。検査ルートの外を指す `.git` ファイルや `include.path` は辿りません（`gitdir_outside_root` / `git_include_unresolved`）。
 - **全項目の検査には `jq` が必要。** `jq` がない場合は一部の検査を grep で代替し、§48・§49・収集インテルの照合・一部のロックファイル形式は `jq_unavailable` として記録します。
 - **ホスト検査は稼働中のシステムを読む。** `ps`・`lsof`・`/proc` と上記のプローブを使います。ディレクトリだけを検査する場合は `ZES_HOST_CHECKS=0` を指定してください。
 - **`noatime`。** `noatime` でマウントされたファイルシステムでは、§13（ハニーポット）のアクセス時刻の検査とアクセス痕跡の調査が機能しません。
-- **ブラウザ UI。** ホストの状態は見えません。シンボリックリンクはブラウザに 0 バイトのファイルとして渡るため、SymJack の判定が CLI と異なります（CRITICAL ではなく HIGH）。WebKit では、直下が隠しエントリだけのフォルダ（`.mcp.json` や `.github/` だけ）を読み込めず、Safari でも隠しファイルが検査から漏れる可能性があります。その場合はドラッグ＆ドロップか CLI で確認してください。
+- **ブラウザ UI。** ホストの状態・`PATH`・git は見えません。シンボリックリンクはブラウザに 0 バイトのファイルとして渡るため、SymJack の判定が CLI と異なり（CRITICAL ではなく HIGH）、シンボリックリンク経由でしか届かない設定や SkillPact のスクリプトは CLI でだけ検査します。WebKit では、直下が隠しエントリだけのフォルダ（`.mcp.json` や `.github/` だけ）を読み込めず、Safari でも隠しファイルが検査から漏れる可能性があります。その場合はドラッグ＆ドロップか CLI で確認してください。
 - **§49 は実験的で部分的な検査です**（上記のとおり）。
 
 ## 関連ツール
@@ -197,7 +218,7 @@ npm run test:e2e                     # Playwright（file:// で起動）
 - フィクスチャは無害なダミーです。期待値は `tests/expected/` にあります。
 - `ui/.npmrc` で `ignore-scripts=true` を指定し、依存は `package-lock.json` で版を固定しています。
 - `rules/ioc.json` を変更したら `index.html` を再ビルドしてください。コミット済みの `index.html` がビルド結果と異なると CI が失敗します。
-- UI の設計書（実装前のドラフト。§49 の部分は SkillPact 0.8 対応前の内容）: [docs/design/ui-design.md](docs/design/ui-design.md)
+- UI の設計書: 現行の 0.3「検疫台」は [docs/design/ui-design-0.3.md](docs/design/ui-design-0.3.md)。実装前のドラフト（画面は 0.3.0 より前、§49 の部分は SkillPact 0.8 対応前の内容）は [docs/design/ui-design.md](docs/design/ui-design.md)
 - 変更履歴: [CHANGELOG.md](CHANGELOG.md)
 
 ## ライセンスとクレジット

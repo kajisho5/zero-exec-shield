@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "bun/bun.lock"
+    },
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§15",
+      "path": "deno/deno.lock"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

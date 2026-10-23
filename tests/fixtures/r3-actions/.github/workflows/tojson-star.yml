@@ -1,0 +1,7 @@
+# ZES test fixture (r3): toJSON(secrets.*)
+on: push
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ toJSON(secrets.*) }}" > s.txt

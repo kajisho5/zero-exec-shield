@@ -5,6 +5,7 @@ import { useState, type DragEvent, type ReactNode } from 'react';
 import { Check, FolderOpen, Hourglass, OctagonAlert, Upload } from 'lucide-react';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { cn } from '@/lib/utils';
+import { visiblePath } from '@/lib/visiblePath';
 import { Button } from '@/components/ui/button';
 import { Tip } from '@/components/ui/tooltip';
 
@@ -58,6 +59,8 @@ export function SpecimenForm({ name, files, duration, undetermined, status, busy
   onDrop(dt: DataTransfer): void; onPick(): void;
 }) {
   const { over, handlers } = useDrop(busy, onDrop);
+  // 検体名は投入したフォルダ・ファイルの名前（信頼できない）。制御文字・双方向制御文字を目印にして、<bdi> で切り離す
+  const shown = visiblePath(name);
   // data-testid=scan-status を 1 つにするため、CSS で隠さずに片方だけを描く
   const wide = useMediaQuery('(min-width: 1280px)');
   const Icon = STATUS_ICON[status.kind];
@@ -81,7 +84,7 @@ export function SpecimenForm({ name, files, duration, undetermined, status, busy
       <div className="grid h-[86px] grid-cols-[280px_repeat(4,100px)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col justify-center gap-0.5 border-r border-border px-5">
           <span className="text-xs text-muted-foreground">検体</span>
-          <span className="truncate font-mono text-[26px] leading-[1.2] font-semibold" title={name}>{name}</span>
+          <bdi dir="ltr" data-testid="specimen-name" className="block truncate font-mono text-[26px] leading-[1.2] font-semibold" title={shown}>{shown}</bdi>
         </div>
         <Field label="ファイル">{files}</Field>
         <Field label="判定時間" className="border-l border-dotted border-border">{duration}</Field>
@@ -98,7 +101,7 @@ export function SpecimenForm({ name, files, duration, undetermined, status, busy
         <div className="flex min-w-0 items-start gap-3 px-3.5 pt-2.5 pb-3">
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-xs text-muted-foreground">検体</span>
-            <span className="truncate font-mono text-[22px] leading-[1.25] font-semibold" title={name}>{name}</span>
+            <bdi dir="ltr" data-testid="specimen-name" className="block truncate font-mono text-[22px] leading-[1.25] font-semibold" title={shown}>{shown}</bdi>
           </div>
           <div className="flex max-w-[62%] min-w-0 items-center gap-3 pt-0.5">{statusCell}{pick}</div>
         </div>

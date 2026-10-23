@@ -1,0 +1,5 @@
+{
+  "version": "4",
+  "specifiers": { "npm:keyv@6.0.0": "6.0.0" },
+  "npm": { "keyv@6.0.0": { "integrity": "sha512-AAAA" } }
+}

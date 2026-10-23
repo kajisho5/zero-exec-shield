@@ -1,0 +1,9 @@
+# ZES test fixture (r3): エイリアス（*step）は解決しない（errors[] に yaml_alias_unresolved）
+on: push
+x-step: &step
+  uses: actions/setup-node@v4
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - *step

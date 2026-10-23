@@ -25,6 +25,12 @@
       "path": "site-packages/cook.py"
     },
     {
+      "campaign": "litellm-oct2026",
+      "level": "MEDIUM",
+      "module": "§2",
+      "path": "site-packages/cook.pth"
+    },
+    {
       "campaign": "litellm-1-107-0-cook-pth",
       "level": "CRITICAL",
       "module": "§30",

@@ -5,6 +5,7 @@ import { CircleDashed, Copy } from 'lucide-react';
 import type { BlastRadiusItem } from '@/engine';
 import { CLI_COMMAND } from '@/tabs/definitions';
 import { cn } from '@/lib/utils';
+import { visiblePath } from '@/lib/visiblePath';
 import { Tag } from '@/components/severity/Tag';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -56,7 +57,7 @@ export function BlastRadius({ items }: { items: BlastRadiusItem[] }) {
         <ul className="mt-3 max-h-[260px] overflow-y-auto border-y border-border">
           {items.map((b) => (
             <li key={b.path} className="flex items-baseline gap-3 border-b border-dotted border-border py-2 last:border-0">
-              <span className="min-w-0 flex-1 truncate font-mono text-[13px]" title={b.path}>{b.path}</span>
+              <bdi dir="ltr" className="min-w-0 flex-1 truncate font-mono text-[13px]" title={visiblePath(b.path)}>{visiblePath(b.path)}</bdi>
               <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{size(b.size)}</span>
             </li>
           ))}
@@ -65,7 +66,7 @@ export function BlastRadius({ items }: { items: BlastRadiusItem[] }) {
       <p className="mt-3.5 text-xs text-muted-foreground">{items.length} 件・内容は読み取り・表示しません</p>
       <div className="mt-2 flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
         <p className="max-w-[13.5em] min-w-[12.5em] flex-1 text-xs leading-normal text-muted-foreground">手順: 検出 → 一覧提示 → ローテーション → 再構築</p>
-        <Button size="sm" disabled={!items.length} onClick={() => copy(items.map((b) => b.path).join('\n'), 'パス一覧')} className="shrink-0"><Copy />パス一覧をコピー</Button>
+        <Button size="sm" disabled={!items.length} onClick={() => copy(items.map((b) => b.path).join('\n'), 'パス一覧') /* コピーは元の値のまま */} className="shrink-0"><Copy />パス一覧をコピー</Button>
       </div>
     </Note>
   );

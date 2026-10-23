@@ -1,0 +1,11 @@
+# ZES test fixture (r3): タグ（!!str）を付けた uses と PR head の checkout
+on: pull_request_target
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: !!str actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: !!str tj-actions/changed-files@v35
+      - run: echo ${{ secrets.TOKEN }}

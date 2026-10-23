@@ -37,12 +37,12 @@
     "approvers": ["security-lead", "platform-owner"]
   },
   "skillpact_policy": {
-    "l3_trusted": false,
-    "diff_anomaly_threshold": 0.3,
-    "destructive_requires_human": true
+    "l3_trusted": false
   }
 }
 ```
+
+`skillpact_policy.diff_anomaly_threshold` と `skillpact_policy.destructive_requires_human` は予約済み・未実装です。ZET のスキーマでは必須ではなく、指定すると ZET は「reserved, not implemented」として入力を拒否します（効くように見えて効かない設定を受け付けない）。破壊的な操作の人間承認は §7 の `reversible: false` の二重承認で扱います。
 
 ## 3. ZET 出力 `remediation-plan.json`
 
@@ -80,6 +80,7 @@
 | A-3 `level_effective` | SkillPact 規則で引き上げた後の重大度。入力の `level` は改変しない。引き下げ不可 |
 | A-4 `action.reversible` / `action.skillpact_effects` | ZET が操作種別と finding の `declared_effects` から付与。GER は findings を読まないため、二重承認と SkillPact 制限の判定材料を plan で渡す |
 | A-5 `held[].module`（`finding_id: null` 可） | `errors[]` のモジュールをモジュール単位で保留する（finding が 0 件でも未確定を表現できる） |
+| `action.target` | 対象の finding の `path` と一致すること（ZET は一致しない plan を出さない。`path` が `null` の finding には `action` を付けられない） |
 | A-6 `plan_hash` | 確定 plan の本体（`plan_hash` を除く）を、キー順ソート・区切り `,` `:`・UTF-8 で正規化した JSON の SHA-256。GER の承認トークンと照合する |
 
 ## 4. ZET 不変条件
@@ -153,7 +154,8 @@
 - 全対象の事前検証。1 件でも失敗なら全体中止（部分適用禁止）
 - ZES 出力（findings.json）を直接読まない（`remediation-plan.json` のみ）
 - `allowed_actions` 外の操作を拒否（許可リスト方式）
-- 対象パスは `plan.items[].action.target` に限定、親ディレクトリへの遡及禁止
+- 対象パスは `plan.items[].action.target`（＝ finding の `path`）に限定、親ディレクトリへの遡及禁止
+- `chmod` は権限を狭める変更だけ（例: `0644` → `0600`）。権限を広げる `params` は ZET が拒否する
 - 全操作は冪等。`reversible: false` は二重承認必須
 - 1 件でも `failed` が出たら残りを実行せずロールバック
 - 【追加】実行者（`--operator`）は `approval.approved_by` に含まれてはならない。dry-run 記録は既定 24 時間で失効し、監査ログのハッシュチェーンが壊れている場合は dry-run 記録を信用しない
@@ -179,6 +181,6 @@
 - トップレベルキーは `schema_version` / `incident_bundle` / `scan_started_at` / `scan_finished_at` / `scan_mode` / `status` / `findings` / `errors` のみ
 - finding のキーは `id` / `level` / `module` / `campaign` / `path` / `detail` / `evidence_hash`（§49 のみ `skillpact` を追加）のみ
 - `skillpact` のキーは `contract_path` / `contract_version` / `level` / `signed` / `author` / `declared_effects` / `observed_effects` / `policy_decision` / `l2_tested` / `divergence` / `diff_anomaly` のみ。効果名は SkillPact 0.8 の `read` / `write` / `network` / `exec` / `spend` / `send` のみ（`secrets` / `persist` / `longrun` は廃止）。`policy_decision` は常に `null`、`l2_tested` は常に `false`（ZES は評価しない）
-- `id` は `sha256:` + 64 桁 16 進で決定的。`path` は絶対パスまたは `null`
+- `id` は `sha256:` + 64 桁 16 進で決定的。1 つの findings.json の中で一意（同じ `id` が重なったら 1 件だけ残し、`errors[]` に `duplicate_finding_id` を記録）。`path` は絶対パスまたは `null`
 - `evidence_hash` は通常ファイルならその SHA-256（100MB 超はパス・サイズ・mtime の SHA-256）
 - ファイル内容・シークレット値を含まない

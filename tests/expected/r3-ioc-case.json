@@ -1,0 +1,12 @@
+{
+  "findings": [
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§18",
+      "path": "upper/p.js"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

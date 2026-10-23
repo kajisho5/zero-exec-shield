@@ -40,6 +40,14 @@ function Scanner() {
   const busy = state.phase === 'reading' || state.phase === 'analyzing';
   const [specimen, setSpecimen] = useState<string | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
+  // 貼り付けシートを閉じたらフォーカスを開いたボタンへ戻す。開く前（未投入）と後（投入済み）でボタンが入れ替わるので、
+  // 押したボタンが消えていれば、いま出ている方（data-paste-opener）へ戻す
+  const pasteOpener = useRef<HTMLElement | null>(null);
+  const openPaste = (e: React.MouseEvent<HTMLElement>) => { pasteOpener.current = e.currentTarget; setPasteOpen(true); };
+  const returnPasteFocus = (e: Event) => {
+    const el = pasteOpener.current?.isConnected ? pasteOpener.current : document.querySelector<HTMLElement>('[data-paste-opener]');
+    if (el) { e.preventDefault(); el.focus(); }
+  };
 
   const dirInput = useRef<HTMLInputElement>(null);
   const importInput = useRef<HTMLInputElement>(null);
@@ -89,13 +97,16 @@ function Scanner() {
   };
 
   const tabFindings = useMemo(() => findingsForTab(tab, findings), [tab, findings]);
+  const modules = useMemo(() => [...new Set(tabFindings.map((f) => f.module))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))), [tabFindings]);
+  // このタブに無いモジュールの絞り込みは効かせない（選択欄が「すべて」なのに全行が消える状態を作らない）。SET_TAB でも消す
+  const moduleFilter = state.ui.moduleFilter && modules.includes(state.ui.moduleFilter) ? state.ui.moduleFilter : null;
+  useEffect(() => { if (state.ui.moduleFilter && !moduleFilter) dispatch({ type: 'SET_MODULE', module: null }); }, [state.ui.moduleFilter, moduleFilter, dispatch]);
   const visible = useMemo(() => {
     const q = state.ui.query.trim().toLowerCase();
     return tabFindings.filter((f: Finding) =>
-      state.ui.severityFilter.has(f.level) && (!state.ui.moduleFilter || f.module === state.ui.moduleFilter)
+      state.ui.severityFilter.has(f.level) && (!moduleFilter || f.module === moduleFilter)
       && (!q || String(f.path ?? '').toLowerCase().includes(q) || String(f.campaign ?? '').toLowerCase().includes(q)));
-  }, [tabFindings, state.ui]);
-  const modules = useMemo(() => [...new Set(tabFindings.map((f) => f.module))].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))), [tabFindings]);
+  }, [tabFindings, state.ui.severityFilter, state.ui.query, moduleFilter]);
   const sevCounts = useMemo(() => Object.fromEntries(SEVERITIES.map((s) => [s, tabFindings.filter((f) => f.level === s).length])) as Record<Severity, number>, [tabFindings]);
   const counts = useMemo(() => tabCounts(findings), [findings]);
 
@@ -138,7 +149,35 @@ function Scanner() {
   const started = state.phase !== 'idle' || !!state.imported || state.pasteFindings.length > 0;
   const pickFolder = () => dirInput.current?.click();
   const pickImport = () => importInput.current?.click();
-  const dropFolder = async (dt: DataTransfer) => scan(await fromDataTransfer(dt));
+  const dropFolder = async (dt: DataTransfer) => {
+    let picked: PickedFile[];
+    try { picked = await fromDataTransfer(dt); } catch {
+      // 読めなかったことを黙って捨てない（何も起きないと「問題なし」と誤認させる）
+      toast({ tone: 'error', text: 'ドロップしたフォルダを読み取れませんでした。「フォルダを選択…」か CLI で確認してください' });
+      return;
+    }
+    await scan(picked);
+  };
+
+  // ドロップ先の外にファイルを落としても、ブラウザがそのファイルへ移動しない（file:// の画面が消え、
+  // ローカルのファイルを開いてしまう）。ファイルのドラッグだけを扱い、テキストのドラッグ（貼り付け欄など）は既定のまま。
+  // ドロップ先が処理したもの（defaultPrevented）は二重に扱わない。それ以外はドロップ先と同じくスキャンへ回す。
+  const dropRef = useRef({ busy, dropFolder });
+  dropRef.current = { busy, dropFolder };
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+    const over = (e: DragEvent) => { if (!hasFiles(e) || e.defaultPrevented) return; e.preventDefault(); e.dataTransfer!.dropEffect = 'copy'; };
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e) || e.defaultPrevented) return;
+      e.preventDefault();
+      const { busy: b, dropFolder: go } = dropRef.current;
+      if (b) toast({ tone: 'error', text: '判定中です。終わってから検体票（ドロップ先）へドロップしてください' });
+      else void go(e.dataTransfer!);
+    };
+    window.addEventListener('dragover', over);
+    window.addEventListener('drop', drop);
+    return () => { window.removeEventListener('dragover', over); window.removeEventListener('drop', drop); };
+  }, [toast]);
 
   return (
     <div className="min-h-full">
@@ -162,11 +201,11 @@ function Scanner() {
                     {tab.id === 'overview' && mobile && started && (
                       <div className="flex gap-2">
                         <Button variant="ink" size="touch" disabled={busy} onClick={pickFolder} className="flex-1 justify-start"><FolderOpen />フォルダを選択…</Button>
-                        <Button variant="outline" size="icon-touch" aria-label="テキスト貼り付け判定" onClick={() => setPasteOpen(true)}><ClipboardPaste /></Button>
+                        <Button variant="outline" size="icon-touch" aria-label="テキスト貼り付け判定" data-paste-opener onClick={openPaste}><ClipboardPaste /></Button>
                       </div>
                     )}
                     {tab.id === 'overview' && mobile && !started && (
-                      <Button variant="outline" size="touch" onClick={() => setPasteOpen(true)}><ClipboardPaste />テキスト貼り付け判定</Button>
+                      <Button variant="outline" size="touch" data-paste-opener onClick={openPaste}><ClipboardPaste />テキスト貼り付け判定</Button>
                     )}
                     {state.imported && (
                       <p className="text-xs text-muted-foreground" data-testid="import-status">
@@ -177,8 +216,8 @@ function Scanner() {
                     {tab.cliOnlyNote && <CliOnlyNotice note={tab.cliOnlyNote} compact />}
                     <div className="mt-1 max-sm:mt-0"><Tally counts={sevCounts} active={state.ui.severityFilter} onToggle={(s) => dispatch({ type: 'TOGGLE_SEVERITY', severity: s })} safe={{ clear: clearChecks, total }} mobile={mobile} /></div>
                     {mobile
-                      ? <FindingList findings={visible} empty={empty} query={state.ui.query} onQuery={(q) => dispatch({ type: 'SET_QUERY', query: q })} modules={modules} module={state.ui.moduleFilter} onModule={(m) => dispatch({ type: 'SET_MODULE', module: m })} />
-                      : <FindingsTable findings={visible} total={tabFindings.length} empty={empty} query={state.ui.query} onQuery={(q) => dispatch({ type: 'SET_QUERY', query: q })} modules={modules} module={state.ui.moduleFilter} onModule={(m) => dispatch({ type: 'SET_MODULE', module: m })} />}
+                      ? <FindingList findings={visible} empty={empty} query={state.ui.query} onQuery={(q) => dispatch({ type: 'SET_QUERY', query: q })} modules={modules} module={moduleFilter} onModule={(m) => dispatch({ type: 'SET_MODULE', module: m })} />
+                      : <FindingsTable findings={visible} total={tabFindings.length} empty={empty} query={state.ui.query} onQuery={(q) => dispatch({ type: 'SET_QUERY', query: q })} modules={modules} module={moduleFilter} onModule={(m) => dispatch({ type: 'SET_MODULE', module: m })} />}
                     {tab.viewer === 'mcp' && <McpViewer configs={r?.viewers.mcp ?? []} />}
                     {tab.viewer === 'actions' && <ActionsViewer workflows={r?.viewers.actions ?? []} />}
                     {tab.viewer === 'extensions' && <ExtensionViewer manifests={r?.viewers.extensions ?? []} />}
@@ -197,7 +236,7 @@ function Scanner() {
       </Tabs>
       {mobile && (
         <Sheet open={pasteOpen} onOpenChange={setPasteOpen}>
-          <SheetContent title="テキスト貼り付け判定" className="pb-[max(env(safe-area-inset-bottom),16px)]">
+          <SheetContent title="テキスト貼り付け判定" onCloseAutoFocus={returnPasteFocus} className="pb-[max(env(safe-area-inset-bottom),16px)]">
             <PasteCheck onPaste={paste} inSheet />
           </SheetContent>
         </Sheet>

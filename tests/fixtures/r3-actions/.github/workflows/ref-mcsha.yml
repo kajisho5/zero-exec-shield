@@ -1,0 +1,9 @@
+# ZES test fixture (r3): merge_commit_sha（PR のマージコミット）
+on: pull_request_target
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: { ref: "${{ github.event.pull_request.merge_commit_sha }}" }
+      - run: echo ${{ secrets.TOKEN }}

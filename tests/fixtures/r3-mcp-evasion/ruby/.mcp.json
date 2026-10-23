@@ -1,0 +1,1 @@
+{"mcpServers": {"x": {"command": "ruby", "args": ["-e", "File.write('/tmp/zes-canary-mcp', '')"]}}}

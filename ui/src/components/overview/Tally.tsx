@@ -1,18 +1,23 @@
 // 集計＝重大度フィルタ（設計書 §10.3、W-6）。サマリカードとフィルタチップを 1 本の ToggleGroup（type="multiple"）に統合。
 // 押した区画: 左 3px の帯＋右上のチェック＋語とアイコンを重大度の色に。押していない区画: 鉛筆色＋右上に空の枠。
 // 罫の枠だけで塗らない（色は一覧が持つ）。≥640 は 5 区画＋右に SAFE の文、<640 は 3＋2 区画＋SAFE、<360 は 2 列×3 段。
-import { Check, CircleCheck } from 'lucide-react';
+import { Check, CircleCheck, CircleDashed } from 'lucide-react';
 import { SEVERITIES, type Severity } from '@/engine';
 import { cn } from '@/lib/utils';
 import { SEV } from '@/components/severity/severity';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 function SafeStatement({ clear, total, compact }: { clear: number; total: number; compact?: boolean }) {
+  // チェックを 1 つも実行していない（未投入・取り込みや貼り付けだけ）ときは、緑の「✓ 0 / 0」で安全に見せない。無彩色の「—」
+  const none = total === 0;
+  const Icon = none ? CircleDashed : CircleCheck;
   return (
-    <div data-testid="card-SAFE" className={cn('flex min-w-0 gap-2', compact ? 'flex-col justify-center gap-0.5 px-3 py-2' : 'items-start')}>
+    <div data-testid="card-SAFE" data-safe={none ? 'none' : 'run'} className={cn('flex min-w-0 gap-2', compact ? 'flex-col justify-center gap-0.5 px-3 py-2' : 'items-start')}>
       <span className={cn('flex items-center gap-1.5', compact ? 'text-[13px]' : 'pt-0.5 text-sm')}>
-        <CircleCheck aria-hidden="true" strokeWidth={2.25} className={cn('shrink-0 text-safe', compact ? 'size-[13px]' : 'size-[15px]')} />
-        <span className="tabular-nums"><b className="font-semibold">{clear}</b> <span className={compact ? 'font-semibold' : 'text-muted-foreground'}>/ {total}</span>{!compact && <span className="text-muted-foreground"> チェック非該当</span>}</span>
+        <Icon aria-hidden="true" strokeWidth={2.25} className={cn('shrink-0', none ? 'text-muted-foreground' : 'text-safe', compact ? 'size-[13px]' : 'size-[15px]')} />
+        {none
+          ? <span className={cn('tabular-nums', compact ? 'font-semibold' : 'text-muted-foreground')}>—{!compact && <span> チェック非該当</span>}</span>
+          : <span className="tabular-nums"><b className="font-semibold">{clear}</b> <span className={compact ? 'font-semibold' : 'text-muted-foreground'}>/ {total}</span>{!compact && <span className="text-muted-foreground"> チェック非該当</span>}</span>}
       </span>
       {compact && <span className="text-[11.5px] text-muted-foreground">チェック非該当</span>}
     </div>

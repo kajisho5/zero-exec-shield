@@ -22,9 +22,10 @@ jobs:
       - name: CHANGELOG から版とリリースノートを取り出す
         id: ver
         run: |
-          line="$(grep -m1 -E '^## [0-9]+\.[0-9]+\.[0-9]+ ' CHANGELOG.md || true)"
-          ver="$(printf '%s' "$line" | sed -E 's/^## ([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
-          if [ -z "$ver" ]; then echo "CHANGELOG に版の見出しがありません"; exit 1; fi
+          # 先頭の "## " 見出しが版でなければ（"## Unreleased" など）失敗させる。下の古い版へ黙って戻らない
+          line="$(grep -m1 -E '^## ' CHANGELOG.md || true)"
+          ver="$(printf '%s\n' "$line" | sed -n -E 's/^## ([0-9]+\.[0-9]+\.[0-9]+)( — [0-9]{4}-[0-9]{2}-[0-9]{2})?$/\1/p')"
+          if [ -z "$ver" ]; then echo "::error file=CHANGELOG.md::先頭の見出しが \"## X.Y.Z — YYYY-MM-DD\" ではありません: ${line:-（見出しなし）}"; exit 1; fi
           # その版の見出しの次の行から、次の "## " 見出しの手前まで
           awk -v v="$ver" 'BEGIN{p=0} /^## /{ if (p) exit; if (index($0, "## " v " ")==1) {p=1; next} } p' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           echo "version=$ver" >> "$GITHUB_OUTPUT"

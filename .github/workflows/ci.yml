@@ -20,7 +20,9 @@ jobs:
       - name: strace（ゼロ実行検証に必須。無いと SKIP になり合格扱いにしない）
         run: sudo apt-get update -qq && sudo apt-get install -y -qq strace
       - name: shellcheck
-        run: shellcheck -S warning -e SC2088,SC2066 zes-scan.sh
+        run: shellcheck -S warning -e SC2088,SC2066 zes-scan.sh tests/*.sh
+      - name: 版の一致（CHANGELOG の先頭 = ZES_VERSION = ui/package.json）
+        run: tests/check-versions.sh
       - name: run-tests
         run: tests/run-tests.sh
       - name: zero-exec
@@ -46,8 +48,38 @@ jobs:
         run: npm run build
       - name: コミット済みの index.html がソースから再現できること
         run: git diff --exit-code -- ../index.html
+      # ブラウザのダウンロードは不安定なことがあるので、テストとは別の手順にして時間を区切り、3 回まで試す。
+      # ブラウザ本体は @playwright/test の版をキーにキャッシュし、当たったときは OS の依存パッケージだけを入れる
+      - name: Playwright の版
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Playwright ブラウザのキャッシュ
+        id: pw-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - name: Playwright ブラウザの導入（3 回まで再試行）
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        run: |
+          for i in 1 2 3; do
+            npx playwright install --with-deps chromium firefox webkit && exit 0
+            echo "playwright install が失敗（${i} 回目）"; sleep $((i * 15))
+          done
+          exit 1
+      - name: Playwright の OS 依存パッケージ（キャッシュが当たったとき）
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 10
+        run: |
+          for i in 1 2 3; do
+            npx playwright install-deps chromium firefox webkit && exit 0
+            echo "playwright install-deps が失敗（${i} 回目）"; sleep $((i * 15))
+          done
+          exit 1
       - name: e2e（Chromium / Firefox / WebKit）
-        run: npx playwright install --with-deps chromium firefox webkit && npm run test:e2e
+        timeout-minutes: 20
+        run: npm run test:e2e
         env:
           E2E_ALL_BROWSERS: '1'
       - name: 失敗時の trace（ファイル内容は含まない、フィクスチャのみ）

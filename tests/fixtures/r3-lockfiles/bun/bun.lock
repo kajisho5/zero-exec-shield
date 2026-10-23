@@ -1,0 +1,14 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "app",
+      "dependencies": {
+        "keyv": "6.0.0",
+      },
+    },
+  },
+  "packages": {
+    "keyv": ["keyv@6.0.0", "", {}, "sha512-AAAA"],
+  }
+}

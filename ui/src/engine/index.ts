@@ -7,7 +7,7 @@ import { buildHookRules, containerRules, credentialRules, homeRules, ebpfRules, 
 import { analyzePasteText } from './rules/network';
 import { phpRules } from './rules/php';
 import { networkRules } from './rules/network';
-import { blastRadius, filenameRules, packageRules } from './rules/supplyChain';
+import { blastRadius, filenameRules, packageRules, pthRules } from './rules/supplyChain';
 import { skillpactRules } from './skillpact';
 import type { EngineResult, FileInput, Finding } from './types';
 import { SEVERITY_RANK } from './types';
@@ -33,6 +33,7 @@ export async function analyzeFiles(input: FileInput[], ioc: IocDb = IOC): Promis
   };
   filenameRules(ctx);
   packageRules(ctx);
+  pthRules(ctx);
   mcpRules(ctx);
   mcpRegistryRules(ctx);
   aiAssistantRules(ctx);

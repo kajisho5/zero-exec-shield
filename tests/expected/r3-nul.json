@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "campaign": "chaindrop-keyv",
+      "level": "CRITICAL",
+      "module": "§18",
+      "path": "p.js"
+    },
+    {
+      "campaign": null,
+      "level": "CRITICAL",
+      "module": "§47",
+      "path": "t.sh"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}
