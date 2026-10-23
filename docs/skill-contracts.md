@@ -1,31 +1,33 @@
-# ZES スキル契約書（Skill Contracts）— 判断層・修復層
+English | [日本語](skill-contracts.ja.md)
 
-- **対象**: ZET — Zero-Exec Triage（判断層、リポジトリ [kajisho5/zero-exec-triage](https://github.com/kajisho5/zero-exec-triage)） / GER — Gated-Exec Remediation（修復層、リポジトリ [kajisho5/gated-exec-remediation](https://github.com/kajisho5/gated-exec-remediation)）
-- **スキーマの所有**: 出力する層がスキーマを持ち、受け取る層は `schema_version` を固定して参照する（findings.json → ZES [`schemas/findings.schema.json`](../schemas/findings.schema.json) / remediation-plan.json → ZET / remediation-log.json → GER）
-- **前段**: 検知層 `zes-scan`（[SKILL.md](../SKILL.md)）が出力する findings.json
-- **位置づけ**: 3 層の共通インターフェース定義。実装は ZET 0.1.0 / GER 0.1.0。検知層（ZES）は §9 の出力保証でこれに準拠する
-- **改定**: 2026-10-22 契約追加 A-1〜A-6（ZET 設計）と GER の出力追加を採用（§3・§6 に反映、各項目に【追加】と表記）
-- **正のスキーマ**: [remediation-plan.schema.json（ZET）](https://github.com/kajisho5/zero-exec-triage/blob/main/schemas/remediation-plan.schema.json) / [remediation-log.schema.json・ger-input.schema.json（GER）](https://github.com/kajisho5/gated-exec-remediation/tree/main/schemas)。本書の JSON 例と食い違う場合はスキーマが正
-- **版**: ZES v5.2（`incident_bundle`: `ZES-2026-OCT-EMERGENCY-V5.2`）
+# ZES Skill Contracts — decision layer and remediation layer
+
+- **Scope**: ZET — Zero-Exec Triage (decision layer, repository [kajisho5/zero-exec-triage](https://github.com/kajisho5/zero-exec-triage)) / GER — Gated-Exec Remediation (remediation layer, repository [kajisho5/gated-exec-remediation](https://github.com/kajisho5/gated-exec-remediation))
+- **Schema ownership**: the layer that produces an output owns its schema; the receiving layer pins `schema_version` and refers to it (findings.json → ZES [`schemas/findings.schema.json`](../schemas/findings.schema.json) / remediation-plan.json → ZET / remediation-log.json → GER)
+- **Upstream**: findings.json output by the detection layer `zes-scan` ([SKILL.md](../SKILL.md))
+- **Role**: the common interface definition of the three layers. Implemented in ZET 0.1.0 / GER 0.1.0. The detection layer (ZES) conforms to it through the output guarantees in §9
+- **Revision**: 2026-10-22, adopted contract additions A-1 to A-6 (ZET design) and the GER output additions (reflected in §3 and §6, each item marked [Added])
+- **Authoritative schemas**: [remediation-plan.schema.json (ZET)](https://github.com/kajisho5/zero-exec-triage/blob/main/schemas/remediation-plan.schema.json) / [remediation-log.schema.json and ger-input.schema.json (GER)](https://github.com/kajisho5/gated-exec-remediation/tree/main/schemas). Where the JSON examples in this document disagree with them, the schemas win
+- **Version**: ZES v5.2 (`incident_bundle`: `ZES-2026-OCT-EMERGENCY-V5.2`)
 
 ```
-[検知層] zes-scan … read-only、契約検証、乖離検出
-      ↓ findings.json（skillpactフィールド付き）
-[判断層] ZET（Zero-Exec Triage） … 乖離の影響判定、例外承認
+[detection layer]   zes-scan … read-only, contract checks, divergence detection
+      ↓ findings.json (with skillpact fields)
+[decision layer]    ZET (Zero-Exec Triage) … impact assessment of divergence, exception approval
       ↓ remediation-plan.json
-[修復層] GER（Gated-Exec Remediation） … 明示承認後のみ実行
+[remediation layer] GER (Gated-Exec Remediation) … executes only after explicit approval
 ```
 
-## 1. 共通契約
+## 1. Common contract
 
-- 入出力は UTF-8 の JSON。スキーマ固定、未知フィールドは拒否（strict）
-- タイムスタンプは RFC 3339（UTC）
-- fail-closed: 取得失敗を 0 件扱いしない。部分成功を残さない
-- 追記専用ログ（`skill` / `version` / `input_hash` / `output_hash` / `started_at` / `finished_at` / `operator`）
-- 検知ログと修復ログは別ファイル・別リテンション
-- 判断層は read-only、修復層は許可リスト方式
+- Input and output are UTF-8 JSON. Schemas are fixed; unknown fields are rejected (strict)
+- Timestamps are RFC 3339 (UTC)
+- fail-closed: a failed retrieval is not treated as 0 findings. No partial success is left behind
+- Append-only log (`skill` / `version` / `input_hash` / `output_hash` / `started_at` / `finished_at` / `operator`)
+- Detection logs and remediation logs are separate files with separate retention
+- The decision layer is read-only; the remediation layer works from an allowlist
 
-## 2. ZET 入力
+## 2. ZET input
 
 ```json
 {
@@ -42,9 +44,9 @@
 }
 ```
 
-`skillpact_policy.diff_anomaly_threshold` と `skillpact_policy.destructive_requires_human` は予約済み・未実装です。ZET のスキーマでは必須ではなく、指定すると ZET は「reserved, not implemented」として入力を拒否します（効くように見えて効かない設定を受け付けない）。破壊的な操作の人間承認は §7 の `reversible: false` の二重承認で扱います。
+`skillpact_policy.diff_anomaly_threshold` and `skillpact_policy.destructive_requires_human` are reserved and not implemented. They are not required by ZET's schema, and if you specify them ZET rejects the input as "reserved, not implemented" (it does not accept a setting that looks effective but is not). Human approval of destructive operations is handled by the double approval for `reversible: false` in §7.
 
-## 3. ZET 出力 `remediation-plan.json`
+## 3. ZET output `remediation-plan.json`
 
 ```json
 {
@@ -52,7 +54,7 @@
   "plan_id": "uuid",
   "created_at": "RFC3339",
   "status": "ok|partial|error|draft",
-  "plan_hash": "sha256:<plan_hash を除いた本体の正規化 JSON の SHA-256>",
+  "plan_hash": "sha256:<SHA-256 of the canonical JSON of the body without plan_hash>",
   "items": [
     {
       "finding_id": "sha256:<hash>",
@@ -73,34 +75,34 @@
 }
 ```
 
-| 【追加】 | 内容 |
+| [Added] | Description |
 |---|---|
-| A-1 `status: "draft"` | ZET の下書き。GER は受理しない（確定 plan は `ok` / `partial`） |
-| A-2 `decided_by` | 判断者。「exception は判断者以外が承認」を機械的に検査するために必須 |
-| A-3 `level_effective` | SkillPact 規則で引き上げた後の重大度。入力の `level` は改変しない。引き下げ不可 |
-| A-4 `action.reversible` / `action.skillpact_effects` | ZET が操作種別と finding の `declared_effects` から付与。GER は findings を読まないため、二重承認と SkillPact 制限の判定材料を plan で渡す |
-| A-5 `held[].module`（`finding_id: null` 可） | `errors[]` のモジュールをモジュール単位で保留する（finding が 0 件でも未確定を表現できる） |
-| `action.target` | 対象の finding の `path` と一致すること（ZET は一致しない plan を出さない。`path` が `null` の finding には `action` を付けられない） |
-| A-6 `plan_hash` | 確定 plan の本体（`plan_hash` を除く）を、キー順ソート・区切り `,` `:`・UTF-8 で正規化した JSON の SHA-256。GER の承認トークンと照合する |
+| A-1 `status: "draft"` | A ZET draft. GER does not accept it (a final plan is `ok` / `partial`) |
+| A-2 `decided_by` | The decision maker. Required so that "an exception is approved by someone other than the decision maker" can be checked mechanically |
+| A-3 `level_effective` | The severity after being raised by SkillPact rules. The input `level` is not modified. It cannot be lowered |
+| A-4 `action.reversible` / `action.skillpact_effects` | Set by ZET from the operation type and the finding's `declared_effects`. Because GER does not read findings, the plan carries the inputs for the double-approval and SkillPact-restriction checks |
+| A-5 `held[].module` (`finding_id: null` allowed) | Holds the modules in `errors[]` per module (an unconfirmed state can be expressed even with 0 findings) |
+| `action.target` | Must equal the `path` of the target finding (ZET does not output a plan where they differ. A finding whose `path` is `null` cannot have an `action`) |
+| A-6 `plan_hash` | SHA-256 of the final plan's body (without `plan_hash`) as canonical JSON: keys sorted, separators `,` `:`, UTF-8. Checked against GER's approval token |
 
-## 4. ZET 不変条件
+## 4. ZET invariants
 
-- 全 finding に判断を付与する（`held` は明示的保留であり未判断ではない）
-- `exception` には `exception_type` / `reason` / `recheck_at` / 判断者以外の `approved_by` が必須
-- `remediate` には `owner` / `due_at` / `action` が必須
-- `held` は修復層に渡さない
-- 入力 findings の `id` / `level` / `module` を改変しない
-- 【追加】`decided_by` / `decided_at` は全判断で必須。`approved_by` は `policy.approvers` に含まれる人だけ。`due_at` は判断日 + `deadlines[level_effective]` 日以内、exception / defer の `recheck_at` は判断日 + `decision_window_days` 日以内
-- 【追加】入力が `partial` の場合、plan も `partial` とし、`errors[]` の各モジュールを `held` に明示する
-- `findings.status == "error"` の入力は拒否する。`errors[]` に記録されたモジュールの finding は未確定として扱う（`held` で明示）
+- Every finding gets a decision (`held` is an explicit hold, not a missing decision)
+- `exception` requires `exception_type` / `reason` / `recheck_at` / an `approved_by` other than the decision maker
+- `remediate` requires `owner` / `due_at` / `action`
+- `held` is not passed to the remediation layer
+- The input findings' `id` / `level` / `module` are not modified
+- [Added] `decided_by` / `decided_at` are required for every decision. `approved_by` may contain only people listed in `policy.approvers`. `due_at` is within the decision date + `deadlines[level_effective]` days; `recheck_at` for exception / defer is within the decision date + `decision_window_days` days
+- [Added] When the input is `partial`, the plan is also `partial`, and every module in `errors[]` is listed explicitly in `held`
+- Input with `findings.status == "error"` is rejected. Findings of modules recorded in `errors[]` are treated as unconfirmed (stated explicitly in `held`)
 - **SkillPact**
-  - `skillpact.divergence` が非空の finding は `exception` を許可しない（必ず `remediate` または `defer`）
-  - `skillpact.diff_anomaly: true` の finding は `approved_by` に 2 名以上を要求
-  - `skillpact.signed: true` でも `divergence` が非空なら CRITICAL 相当として扱う（`signed` は ZES が署名欄の有無を見ただけで未検証）
-  - `skillpact_policy.l3_trusted` は既定 `false`。L3 署名を信頼の根拠にしない（差分異常と併せて評価）
-  - SkillPact 署名の検証（`skillpact validate` 等）が必要な場合は、判断層で人間が実行する（検知層は署名欄の有無のみ確認し、L2/L3 を判定しない）
+  - A finding with a non-empty `skillpact.divergence` cannot be an `exception` (it must be `remediate` or `defer`)
+  - A finding with `skillpact.diff_anomaly: true` requires 2 or more people in `approved_by`
+  - Even with `skillpact.signed: true`, a non-empty `divergence` is treated as CRITICAL-equivalent (`signed` only means ZES saw that a signature field exists; it is not verified)
+  - `skillpact_policy.l3_trusted` defaults to `false`. An L3 signature is not grounds for trust (evaluate it together with diff anomalies)
+  - When SkillPact signature verification (`skillpact validate`, etc.) is needed, a human runs it in the decision layer (the detection layer only checks whether a signature field exists and does not judge L2/L3)
 
-## 5. GER 入力
+## 5. GER input
 
 ```json
 {
@@ -110,16 +112,16 @@
     "plan_id": "uuid",
     "approved_by": ["security-lead", "platform-owner"],
     "approved_at": "RFC3339",
-    "approval_token": "sha256:<承認対象 plan の plan_hash>"
+    "approval_token": "sha256:<plan_hash of the approved plan>"
   },
   "mode": "dry-run|apply",
   "allowed_actions": ["chmod", "write_config", "rotate_secret"]
 }
 ```
 
-【追加】`approval_token` は承認対象の確定 plan の `plan_hash` と一致すること（承認を計画の中身に束縛し、承認後の差し替えを検出する）。`allowed_actions` にワイルドカードは使えない。dry-run と apply の同一性は、入力から `mode` を除いた正規化 JSON の SHA-256（`input_hash`）で判定する。
+[Added] `approval_token` must equal the `plan_hash` of the final plan being approved (this binds the approval to the plan's content and detects substitution after approval). `allowed_actions` cannot use wildcards. Whether a dry-run and an apply are the same is decided by the SHA-256 of the canonical JSON of the input without `mode` (`input_hash`).
 
-## 6. GER 出力 `remediation-log.json`
+## 6. GER output `remediation-log.json`
 
 ```json
 {
@@ -145,49 +147,54 @@
 }
 ```
 
-【追加】`plan_hash` と `mode`（どの計画のどの実行かを一意にするため）。`applied_at` は実際に適用した結果以外では `null`。
+[Added] `plan_hash` and `mode` (to identify uniquely which run of which plan this is). `applied_at` is `null` except for results that were actually applied.
 
-## 7. GER 不変条件
+## 7. GER invariants
 
-- 承認なき実行禁止、`plan_id` 不一致は拒否
-- dry-run を経ない apply 禁止
-- 全対象の事前検証。1 件でも失敗なら全体中止（部分適用禁止）
-- ZES 出力（findings.json）を直接読まない（`remediation-plan.json` のみ）
-- `allowed_actions` 外の操作を拒否（許可リスト方式）
-- 対象パスは `plan.items[].action.target` に限定。target は finding の `path` そのもの（relation `self`）か、finding の `path` から `relation`（`npm_pkg_dir` / `npm_installed` / `pypi_record` / `ext_dir` / `skill_dir`。findings 1.1 の `related` を含む）で導ける対象だけで、それ以外の親ディレクトリへは遡及しない
-- `chmod` は権限を狭める変更だけ（例: `0644` → `0600`）。権限を広げる `params` は ZET が拒否する
-- 全操作は冪等。`reversible: false` は二重承認必須
-- 1 件でも `failed` が出たら残りを実行せずロールバック
-- 【追加】実行者（`--operator`）は `approval.approved_by` に含まれてはならない。dry-run 記録は既定 24 時間で失効し、監査ログのハッシュチェーンが壊れている場合は dry-run 記録を信用しない
+- No execution without approval; a `plan_id` mismatch is rejected
+- No apply without a preceding dry-run
+- All targets are validated in advance. If even one fails, the whole run is aborted (no partial application)
+- Does not read the ZES output (findings.json) directly (only `remediation-plan.json`)
+- Operations outside `allowed_actions` are rejected (allowlist)
+- Target paths are limited to `plan.items[].action.target`. A target is either the finding's `path` itself (relation `self`) or a target derivable from the finding's `path` through a `relation` (`npm_pkg_dir` / `npm_installed` / `pypi_record` / `ext_dir` / `skill_dir`, including `related` in findings 1.1); GER does not walk up to any other parent directory
+- `chmod` only narrows permissions (for example `0644` → `0600`). ZET rejects `params` that widen permissions
+- Every operation is idempotent. `reversible: false` requires double approval
+- If even one `failed` occurs, the rest is not executed and the run is rolled back
+- [Added] The executor (`--operator`) must not be in `approval.approved_by`. A dry-run record expires after 24 hours by default, and if the audit log's hash chain is broken, the dry-run record is not trusted
 - **SkillPact**
-  - `skillpact.declared_effects` に `exec` / `network` / `spend` / `send` が含まれるスキルの修復は、その操作が `allowed_actions` に明示されていなければ拒否
-  - `skillpact.signed: true` を承認の代替にしない（人間承認は必須）
+  - Remediation of a skill whose `skillpact.declared_effects` includes `exec` / `network` / `spend` / `send` is rejected unless the operation is listed explicitly in `allowed_actions`
+  - `skillpact.signed: true` is not a substitute for approval (human approval is mandatory)
 
-## 8. 層間連携ルール
+## 8. Inter-layer rules
 
-| ルール | 内容 |
+| Rule | Description |
 |---|---|
-| 飛び越し禁止 | 修復層は ZES 出力を直接読まない |
-| スキーマ検証必須 | 各層は入力スキーマを検証、失敗時は次層へ渡さない |
-| 失敗の伝播 | `status: "error"` は次層へ渡さない、`partial` は `held` を明示 |
-| 承認の連鎖 | 判断層と修復層の `approved_by` は別途取得（自己承認防止） |
-| ログ分離 | 検知・判断・修復ログは別ファイル・別リテンション |
-| バージョン固定 | 各層は `schema_version` を検証、不一致なら拒否 |
+| No skipping | The remediation layer does not read the ZES output directly |
+| Schema validation required | Each layer validates its input schema and does not pass anything to the next layer on failure |
+| Failure propagation | `status: "error"` is not passed to the next layer; `partial` states `held` explicitly |
+| Chain of approval | `approved_by` for the decision layer and for the remediation layer are obtained separately (prevents self-approval) |
+| Log separation | Detection, decision and remediation logs are separate files with separate retention |
+| Version pinning | Each layer validates `schema_version` and rejects a mismatch |
 
-## 9. 検知層（ZES）が保証すること
+## 9. What the detection layer (ZES) guarantees
 
-判断層が依存してよい、findings.json の性質です（`tests/run-tests.sh` で検証）。
+These are the properties of findings.json that the decision layer may rely on (verified by `tests/run-tests.sh`).
 
-- `schema_version` は `"1.1"`（ZES 0.4.0 以降。1.1 は 1.0 に任意の項目を足しただけで、`id` と `evidence_hash` の作り方は同じ）
-- トップレベルキーは `schema_version` / `scan_roots` / `incident_bundle` / `scan_started_at` / `scan_finished_at` / `scan_mode` / `status` / `findings` / `errors` のみ。`scan_roots` は `--root` の実パスの配列
-- finding のキーは `id` / `level` / `module` / `campaign` / `path` / `detail` / `evidence_hash` / `evidence`（§49 のみ `skillpact` を追加）と、任意の `kind` / `subject` / `locators` / `related` のみ
-  - `kind`: 機械可読な種別（`pkg.compromised` / `pkg.vulnerable` / `pkg.lockfile_compromised` / `mcp.dangerous_command` / `mcp.unpinned` / `gha.pwn_request` / `gha.unpinned` / `secret.token` / `runtime.cve`）。ZET の I-13 はこれで操作を絞る
-  - `subject`: パッケージの `{ecosystem, package, version, safe_version, fixed_versions}`（§15）
-  - `locators`: 同じファイルの該当箇所。JSON / JSONC / TOML は `{format, pointer}`（RFC 6901。例 `/mcpServers/<name>`）、テキストは `{format: "text", line, line_sha256}`（行の SHA-256。改行・行末の CR・1 行目の BOM を除く。GER の `remove_line` と同じ）。内容そのものは出さない
-  - `related`: finding の path から導ける別の対象 `{relation, path}`（`npm_installed`・`ext_dir`・`skill_dir`）
-  - `evidence`: 種類つきの証跡 `{kind, hash}`。`file`（100MB 超は `large_file`。`evidence_hash` と同じ値）/ `symlink`（readlink の値の SHA-256）/ `tree`（ディレクトリ。GER の ger-tree-v1）/ `detail`（それ以外。検査ルート・ホームそのものの finding も）
-- GER の隔離ストア（`.ger-quarantine-store` のあるディレクトリ。所有者が実行ユーザーで 0700）は走査しない（`errors[]` に `quarantine_store_skipped`。status は変えない）
-- `skillpact` のキーは `contract_path` / `contract_version` / `level` / `signed` / `author` / `declared_effects` / `observed_effects` / `policy_decision` / `l2_tested` / `divergence` / `diff_anomaly` のみ。効果名は SkillPact 0.8 の `read` / `write` / `network` / `exec` / `spend` / `send` のみ（`secrets` / `persist` / `longrun` は廃止）。`policy_decision` は常に `null`、`l2_tested` は常に `false`（ZES は評価しない）
-- `id` は `sha256:` + 64 桁 16 進で決定的。1 つの findings.json の中で一意（同じ `id` が重なったら 1 件だけ残し、`errors[]` に `duplicate_finding_id` を記録）。`path` は絶対パスまたは `null`
-- `evidence_hash` は通常ファイルならその SHA-256（100MB 超はパス・サイズ・mtime の SHA-256）
-- ファイル内容・シークレット値を含まない
+- `schema_version` is `"1.2"` (ZES 0.5.0 and later. 1.2 adds `code` and `params` to findings, makes `detail` English, and changes `id` to v2. 1.1 (ZES 0.4.x) only added optional fields to 1.0, and builds `id` and `evidence_hash` the same way as 1.0)
+- The top-level keys are only `schema_version` / `scan_roots` / `incident_bundle` / `scan_started_at` / `scan_finished_at` / `scan_mode` / `status` / `findings` / `errors`. `scan_roots` is an array of the real paths of `--root`
+- The keys of a finding are only `id` / `level` / `module` / `campaign` / `path` / `detail` / `evidence_hash` / `evidence` (`skillpact` is added for §49 only), `code` / `params` (1.2), and the optional `kind` / `subject` / `locators` / `related`
+  - `code`: the message id. The catalog key `f.<code>` in `i18n/en.json`. Language-neutral
+  - `params`: the values that go into the message. All values are strings; keys are the catalog placeholders (`^[a-z_]+$`). Never file contents
+  - `detail`: always English. The catalog entry `f.<code>` with `params` filled in; it never depends on `--lang` or the locale
+  - `kind`: a machine-readable type (`pkg.compromised` / `pkg.vulnerable` / `pkg.lockfile_compromised` / `mcp.dangerous_command` / `mcp.unpinned` / `gha.pwn_request` / `gha.unpinned` / `secret.token` / `runtime.cve`). ZET's I-13 uses it to narrow the operations
+  - `subject`: the package's `{ecosystem, package, version, safe_version, fixed_versions}` (§15)
+  - `locators`: the relevant locations in the same file. JSON / JSONC / TOML use `{format, pointer}` (RFC 6901, for example `/mcpServers/<name>`); text uses `{format: "text", line, line_sha256}` (SHA-256 of the line, excluding the newline, a trailing CR and a BOM on line 1; the same as GER's `remove_line`). The content itself is never output
+  - `related`: other targets derivable from the finding's path, `{relation, path}` (`npm_installed`, `ext_dir`, `skill_dir`)
+  - `evidence`: typed evidence `{kind, hash}`. `file` (`large_file` above 100MB; the same value as `evidence_hash`) / `symlink` (SHA-256 of the readlink value) / `tree` (a directory; GER's ger-tree-v1) / `detail` (anything else, including findings about the scan root or the home directory itself)
+- GER's quarantine store (a directory containing `.ger-quarantine-store`, owned by the running user, mode 0700) is not scanned (`quarantine_store_skipped` in `errors[]`; status is unchanged)
+- The keys of `skillpact` are only `contract_path` / `contract_version` / `level` / `signed` / `author` / `declared_effects` / `observed_effects` / `policy_decision` / `l2_tested` / `divergence` / `diff_anomaly`. Effect names are only SkillPact 0.8's `read` / `write` / `network` / `exec` / `spend` / `send` (`secrets` / `persist` / `longrun` are retired). `policy_decision` is always `null` and `l2_tested` is always `false` (ZES does not evaluate them)
+- `id` is `sha256:` + 64 hex digits and deterministic. It is unique within one findings.json (when the same `id` occurs twice, only one is kept and `duplicate_finding_id` is recorded in `errors[]`). `path` is an absolute path or `null`
+  - id v2 (1.2): SHA-256 of `"zes-id-v2|" + module + "|" + campaign + "|" + path + "|" + code + "|" + params`, where `params` is `key=value` pairs sorted by key (C locale) and joined by U+001F, and a `null` `campaign` / `path` is the empty string. It does not depend on the language or the wording of `detail`
+  - `id` changes once, in 0.5.0. ZET decisions and GER approvals made against 0.4.x findings cannot be carried over; re-scan and re-triage
+- `evidence_hash` is the SHA-256 of the file for a regular file (above 100MB, the SHA-256 of path, size and mtime), and otherwise the SHA-256 of the English `detail` (built the same way in 1.2)
+- Contains no file contents or secret values
