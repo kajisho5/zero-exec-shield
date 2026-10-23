@@ -60,7 +60,7 @@ export interface IntelDb {
   workflow_strings?: { campaign: string; severity?: string; strings?: string[] }[];
   strings?: { campaign: string; module: string; severity?: string; file_regex?: string; strings?: string[] }[];
   extensions?: { campaign: string; eco: string; severity?: string; ids?: string[]; bad_versions?: string[] }[];
-  host?: { campaign: string; severity?: string; paths?: string[]; modified_files?: string[]; launch_labels?: string[]; systemd_units?: string[]; process_names?: string[] }[];
+  host?: { campaign: string; severity?: string; paths?: string[]; file_names?: string[] | null; modified_files?: string[]; launch_labels?: string[]; systemd_units?: string[]; process_names?: string[] }[];
   apps?: { campaign: string; bundle: string; cve: string; severity?: string; fixed: string }[];
 }
 
@@ -70,8 +70,17 @@ export interface EmudhraRules {
   [k: string]: unknown;
 }
 
+/** PHP2Shell の upstream 修正版・旧ブランチ・ベンダーのパッケージ修正版（CLI php_status / php_distro_packages と同じ表） */
+export interface Php2ShellDistro {
+  upstream_fixed?: string[];
+  older_branches?: string[];
+  packages?: { vendor: string; release: string; codename?: string; source_package: string; fixed: string; advisory?: string; url?: string }[];
+  [k: string]: unknown;
+}
+
 export interface IocDb {
   incident_bundle: string;
+  php2shell_distro?: Php2ShellDistro;
   packages: IocPackage[];
   infrastructures?: Infrastructure[];
   intel?: IntelDb;

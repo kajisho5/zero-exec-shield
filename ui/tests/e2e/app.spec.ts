@@ -92,8 +92,8 @@ test('MCP / Actions / 拡張ビューアと CLI 案内', async ({ page, browserN
   await page.getByRole('tab', { name: /^総合/ }).click();
   await scan(page, 'github-actions');
   await page.getByRole('tab', { name: /^GitHub Actions/ }).click();
-  // tag-ref.yml と case-variant.yml がタグ参照、tag-ref.yml と flow-mapping.yml が汚染タグ
-  await expect(page.getByTestId('actions-viewer').locator('[data-kind=tag]')).toHaveCount(2);
+  // tag-ref.yml・case-variant.yml・next-line-uses.yml（値が次行の uses:）がタグ参照、tag-ref.yml と flow-mapping.yml が汚染タグ
+  await expect(page.getByTestId('actions-viewer').locator('[data-kind=tag]')).toHaveCount(3);
   await expect(page.getByTestId('actions-viewer').locator('[data-kind=compromised]')).toHaveCount(2);
   await page.getByRole('tab', { name: /^アンチフォレンジック/ }).click();
   await expect(page.getByTestId('cli-only').first()).toContainText('noatime');

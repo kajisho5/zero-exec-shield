@@ -143,6 +143,18 @@ export function tomlLockDeps(text: string): { name: string; version: string }[] 
   return out;
 }
 
+/** METADATA / PKG-INFO のヘッダ（最初の空行まで）の Name / Version（CLI pkg_info_name_version と同じ）。 */
+function pkgInfoNameVersion(text: string): { name: string; version: string } {
+  let name = '';
+  let version = '';
+  for (const l of lines(text)) {
+    if (l === '') break;
+    if (/^name:/i.test(l) && name === '') name = l.replace(/^[^:]*:[ \t]*/, '').replace(/[ \t]+$/, '');
+    if (/^version:/i.test(l) && version === '') version = l.replace(/^[^:]*:[ \t]*/, '').replace(/[ \t]+$/, '');
+  }
+  return name ? { name, version } : { name: '', version: '' };
+}
+
 const depsCache = new WeakMap<RuleCtx, Dep[]>();
 
 /** 依存関係インベントリ（CLI build_deps の DEPS_TSV 相当）。1 回のスキャンで 1 度だけ作る。 */
@@ -161,10 +173,15 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
     } else if (f.name === 'pnpm-lock.yaml') {
       add('npm', pnpmLockDeps(f.text));
     } else if (f.name === 'package.json' && /\/node_modules\/(@[^/]+\/)?[^/]+\/package\.json$/.test('/' + f.relPath)) {
+      // CLI と同じく名前はパス（最後の node_modules/ 以降）から、版はトップレベルの "version"（無ければ空。any_version 等の照合に使う）
+      const name = /.*\/node_modules\/((@[^/]+\/)?[^/]+)\/package\.json$/.exec('/' + f.relPath)?.[1] ?? '';
+      let version = '';
       try {
-        const j = JSON.parse(noBom(f.text)) as { name?: unknown; version?: unknown };
-        if (typeof j.name === 'string' && typeof j.version === 'string' && j.name && j.version) out.push({ eco: 'npm', name: j.name, version: j.version, path: f.relPath, sha: f.sha256 });
-      } catch { /* noop */ }
+        const j = JSON.parse(noBom(f.text)) as unknown;
+        const v = j && typeof j === 'object' && !Array.isArray(j) ? (j as Record<string, unknown>)['version'] : undefined;
+        if (typeof v === 'string') version = v.replace(/[\t\r\n]/g, '');
+      } catch { parseFailed(f.relPath); }
+      out.push({ eco: 'npm', name, version, path: f.relPath, sha: f.sha256 });
     } else if (f.name === 'Cargo.lock') {
       // [[package]] ブロックの name / version（CLI build_deps と同じ）
       for (const b of noBom(f.text).split(/^\[\[package\]\]\s*$/m).slice(1)) {
@@ -185,8 +202,9 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
         if (mod && ver) out.push({ eco: 'go', name: mod, version: ver.replace(/\/go\.mod$/, ''), path: f.relPath, sha: f.sha256 });
       }
     } else if (f.name === 'Gemfile.lock') {
-      for (const m of lines(f.text).join('\n').matchAll(/^ {4}([A-Za-z0-9._-]+) \(([0-9][^)\s]*)\)$/gm)) {
-        if (m[1] && m[2]) out.push({ eco: 'gem', name: m[1], version: m[2], path: f.relPath, sha: f.sha256 });
+      // プラットフォーム付き（nokogiri (1.16.0-x86_64-linux)）はバージョン部分のみで比較する
+      for (const m of lines(f.text).join('\n').matchAll(/^ {4}([A-Za-z0-9._-]+) \(([0-9][^)]*)\)$/gm)) {
+        if (m[1] && m[2]) out.push({ eco: 'gem', name: m[1], version: m[2].replace(/-[A-Za-z].*$/, ''), path: f.relPath, sha: f.sha256 });
       }
     } else if (/^(requirements|constraints).*\.txt$/.test(f.name)) {
       for (const line of lines(f.text)) {
@@ -206,10 +224,20 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
       } catch { parseFailed(f.relPath); }
     }
   }
-  // site-packages の *.dist-info（ディレクトリ名からのみ判定）
+  // site-packages の *.dist-info / *.egg-info（インストール実体。CLI build_deps と同じ）
+  //   Name / Version は METADATA・PKG-INFO のヘッダを正とし、ディレクトリ名（name-1.0-py3.11.egg-info 等）はヘッダが無い場合の代替のみ。
+  //   egg-info は単一ファイル（PKG-INFO と同形式）の場合もある
   for (const f of ctx.files) {
-    const m = /\/([^/]+)-([^/-]+)\.(dist-info|egg-info)\/(METADATA|PKG-INFO)$/.exec('/' + f.relPath);
-    if (m?.[1] && m[2]) out.push({ eco: 'pypi', name: normPypi(m[1]), version: m[2], path: dirname(f.relPath), sha: null });
+    const single = /\.egg-info$/.test(f.relPath);
+    if (!single && !/\/[^/]+\.(dist-info|egg-info)\/(METADATA|PKG-INFO)$/.test('/' + f.relPath)) continue;
+    const src = single ? f.relPath : dirname(f.relPath);
+    let { name, version } = pkgInfoNameVersion(f.text ?? '');
+    if (!name) {
+      const d = src.slice(src.lastIndexOf('/') + 1).replace(/\.dist-info$/, '').replace(/\.egg-info$/, '').replace(/-py[0-9]+(\.[0-9]+)*(-[^-]+)?$/, '');
+      const i = d.lastIndexOf('-');
+      [name, version] = i < 0 ? [d, ''] : [d.slice(0, i), d.slice(i + 1)];
+    }
+    if (name) out.push({ eco: 'pypi', name: normPypi(name), version, path: src, sha: null });
   }
   return out;
 }
@@ -254,13 +282,14 @@ export function packageRules(ctx: RuleCtx): void {
 
 function emitPackage(ctx: RuleCtx, p: IocPackage, d: Dep): void {
   const match = p.match ?? 'versions';
-  const hit = match === 'any_version' || ((match === 'versions' || match === 'vulnerable_versions') && (p.bad_versions ?? []).some((s) => versionMatches(d.version, s)));
+  // 版が分からない依存（version なしの node_modules/*/package.json 等）は版指定の IoC に一致させない（CLI と同じ）
+  const hit = match === 'any_version' || ((match === 'versions' || match === 'vulnerable_versions') && d.version !== '' && (p.bad_versions ?? []).some((s) => s !== '' && versionMatches(d.version, s)));
   if (hit && match === 'vulnerable_versions') {
-    push(ctx, { level: 'HIGH', module: '§15', campaign: p.campaign, path: d.path, detail: `脆弱なバージョン ${d.name}@${d.version}（${d.eco}、悪性ではなく CVE の影響範囲）${p.safe_version ? `。修正版: ${p.safe_version} 以上` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });
+    push(ctx, { level: 'HIGH', module: '§15', campaign: p.campaign, path: d.path, detail: `脆弱なバージョン ${d.name}@${d.version || '?'}（${d.eco}、悪性ではなく CVE の影響範囲）${p.safe_version ? `。修正版: ${p.safe_version} 以上` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });
   } else if (hit) {
-    push(ctx, { level: 'CRITICAL', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害パッケージ ${d.name}@${d.version} を検出（${d.eco}）${p.safe_version ? `。安全版: ${p.safe_version}` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });
+    push(ctx, { level: 'CRITICAL', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害パッケージ ${d.name}@${d.version || '?'} を検出（${d.eco}）${p.safe_version ? `。安全版: ${p.safe_version}` : ''}`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });
   } else if (match === 'unknown_versions') {
-    push(ctx, { level: 'MEDIUM', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害報告のあるパッケージ ${d.name}@${d.version}（侵害版の特定バージョン未定義のため要確認）`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });
+    push(ctx, { level: 'MEDIUM', module: '§15', campaign: p.campaign, path: d.path, detail: `侵害報告のあるパッケージ ${d.name}@${d.version || '?'}（侵害版の特定バージョン未定義のため要確認）`, ruleId: `s15-lockfile:${p.campaign}:${d.name}@${d.version}`, evidenceSha: d.sha });
   }
 }
 

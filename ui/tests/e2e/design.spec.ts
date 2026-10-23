@@ -414,3 +414,18 @@ test('重大度の文字色のコントラスト（台紙・作業台・淡色�
     await ctx.close();
   }
 });
+
+// main の 61b64ed と同じ意図: 320px でもタブ列に 2〜3 枚のタブが収まり、検索ボタンなどに押し出されずに押せる。
+test('320px: タブ列に少なくとも 3 枚分の幅があり、見えているタブを押せる', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await open(page);
+  const list = (await page.getByRole('tablist').boundingBox())!;
+  const tabs = page.getByRole('tab');
+  let need = 0;
+  for (let i = 0; i < 3; i++) need += (await tabs.nth(i).boundingBox())!.width;
+  expect(list.width).toBeGreaterThanOrEqual(need);
+  for (const name of [/^SkillPact/, /^TeamPCP/]) {
+    await page.getByRole('tab', { name }).click();
+    await expect(page.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true');
+  }
+});
