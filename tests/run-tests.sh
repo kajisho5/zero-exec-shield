@@ -237,6 +237,37 @@ else
   printf '  SKIP git/mkfifo/timeout が無いため .git の FIFO チェックを省略\n'
 fi
 
+# ファイル名の制御文字・不正 UTF-8: JSON は valid UTF-8、id は出力した値から再計算可能、人間向けログに ESC を出さない
+mkdir -p "$TMP/names"
+for nm in $'esc\033[31m' $'bad\377\376' $'c1\302\233' 'back\x41slash' $'tab\tname'; do
+  mkdir -p "$TMP/names/$nm" && printf '// ZES test fixture\nconst p = ".claude/";\n' >"$TMP/names/$nm/setup.mjs"
+done
+run_scan "$TMP/names" quick "$FIX/_home" >"$TMP/names.json"; cp "$TMP/stderr.txt" "$TMP/names.log"
+if python3 -I -c 'pass' 2>/dev/null; then
+  if out="$(python3 -I - "$TMP/names.json" <<'PY' 2>&1
+import hashlib, json, sys
+raw = open(sys.argv[1], "rb").read()
+d = json.loads(raw.decode("utf-8"))  # strict UTF-8
+bad = [f["path"] for f in d["findings"] if f["id"] != "sha256:" + hashlib.sha256("|".join([f["module"], f["campaign"] or "", f["path"] or "", f["detail"]]).encode()).hexdigest()]
+n = len([f for f in d["findings"] if f["module"] == "§17"])
+nu = len([e for e in d["errors"] if e["module"] == "core" and e["reason"].startswith("non_utf8_path:") and "\\xff\\xfe" in e["reason"]])
+print(f"mismatch={bad} s17={n} non_utf8={nu}")
+sys.exit(0 if not bad and n == 5 and nu == 1 else 1)
+PY
+)"; then ok "制御文字・不正 UTF-8 のパス: valid UTF-8 JSON・id 再計算一致・errors[] に non_utf8_path"
+  else ng "制御文字・不正 UTF-8 のパスの出力が不正" "$out"; fi
+else
+  printf '  SKIP 不正 UTF-8 パスの JSON 検証（python3 が無い）\n'
+fi
+if grep -q $'\033' "$TMP/names.log"; then ng "人間向けログに ESC（端末エスケープ）がそのまま出力されています"
+else ok "人間向けログの制御文字を \\xHH で表示（端末エスケープ注入なし）"; fi
+# ZES_HOME は実パスへ正規化（相対パス・末尾スラッシュ・存在しないディレクトリ）
+bad="$(cd "$FIX" && ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="_home/" "$SCAN" --quick --root "$TMP/empty-root" --json 2>/dev/null \
+  | jq -r --arg h "$FIX/_home/" '[.findings[] | select(.path != null) | select((.path | startswith($h) | not) or (.path | contains("//"))) | .path] | join(",")')"
+n="$(cd "$FIX" && ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="_home/" "$SCAN" --quick --root "$TMP/empty-root" --json 2>/dev/null | jq '.findings | length')"
+[ -z "$bad" ] && [ "${n:-0}" -gt 0 ] && ok "相対・末尾スラッシュ付き ZES_HOME を実パスに正規化" || ng "ZES_HOME が正規化されていません: ${bad:-findings=$n}"
+ZES_HOME="$TMP/nonexistent-home" "$SCAN" --quick --root "$TMP/empty-root" >/dev/null 2>&1; [ $? -eq 64 ] && ok "存在しない ZES_HOME を拒否" || ng "存在しない ZES_HOME を受理"
+
 # 引数検証（fail-closed）
 "$SCAN" --root /nonexistent-zes-dir >/dev/null 2>&1; [ $? -eq 64 ] && ok "存在しない --root を拒否" || ng "存在しない --root を受理"
 "$SCAN" --quick --url 'file:///etc/passwd' >/dev/null 2>&1; [ $? -eq 64 ] && ok "http(s) 以外の --url を拒否" || ng "不正な --url を受理"

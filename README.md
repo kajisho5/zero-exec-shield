@@ -77,6 +77,13 @@ chmod +x zes-scan.sh
 | `ZES_OFFLINE=1` | 外向き通信（§4 `--url`、§6 eMudhra 接続試験）を無効化（`errors[]` に `skipped_offline`） |
 | `ZES_SKILLPACT_CACHE` | `--skillpact-cache` と同じ |
 
+### 出力の文字列（findings.json / 人間向けログ）
+
+- `path` / `detail` / `errors[].reason` は常に valid な UTF-8 JSON です。制御文字（U+0000〜U+001F・U+007F）と C1 制御文字（U+0080〜U+009F）は `\u00XX` でエスケープします（デコードすれば元の文字に戻ります）。
+- ファイル名に不正な UTF-8 バイトがある場合、そのバイトを 1 バイトずつ `\xHH`（4 文字のテキスト）に置き換えた値を `path` に出力し、`errors[]` に `core` / `non_utf8_path:<置換後のパス>` を記録します（実際のファイル名とは異なることを示すため）。
+- `findings[].id` は、出力した（JSON をデコードした）`module|campaign|path|detail` の SHA-256 です（`campaign` / `path` が null のときは空文字列）。
+- 人間向けログでは制御文字を `\xHH`、C1 制御文字を `\u00HH` と表示し、端末エスケープシーケンスをそのまま出力しません。
+
 ### 終了コード
 
 `0` = 完了（`status` が `ok` / `partial`）、`2` = `status: error`、`64` = 引数・環境エラー。重大度による非 0 終了はしません。CI で失敗させる場合は `jq -e '[.findings[] | select(.level=="CRITICAL")] | length == 0'` 等で判定してください。

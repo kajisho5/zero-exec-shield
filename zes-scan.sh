@@ -104,6 +104,23 @@ if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
   exit 64
 fi
 
+# ホーム（ZES_HOME / HOME）も ROOT と同様に実パスへ正規化する（相対パス・末尾スラッシュ・シンボリックリンクのまま
+# 出力すると findings[].path が絶対パスにならない / "//" を含む / 実体と異なるパスになるため）
+if [ -z "$HOME_DIR" ]; then
+  echo "ZES: ホームディレクトリが未設定です（ZES_HOME または HOME を指定してください）" >&2
+  exit 64
+fi
+if [ ! -d "$HOME_DIR" ]; then
+  echo "ZES: ZES_HOME/HOME がディレクトリではありません: $HOME_DIR" >&2
+  exit 64
+fi
+case "$HOME_DIR" in -*) HOME_DIR="./$HOME_DIR" ;; esac
+HOME_DIR="$(cd -- "$HOME_DIR" 2>/dev/null && pwd -P)"
+if [ -z "$HOME_DIR" ] || [ ! -d "$HOME_DIR" ]; then
+  echo "ZES: ZES_HOME/HOME を解決できません" >&2
+  exit 64
+fi
+
 if [ -n "$TARGET_URL" ]; then
   case "$TARGET_URL" in
     http://*|https://*) ;;
@@ -145,37 +162,78 @@ log_section() {
   CURRENT_MODULE="$1"
   printf '\n%s== %s %s ==%s\n' "$C_CYN" "$1" "${2:-}" "$C_OFF" >&3
 }
-log_info() { printf '%s  %s%s\n' "$C_DIM" "$*" "$C_OFF" >&3; }
+log_info() { zes_enc "$*"; printf '%s  %s%s\n' "$C_DIM" "$ENC_TERM" "$C_OFF" >&3; }
 
 sha256_str() {
   if command -v sha256sum >/dev/null 2>&1; then printf '%s' "$1" | sha256sum | awk '{print $1}'
   else printf '%s' "$1" | shasum -a 256 | awk '{print $1}'; fi
 }
 sha256_file() {
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum -- "$1" 2>/dev/null | awk '{print $1}'
-  else shasum -a 256 -- "$1" 2>/dev/null | awk '{print $1}'; fi
+  # 標準入力から読む（ファイル名に \ や改行があると sha256sum は行頭に "\" を付けてエスケープするため）
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum <"$1" 2>/dev/null | awk '{print $1}'
+  else shasum -a 256 <"$1" 2>/dev/null | awk '{print $1}'; fi
 }
 
-json_escape() {
+# 文字列の符号化（JSON / 人間向けログ / ID 計算で同じ正規形を使う）
+#   zes_enc STR は次の変数を設定する:
+#     ENC_NORM … 正規形。不正な UTF-8 バイトを 1 バイトずつ "\xHH"（4 文字のテキスト）に置き換え、それ以外は元のまま。
+#                findings[].id と JSON の値（デコード後）はこの正規形に一致する
+#     ENC_JSON … ENC_NORM の JSON 文字列表現（引用符なし）。" と \ をエスケープし、制御文字（U+0000〜U+001F・U+007F）と
+#                C1 制御文字（U+0080〜U+009F）を \u00XX にする（往復可能）
+#     ENC_TERM … 人間向けログ用。制御文字を \xHH、C1 制御文字を \u00HH で表示（端末エスケープ注入の防止）
+#     ENC_BAD  … 不正な UTF-8 バイトを含んでいれば 1
+#   印字可能 ASCII のみの文字列は awk を起動せずに処理する
+ZES_ENC_AWK='
+  BEGIN {
+    for (k = 1; k < 256; k++) ord[sprintf("%c", k)] = k
+    s = ENVIRON["ZES_ENC"]; n = length(s); nb = ""; js = ""; tm = ""; bad = 0; i = 1
+    while (i <= n) {
+      c = substr(s, i, 1); b = ord[c]
+      if (b < 128) {
+        if (b < 32 || b == 127) { h = sprintf("%02x", b); nb = nb "\\x" h; js = js "\\u00" h; tm = tm "\\x" h }
+        else if (c == "\\") { nb = nb "\\x5c"; js = js "\\\\"; tm = tm c }
+        else if (c == "\"") { nb = nb c; js = js "\\\""; tm = tm c }
+        else { nb = nb c; js = js c; tm = tm c }
+        i++; continue }
+      L = 0; cp = 0
+      if (b >= 194 && b <= 223) { L = 2; cp = b - 192 } else if (b >= 224 && b <= 239) { L = 3; cp = b - 224 } else if (b >= 240 && b <= 244) { L = 4; cp = b - 240 }
+      ok = (L > 0 && i + L - 1 <= n)
+      for (k = 1; ok && k < L; k++) { b2 = ord[substr(s, i + k, 1)]; if (b2 < 128 || b2 > 191) ok = 0; else cp = cp * 64 + b2 - 128 }
+      if (ok && ((L == 3 && (cp < 2048 || (cp >= 55296 && cp <= 57343))) || (L == 4 && (cp < 65536 || cp > 1114111)))) ok = 0
+      if (!ok) { h = sprintf("%02x", b); nb = nb "\\x5cx" h; js = js "\\\\x" h; tm = tm "\\x" h; bad = 1; i++; continue }
+      q = substr(s, i, L); nb = nb q
+      if (cp >= 128 && cp <= 159) { js = js sprintf("\\u%04x", cp); tm = tm sprintf("\\u%04x", cp) } else { js = js q; tm = tm q }
+      i += L }
+    print nb; print js; print tm; print bad }'
+zes_enc() {
   local s="$1"
-  s="${s//\\/\\\\}"
-  s="${s//\"/\\\"}"
-  s="${s//$'\n'/\\n}"
-  s="${s//$'\r'/\\r}"
-  s="${s//$'\t'/\\t}"
-  printf '%s' "$s" | tr -d '\000-\010\013\014\016-\037\177'
+  if [[ "$s" != *[![:print:]]* ]]; then
+    ENC_NORM="$s"; ENC_TERM="$s"; ENC_BAD=0
+    s="${s//\\/\\\\}"; ENC_JSON="${s//\"/\\\"}"
+    return 0
+  fi
+  local -a enc_r=()
+  mapfile -t enc_r < <(ZES_ENC="$s" awk "$ZES_ENC_AWK")
+  # 1 行目は %b 形式（全てのバックスラッシュは \xHH）で、制御文字を含む正規形を改行なしで受け渡す
+  printf -v ENC_NORM '%b' "${enc_r[0]-}"
+  ENC_JSON="${enc_r[1]-}"; ENC_TERM="${enc_r[2]-}"; ENC_BAD="${enc_r[3]:-0}"
 }
+json_escape() { zes_enc "$1"; printf '%s' "$ENC_JSON"; }
 json_str_or_null() { if [ -n "$1" ]; then printf '"%s"' "$(json_escape "$1")"; else printf 'null'; fi; }
 
 # emit LEVEL CAMPAIGN PATH DETAIL [SKILLPACT_JSON]
-#   findings[].id は module|campaign|path|detail から決定的に生成（§6 保証）
+#   findings[].id は module|campaign|path|detail（JSON に出力する値そのもの＝zes_enc の正規形）から決定的に生成（§6 保証）
 #   evidence_hash は通常ファイルならその SHA-256、それ以外は detail の SHA-256
+#   パスに不正な UTF-8 バイトがある場合、path は "\xHH" 置換後の値になるため errors[] に non_utf8_path を記録する
 declare -A SEEN_IDS=()
 emit() {
   local level="$1" campaign="$2" path="$3" detail="$4" sp="${5:-}"
   local module="$CURRENT_MODULE"
-  local id ev color
-  id="sha256:$(sha256_str "$module|$campaign|$path|$detail")"
+  local id ev color np jp tp pbad nd jd td nc jc
+  zes_enc "$path"; np="$ENC_NORM"; jp="$ENC_JSON"; tp="$ENC_TERM"; pbad="$ENC_BAD"
+  zes_enc "$detail"; nd="$ENC_NORM"; jd="$ENC_JSON"; td="$ENC_TERM"
+  zes_enc "$campaign"; nc="$ENC_NORM"; jc="$ENC_JSON"
+  id="sha256:$(sha256_str "$module|$nc|$np|$nd")"
   [ -n "${SEEN_IDS[$id]:-}" ] && return 0
   SEEN_IDS[$id]=1
   ev=""
@@ -183,32 +241,34 @@ emit() {
     # 100MB 超（モデル重み等）は全体ハッシュを避け、パス・サイズ・mtime のハッシュで代替
     local sz; sz="$(stat_size "$path")"
     if [ "${sz:-0}" -le 104857600 ]; then ev="$(sha256_file "$path")"
-    else ev="$(sha256_str "$path|$sz|$(stat_mtime "$path")")"; fi
+    else ev="$(sha256_str "$np|$sz|$(stat_mtime "$path")")"; fi
   fi
-  [ -n "$ev" ] || ev="$(sha256_str "$detail")"
+  [ -n "$ev" ] || ev="$(sha256_str "$nd")"
   {
     printf '{"id":"%s","level":"%s","module":"%s","campaign":%s,"path":%s,"detail":%s,"evidence_hash":"sha256:%s"' \
-      "$id" "$level" "$(json_escape "$module")" "$(json_str_or_null "$campaign")" "$(json_str_or_null "$path")" \
-      "$(json_str_or_null "$detail")" "$ev"
+      "$id" "$level" "$(json_escape "$module")" "$( [ -n "$campaign" ] && printf '"%s"' "$jc" || printf null)" \
+      "$( [ -n "$path" ] && printf '"%s"' "$jp" || printf null)" "$( [ -n "$detail" ] && printf '"%s"' "$jd" || printf null)" "$ev"
     [ -n "$sp" ] && printf ',"skillpact":%s' "$sp"
     printf '}\n'
   } >>"$FINDINGS_FILE"
+  [ "$pbad" = "1" ] && record_error "core" "non_utf8_path:$np"
   case "$level" in
     CRITICAL) color="$C_RED" ;; HIGH) color="$C_MAG" ;; MEDIUM) color="$C_YEL" ;; *) color="$C_DIM" ;;
   esac
-  printf '%s[%s]%s %s%s\n' "$color" "$level" "$C_OFF" "$detail" "${path:+ : $path}" >&3
+  printf '%s[%s]%s %s%s\n' "$color" "$level" "$C_OFF" "$td" "${path:+ : $tp}" >&3
 }
 critical() { emit CRITICAL "$@"; }
 high()     { emit HIGH "$@"; }
 medium()   { emit MEDIUM "$@"; }
 low()      { emit LOW "$@"; }
 info()     { emit INFO "$@"; }
-safe()     { printf '%s[SAFE]%s %s\n' "$C_GRN" "$C_OFF" "$*" >&3; }
+safe()     { zes_enc "$*"; printf '%s[SAFE]%s %s\n' "$C_GRN" "$C_OFF" "$ENC_TERM" >&3; }
 
 record_error() {
-  local module="$1" reason="$2"
-  printf '{"module":"%s","reason":"%s"}\n' "$(json_escape "$module")" "$(json_escape "$reason")" >>"$ERRORS_FILE"
-  printf '%s[ERROR]%s %s: %s\n' "$C_YEL" "$C_OFF" "$module" "$reason" >&3
+  local module="$1" reason="$2" jr tr
+  zes_enc "$reason"; jr="$ENC_JSON"; tr="$ENC_TERM"
+  printf '{"module":"%s","reason":"%s"}\n' "$(json_escape "$module")" "$jr" >>"$ERRORS_FILE"
+  printf '%s[ERROR]%s %s: %s\n' "$C_YEL" "$C_OFF" "$module" "$tr" >&3
 }
 
 # ---------------------------------------------------------------------------
@@ -763,7 +823,10 @@ intel_files() {
     cut -f3 "$TMP_DIR/intel_sha.tsv" | sort -u >"$TMP_DIR/intel_sha.lst"
     # sha256sum に一括で渡し、既知ハッシュと一致した行だけを残す（ファイル内容は出力しない）
     tr '\n' '\0' <"$FILES_LIST" | xargs -0 sha256sum -- 2>/dev/null \
-      | awk 'NR==FNR {want[$1]=1; next} ($1 in want) { h=$1; sub(/^[0-9a-f]+  /,""); print h "\t" $0 }' "$TMP_DIR/intel_sha.lst" - \
+      | awk 'NR==FNR {want[$1]=1; next}
+          # ファイル名に \ を含む行は GNU sha256sum が先頭に "\" を付け、名前の \ を \\ にエスケープする
+          { esc = 0; if (substr($0, 1, 1) == "\\") { esc = 1; $0 = substr($0, 2) } }
+          ($1 in want) { h=$1; sub(/^[0-9a-f]+  /,""); if (esc) { gsub(/\\\\/, "\001"); gsub(/\001/, "\\") } print h "\t" $0 }' "$TMP_DIR/intel_sha.lst" - \
       | while IFS=$'\t' read -r h f; do
           IFS=$'\t' read -r camp sev _ < <(grep -F -- "$h" "$TMP_DIR/intel_sha.tsv" | head -n1)
           critical "$camp" "$f" "既知の悪性ファイル（SHA-256 一致）"
