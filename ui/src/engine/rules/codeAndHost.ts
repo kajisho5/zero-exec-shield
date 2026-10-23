@@ -2,6 +2,7 @@
 // ブラウザで判定できるのは「投入されたファイルの中身」まで。ホスト状態は CliOnlyNotice で CLI に案内する。
 import { HOME_RC_FILES, homeLike, named, push, readable, rootRel, type RuleCtx } from '../context';
 import { extname } from '../util';
+import { collectDeps } from './supplyChain';
 
 const RC = /(^|\/)(\.bashrc|\.bash_profile|\.profile|\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bash_login)$/;
 
@@ -28,7 +29,7 @@ export function buildHookRules(ctx: RuleCtx): void {
 }
 
 export function modelSupplyRules(ctx: RuleCtx): void {
-  ctx.checks.add('s32-pickle-ext').add('s32-weights-only').add('s32-extra-index').add('s36-trust-remote').add('s36-dataset-exec').add('s36-pickle-load');
+  ctx.checks.add('s32-pickle-ext').add('s32-weights-only').add('s32-extra-index').add('s36-trust-remote').add('s36-dataset-exec').add('s36-pickle-load').add('s36-lerobot');
   for (const f of ctx.files) {
     const e = extname(f.name);
     if (f.relPath.includes('node_modules/')) continue;
@@ -46,6 +47,10 @@ export function modelSupplyRules(ctx: RuleCtx): void {
     if (f.name.endsWith('.py') && !/(site|dist)-packages\/|node_modules\//.test(f.relPath) && /(def __reduce__|pickle\.loads?\(|dill\.loads?\(|cloudpickle\.loads?\()/.test(f.text)) {
       push(ctx, { level: 'MEDIUM', module: '§36', campaign: 'hf-supply-chain', path: f.relPath, detail: 'pickle 系デシリアライズ（__reduce__/pickle.loads/dill）', ruleId: 's36-pickle-load', evidenceSha: f.sha256 });
     }
+  }
+  // lerobot（CVE-2026-25874。ioc に修正版が未定義のため版に依らず要確認。CLI check_s36 と同じく依存インベントリから）
+  for (const d of collectDeps(ctx)) {
+    if (d.eco === 'pypi' && d.name === 'lerobot') push(ctx, { level: 'HIGH', module: '§36', campaign: 'hf-lerobot-rce', path: d.path, detail: `lerobot ${d.version}: CVE-2026-25874（CVSS 9.8）の修正版を確認してください（ioc に修正版未定義）`, ruleId: `s36-lerobot:${d.version}`, evidenceSha: d.sha });
   }
 }
 
