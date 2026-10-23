@@ -21,7 +21,7 @@
       "campaign": "hf-lerobot-rce",
       "eco": "pypi",
       "name": "lerobot",
-      "match": "versions",
+      "match": "vulnerable_versions",
       "bad_versions": [
         "<=0.5.1"
       ],

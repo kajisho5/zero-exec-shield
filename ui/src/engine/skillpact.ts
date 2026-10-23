@@ -1,264 +1,543 @@
-// §49 SkillPact（CLI check_skillpact と同じ規則をブラウザで再現）
-// - 契約・ポリシー・前バージョン契約は JSON.parse のみ。スキル本体は実行しない
-// - L2 記録は存在と SHA-256 のみ、L3 署名は署名ファイルの存在のみ（検証しない・信頼判定に使わない）
+// §49 SkillPact 契約（実験的）— CLI check_skillpact と同じ規則をブラウザで再現する。
+// AI エージェントのスキルが「宣言した権限」（skill.contract.json、SkillPact 0.8 形式
+// https://github.com/kajisho5/skillpact）と「コードが実際にしていること」（静的解析）が一致するかを確かめる。
+// - 契約・ポリシーは JSON として読むのみ。スキル本体・テストは実行しない。署名は検証しない（signed = 署名欄あり・未検証）
+// - level は自己申告を使わず、ZES の部分検査に合格した場合のみ 'L1'。L2/L3 は ZES では判定しない（L3 でも安全を意味しない）
+// - 契約のないスキルは比較対象外（影響の大きい効果が見える場合のみ参考 INFO）。契約付きスキル配下の SKILL.md は報告しない
 import { push, type RuleCtx } from './context';
-import type { Effect, FileInput, RuleResult, Severity, SkillPactAnalysis, SkillPactFindingField } from './types';
-import { EFFECTS, SEVERITY_RANK } from './types';
-import { basename, dirname, ere, splitMarkdown, versionCmp } from './util';
+import type { DiffAnomaly, Effect, FileInput, RuleResult, Severity, SkillPactAnalysis, SkillPactDivergence, SkillPactFindingField } from './types';
+import { SEVERITY_RANK } from './types';
+import { basename, dirname, ere } from './util';
 
-type Contract = Record<string, unknown>;
-const ORDER = ['exec', 'network', 'write', 'read', 'secrets', 'spend', 'persist', 'longrun'];
-const sortEffects = (xs: Iterable<string>) => [...new Set(xs)].sort((a, b) => (ORDER.indexOf(a) + 99) % 99 - (ORDER.indexOf(b) + 99) % 99 || a.localeCompare(b));
-const RISKY = ['exec', 'network', 'secrets'];
-const SCRIPT_FENCES = new Set(['bash', 'sh', 'shell', 'zsh', 'fish', 'console', 'shell-session', 'powershell', 'ps1', 'pwsh', 'cmd', 'bat', 'python', 'python3', 'py', 'js', 'javascript', 'node', 'mjs', 'ts', 'typescript', 'ruby', 'rb', 'perl', 'php']);
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
+const isStr = (v: unknown): v is string => typeof v === 'string';
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const strs = (v: unknown): string[] => arr(v).filter(isStr);
+const HIGH_EFFECTS: Effect[] = ['exec', 'network', 'spend', 'send'];
+const CONTRACT = 'skill.contract.json';
 
-function normEffect(e: unknown): string {
-  if (typeof e === 'string') return e;
-  if (e && typeof e === 'object') {
-    const o = e as Record<string, unknown>;
-    const base = String(o['effect'] ?? o['type'] ?? o['name'] ?? '');
-    return o['scope'] != null ? `${base}:${String(o['scope'])}` : base;
-  }
-  return String(e);
-}
-
-function tokens(c: Contract): string[] {
-  const own = Array.isArray(c['effects']) ? (c['effects'] as unknown[]).map(normEffect) : [];
-  const ops = Array.isArray(c['operations']) ? (c['operations'] as Record<string, unknown>[]).flatMap((o) => (Array.isArray(o['effects']) ? (o['effects'] as unknown[]).map(normEffect) : [])) : [];
-  return [...new Set([...own, ...ops].filter(Boolean))].sort();
-}
-const baseOf = (t: string) => t.split(':')[0] ?? t;
-const str = (v: unknown): string | null => (v == null ? null : typeof v === 'object' ? ((v as Record<string, unknown>)['name'] as string) ?? JSON.stringify(v) : String(v));
-
-function parse(f: FileInput | undefined): Contract | null | 'invalid' {
-  if (!f) return null;
-  if (f.text == null) return 'invalid';
+// ---------------------------------------------------------------- I-JSON（spec §4.1）
+/** 重複キー・深さ 64 超・±(2^53−1) 外の数値・孤立サロゲート・不正 UTF-8（U+FFFD）を検出する。問題なければ null。 */
+export function ijsonProblem(text: string): string | null {
+  const s = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  let value: unknown;
   try {
-    const v = JSON.parse(f.text) as unknown;
-    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Contract) : 'invalid';
+    value = JSON.parse(s);
   } catch {
-    return 'invalid';
+    return 'not valid JSON (or lone surrogate)';
   }
+  if (!isObj(value)) return 'top-level value is not an object';
+  let i = 0;
+  let problem: string | null = null;
+  const ws = () => { while (i < s.length && ' \t\r\n'.includes(s[i]!)) i++; };
+  const str = (): string => {
+    let out = '';
+    i++; // "
+    while (i < s.length && s[i] !== '"') {
+      if (s[i] === '\\') {
+        const c = s[i + 1];
+        if (c === 'u') { out += String.fromCharCode(parseInt(s.slice(i + 2, i + 6), 16)); i += 6; continue; }
+        out += c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c === 'b' ? '\b' : c === 'f' ? '\f' : c;
+        i += 2;
+      } else out += s[i++];
+    }
+    i++;
+    if (/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|�/.test(out)) problem ??= 'invalid UTF-8 or lone surrogate';
+    return out;
+  };
+  const val = (depth: number): void => {
+    if (depth > 64) { problem ??= 'nesting deeper than 64'; }
+    ws();
+    const c = s[i];
+    if (c === '{') {
+      i++; ws();
+      const seen = new Set<string>();
+      if (s[i] === '}') { i++; return; }
+      for (;;) {
+        ws();
+        const k = str();
+        if (seen.has(k)) problem ??= 'duplicate member name';
+        seen.add(k);
+        ws(); i++; // :
+        val(depth + 1);
+        ws();
+        if (s[i] === ',') { i++; continue; }
+        i++; return;
+      }
+    } else if (c === '[') {
+      i++; ws();
+      if (s[i] === ']') { i++; return; }
+      for (;;) {
+        val(depth + 1); ws();
+        if (s[i] === ',') { i++; continue; }
+        i++; return;
+      }
+    } else if (c === '"') {
+      str();
+    } else {
+      const m = /^-?\d+(\.\d+)?([eE][+-]?\d+)?|^(true|false|null)/.exec(s.slice(i, i + 400));
+      const tok = m?.[0] ?? '';
+      i += tok.length || 1;
+      if (/^-?\d/.test(tok)) {
+        const n = Number(tok);
+        if (!Number.isFinite(n) || Math.abs(n) > Number.MAX_SAFE_INTEGER) problem ??= 'number outside ±(2^53-1)';
+      }
+    }
+  };
+  val(1);
+  return problem;
 }
 
-function skillDirs(ctx: RuleCtx, contractNames: string[]): string[] {
-  const dirs = new Set<string>();
-  for (const f of ctx.files) {
-    if (f.name === 'SKILL.md' || f.name === 'skill.contract.json') dirs.add(dirname(f.relPath));
-    if (/(^|\/)\.skillpact\/contract\.json$/.test(f.relPath)) dirs.add(dirname(dirname(f.relPath)));
+// ---------------------------------------------------------------- globs（spec §6.1。参照実装 core._glob_re と同じ）
+const reEsc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function globRe(p: string): RegExp {
+  const parts = p.split('/');
+  let out = '';
+  let glue = false;
+  parts.forEach((seg, i) => {
+    const sep = i === 0 || glue ? '' : '/';
+    glue = false;
+    if (seg === '**') {
+      if (i === parts.length - 1) out += i ? '(?:/.*)?' : '.*';
+      else { out += sep + '(?:[^/]+/)*'; glue = true; }
+      return;
+    }
+    out += sep + [...seg.replace(/\*+/g, '*')].map((ch) => (ch === '*' ? '[^/]*' : ch === '?' ? '[^/]' : reEsc(ch))).join('');
+  });
+  return new RegExp(`^${out}$`, 's');
+}
+const gmatch = (s: string, p: string) => globRe(p).test(s);
+function hostMatch(h0: string, p0: string): boolean {
+  if (p0 === '@local') return h0 === '@local';
+  const h = h0.toLowerCase().replace(/\.$/, '');
+  const p = p0.toLowerCase().replace(/\.$/, '');
+  if (p === '*') return true;
+  const hl = h.split('.');
+  const pl = p.split('.');
+  const lab = (a: string, q: string) => new RegExp(`^${[...q].map((ch) => (ch === '*' ? '[^.]*' : ch === '?' ? '.' : reEsc(ch))).join('')}$`, 's').test(a);
+  if ((pl[0] === '*' || pl[0] === '**') && pl.length > 1) {
+    const rest = pl.slice(1);
+    if (hl.length < rest.length + (pl[0] === '*' ? 1 : 0)) return false;
+    return rest.every((q, i) => lab(hl[hl.length - rest.length + i]!, q));
   }
-  void contractNames;
-  return [...dirs].sort();
+  return hl.length === pl.length && hl.every((a, i) => lab(a, pl[i]!));
+}
+const literal = (s: string) => s.split('/').map((seg) => (seg === '**' ? '\u0002/\u0002' : seg.replace(/\*/g, '\u0001*\u0001'))).join('/');
+const kindOf = (e: string) => (e === 'read' || e === 'write' ? 'path' : e === 'network' ? 'host' : 'generic');
+export const traversal = (sc: string) => sc.includes('\\') || (sc.startsWith('/') ? sc.slice(1) : sc).split('/').some((x) => x === '' || x === '.' || x === '..');
+function covered(scope: string[], pats: string[], kind: string): boolean {
+  if (!scope.length) return false;
+  if (kind === 'path' && scope.some(traversal)) return false;
+  return scope.every((s) => pats.some((p) => s === p || (kind === 'host' ? hostMatch(s, p) : gmatch(literal(s), p))));
+}
+const ipathBad = (rel: string) => rel === '' || new TextEncoder().encode(rel).length > 1024 || rel.startsWith('/') || /^[A-Za-z]:/.test(rel)
+  || rel.includes('\\') || [...rel].some((c) => c.charCodeAt(0) < 32) || rel.split('/').length > 32 || rel.split('/').some((x) => x === '' || x === '.' || x === '..');
+const truthy = (v: unknown) => v != null && v !== false && v !== '' && v !== 0 && !(Array.isArray(v) && !v.length) && !(isObj(v) && !Object.keys(v).length);
+
+function semv(v: unknown): number[] | null {
+  if (!isStr(v)) return null;
+  const m = /^(\d+)\.(\d+)\.(\d+)(-[^+]*)?/.exec(v);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3]), m[4] ? 0 : 1] : null;
+}
+const cmpv = (a: number[], b: number[]) => { for (let i = 0; i < 4; i++) if (a[i] !== b[i]) return a[i]! < b[i]! ? -1 : 1; return 0; };
+const rank = (l: unknown) => (l === 'any' ? 2 : l === 'scoped' ? 1 : 0);
+
+function authors(c: Obj): string[] {
+  const sigs = arr(isObj(c['integrity']) ? (c['integrity'] as Obj)['signatures'] : undefined);
+  const out = sigs.filter(isObj).filter((s) => (s['role'] ?? 'author') === 'author')
+    .map((s) => (s['type'] === 'sigstore' ? `${s['instance'] === 'staging' ? 'sigstore-staging' : 'sigstore'}:${String(s['issuer'])}|${String(s['identity'])}` : s['key']))
+    .filter(isStr);
+  return [...new Set(out)].sort();
+}
+const lvl = (c: Obj, e: string): string => {
+  const p = isObj(c['permissions']) ? (c['permissions'] as Obj)[e] : undefined;
+  const l = isObj(p) ? p['level'] : undefined;
+  return isStr(l) ? l : 'none';
+};
+const scopes = (c: Obj, e: string): string[] => {
+  const p = isObj(c['permissions']) ? (c['permissions'] as Obj)[e] : undefined;
+  return isObj(p) ? strs(p['scope']) : [];
+};
+
+// ---------------------------------------------------------------- 契約の部分検査（CLI SP_ANALYZE と同じ）
+interface Analysis {
+  vstatus: 'ok' | 'unsupported'; cv: string | null; name: string | null; sver: string | null; errors: string[]; permsOk: boolean;
+  declared: Effect[]; signed: boolean; authors: string[]; signers: string[]; level: string | null; divergence: Omit<SkillPactDivergence, 'level'>[];
+}
+interface Observed { exec: boolean; network: boolean; write: boolean; spend: boolean; send: boolean; read: boolean; durable: boolean }
+
+function analyze(c: Obj, R: RuleCtx['ioc']['skillpact'], files: string[], hashes: Map<string, string | null>, fm: string, obs: Observed): Analysis {
+  const EFF = R.effects;
+  const cvRaw = c['contract_version'];
+  const vs = isStr(cvRaw) && R.contract_versions.includes(cvRaw) ? 'ok' : 'unsupported';
+  const v08 = isStr(cvRaw) && /^\d+\.\d+$/.test(cvRaw) && cmpv([...cvRaw.split('.').map(Number), 0, 0], [0, 8, 0, 0]) >= 0;
+  const schema = new Set<string>();
+  const S = () => schema.add('SCHEMA');
+  const keys = Object.keys(c);
+  if (keys.some((k) => !R.contract_keys.includes(k))) S();
+  if (['contract_version', 'skill', 'permissions', 'capabilities'].some((k) => !(k in c))) S();
+  if ('kind' in c && !['tool', 'instructions'].includes(c['kind'] as string)) S();
+  if ('$schema' in c && !isStr(c['$schema'])) S();
+  if ('x' in c && (!isObj(c['x']) || Object.keys(c['x']).some((k) => !/^[a-z0-9][a-z0-9-]*$/.test(k)))) S();
+  const sk = c['skill'];
+  if (!isObj(sk) || Object.keys(sk).some((k) => !['name', 'version', 'license', 'homepage', 'source', 'authors', 'native_contract'].includes(k))
+    || !(isStr(sk['name']) && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(sk['name']) && sk['name'].length <= 64)
+    || !(isStr(sk['version']) && /^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$/.test(sk['version']))) S();
+  const P = c['permissions'];
+  if (!isObj(P) || JSON.stringify(Object.keys(P).sort()) !== JSON.stringify([...EFF].sort())) S();
+  else for (const v of Object.values(P)) {
+    if (!isObj(v) || Object.keys(v).some((k) => !['level', 'scope', 'why', 'confirm'].includes(k)) || !['none', 'scoped', 'any'].includes(v['level'] as string)
+      || ('scope' in v && (!Array.isArray(v['scope']) || v['scope'].some((x) => !isStr(x)))) || ('confirm' in v && !['never', 'each', 'session'].includes(v['confirm'] as string))) S();
+  }
+  const caps = c['capabilities'];
+  if (!Array.isArray(caps)) S();
+  else for (const cap of caps) {
+    if (!isObj(cap) || Object.keys(cap).some((k) => !R.capability_keys.includes(k))) { S(); continue; }
+    if (!isStr(cap['id']) || !isStr(cap['summary']) || !Array.isArray(cap['effects'])) { S(); continue; }
+    const ef = cap['effects'] as unknown[];
+    if (!ef.every((e) => EFF.includes(e as Effect)) || new Set(ef).size !== ef.length) { S(); continue; }
+    const ce = cap['conditional_effects'] ?? [];
+    if (!Array.isArray(ce) || ce.some((x) => !isObj(x) || !EFF.includes(x['effect'] as Effect))) { S(); continue; }
+    const es = cap['effect_scopes'] ?? {};
+    if (!isObj(es) || Object.keys(es).some((k) => !EFF.includes(k as Effect)) || Object.values(es).some((v) => !Array.isArray(v) || v.some((x) => !isStr(x)))) S();
+  }
+  if ('integrity' in c) {
+    const I = c['integrity'];
+    if (!isObj(I) || Object.keys(I).some((k) => !['algorithm', 'canonicalization', 'exclude', 'files', 'signatures'].includes(k))) S();
+    else if ('algorithm' in I && I['algorithm'] !== 'sha256') S();
+    else if (!isObj(I['files'] ?? {}) || Object.values((I['files'] ?? {}) as Obj).some((h) => !isStr(h) || !/^[0-9a-f]{64}$/.test(h))) S();
+    else if (!Array.isArray(I['exclude'] ?? []) || arr(I['exclude']).some((x) => !isStr(x) || !x.length)) S();
+    else if (!Array.isArray(I['signatures'] ?? []) || arr(I['signatures']).some((x) => !isObj(x) || !['ed25519', 'sigstore'].includes(x['type'] as string) || ('role' in x && !['author', 'reviewer', 'scanner'].includes(x['role'] as string)))) S();
+  }
+  if ('tests' in c) {
+    const T = c['tests'];
+    if (!isObj(T) || Object.keys(T).some((k) => !['setup', 'cases'].includes(k))) S();
+    else if (!Array.isArray(T['cases'] ?? []) || arr(T['cases']).some((x) => !isObj(x) || !('id' in x && 'run' in x && 'expect' in x))) S();
+  }
+
+  const cross = new Set<string>();
+  if (vs === 'ok' && !schema.size) {
+    try {
+      const capsA = caps as Obj[];
+      const perms = P as Record<string, Obj>;
+      const ids = capsA.map((x) => x['id'] as string);
+      if (new Set(ids).size !== ids.length) cross.add('DUP_CAPABILITY');
+      for (const cap of capsA) {
+        for (const e of [...(cap['effects'] as string[]), ...arr(cap['conditional_effects']).map((x) => (x as Obj)['effect'] as string)]) if (lvl(c, e) === 'none') cross.add('UNDECLARED_EFFECT');
+      }
+      for (const e of EFF) if (perms[e]!['level'] === 'scoped' && !strs(perms[e]!['scope']).length) cross.add('SCOPE_EMPTY');
+      for (const e of ['read', 'write']) if (scopes(c, e).some(traversal)) cross.add('SCOPE_TRAVERSAL');
+      const rn = [...arr((c['requirements'] as Obj | undefined)?.['binaries']), ...arr((c['requirements'] as Obj | undefined)?.['runtimes'])].map((b) => (b as Obj)['name']);
+      const fk = arr((c['requirements'] as Obj | undefined)?.['binaries']).flatMap((b) => Object.keys(((b as Obj)['features_check'] ?? {}) as Obj));
+      const cliTokens = (cap: Obj) => strs(isObj(cap['entry']) ? (cap['entry'] as Obj)['cli'] : undefined);
+      for (const cap of capsA) {
+        for (const [e, v] of Object.entries((cap['effect_scopes'] ?? {}) as Record<string, string[]>)) {
+          if ((e === 'read' || e === 'write') && v.some(traversal)) cross.add('SCOPE_TRAVERSAL');
+          if (lvl(c, e) === 'scoped' && !covered(v, scopes(c, e), kindOf(e))) cross.add('SCOPE_WIDENED');
+        }
+        for (const q of arr(cap['requires'])) if (!rn.includes(q)) cross.add('UNKNOWN_REQUIREMENT');
+        for (const f of strs(cap['requires_features'])) if (!fk.includes(f.split(':')[0]!)) cross.add('UNKNOWN_FEATURE_KIND');
+        for (const t of cliTokens(cap)) {
+          if (!t.startsWith('$SKILL_DIR/')) continue;
+          const r = t.slice('$SKILL_DIR/'.length);
+          if (!files.some((f) => f === r || f.startsWith(r + '/'))) cross.add('ENTRY_MISSING');
+        }
+      }
+      if (fm !== '' && fm !== (sk as Obj)['name']) cross.add('NAME_MISMATCH');
+      const tests = (c['tests'] ?? {}) as Obj;
+      for (const t of arr(tests['cases']) as Obj[]) {
+        if (t['capability'] != null && !ids.includes(t['capability'] as string)) cross.add('TEST_UNKNOWN_CAPABILITY');
+        if (v08 && t['network'] === true && lvl(c, 'network') === 'none') cross.add('TEST_UNDECLARED_NETWORK');
+      }
+      const x = (c['x'] ?? {}) as Obj;
+      const draftStr = (v: unknown): boolean => (isStr(v) ? v.includes('TODO(') : Array.isArray(v) ? v.some(draftStr) : isObj(v) ? Object.values(v).some(draftStr) : false);
+      const rest = Object.fromEntries(Object.entries(c).filter(([k]) => k !== 'x'));
+      if (v08 && (truthy((x['init'] as Obj | undefined)?.['uncertain']) || truthy((x['import'] as Obj | undefined)?.['uncertain']) || draftStr(rest))) cross.add('UNCONFIRMED_DRAFT');
+      if ('integrity' in c) {
+        const I = c['integrity'] as Obj;
+        const F = (I['files'] ?? {}) as Record<string, string>;
+        if (v08 && !('SKILL.md' in F)) cross.add('INTEGRITY_EMPTY');
+        for (const [rel, h] of Object.entries(F)) {
+          if (ipathBad(rel)) cross.add('INTEGRITY_PATH');
+          else if (!hashes.has(rel)) cross.add('INTEGRITY_MISSING');
+          else { const got = hashes.get(rel); if (got != null && got !== h) cross.add('INTEGRITY_MISMATCH'); }
+        }
+        const ex = [...R.integrity.default_exclude, ...strs(I['exclude'])];
+        const prot = [...R.integrity.protected, ...R.integrity.code_extensions.map((e) => `**/*.${e}`)];
+        const toks = [...capsA.flatMap(cliTokens), ...(arr(tests['cases']) as Obj[]).flatMap((t) => (Array.isArray(t['run']) ? strs(t['run']) : strs([t['run']]))),
+          ...arr(tests['setup']).flatMap((s) => (Array.isArray(s) ? strs(s) : strs([s])))];
+        const must = toks.flatMap((t) => [...t.matchAll(/\$SKILL_DIR\/([^\s'"]+)/g)].map((m) => m[1]!));
+        for (const rel of files) {
+          if (rel === CONTRACT || rel in F) continue;
+          const isProt = prot.some((p) => gmatch(rel, p)) || must.includes(rel);
+          if ((isProt || !ex.some((p) => gmatch(rel, p))) && v08) cross.add('INTEGRITY_UNLISTED');
+        }
+        const sigKeys = arr(I['signatures']).map((s) => { const o = s as Obj; return o['type'] === 'sigstore' ? `sigstore:${String(o['issuer'])}|${String(o['identity'])}|${String(o['instance'])}` : String(o['key']); });
+        if (new Set(sigKeys).size !== sigKeys.length) cross.add('DUP_SIGNATURE');
+      }
+    } catch {
+      cross.add('SCHEMA');
+    }
+  }
+  const errors = [...new Set([...schema, ...cross])].sort();
+  const permsOk = vs === 'ok' && isObj(P) && EFF.every((e) => isObj((P as Obj)[e]) && ['none', 'scoped', 'any'].includes(((P as Obj)[e] as Obj)['level'] as string));
+  const declared = permsOk ? EFF.filter((e) => lvl(c, e) !== 'none') : [];
+  const condScopes = (e: string) => arr(c['capabilities']).flatMap((cap) => arr(isObj(cap) ? cap['conditional_effects'] : undefined)).filter((x) => isObj(x) && x['effect'] === e).flatMap((x) => strs((x as Obj)['scope']));
+  const sens = ere(R.sensitive_scope_regex, 'i');
+  const secretRead = lvl(c, 'read') === 'any' || [...scopes(c, 'read'), ...condScopes('read')].some((s) => R.broad_scopes.includes(s) || !!sens?.test(s));
+  const durableWrite = lvl(c, 'write') === 'any' || [...scopes(c, 'write'), ...condScopes('write')].some((s) => !R.ephemeral_scope_prefixes.some((p) => s.startsWith(p)));
+  const divergence: Omit<SkillPactDivergence, 'level'>[] = [];
+  if (permsOk) {
+    for (const e of HIGH_EFFECTS) if (obs[e as keyof Observed] && lvl(c, e) === 'none') divergence.push({ effect: e, why: 'none' });
+    if (obs.read && !secretRead) divergence.push({ effect: 'read', why: lvl(c, 'read') === 'none' ? 'none' : 'scope', sensitive: true });
+    if (obs.durable && !durableWrite) divergence.push({ effect: 'write', why: lvl(c, 'write') === 'none' ? 'none' : 'scope', durable: true });
+    else if (obs.write && lvl(c, 'write') === 'none') divergence.push({ effect: 'write', why: 'none' });
+  }
+  const sigs = arr(isObj(c['integrity']) ? (c['integrity'] as Obj)['signatures'] : undefined);
+  return {
+    vstatus: vs, cv: isStr(cvRaw) ? cvRaw : cvRaw == null ? null : JSON.stringify(cvRaw),
+    name: isObj(sk) && isStr(sk['name']) ? sk['name'] : null, sver: isObj(sk) && isStr(sk['version']) ? sk['version'] : null,
+    errors, permsOk, declared, signed: sigs.length > 0, authors: authors(c),
+    signers: [...new Set(sigs.filter(isObj).filter((s) => (s['role'] ?? 'author') === 'author').map((s) => s['signer']).filter(isStr))].sort(),
+    level: vs === 'ok' && !errors.length ? 'L1' : null, divergence,
+  };
 }
 
-function skillFiles(ctx: RuleCtx, dir: string, all: string[]): FileInput[] {
-  const nested = all.filter((d) => d !== dir && (dir === '' || d.startsWith(dir + '/')));
-  return ctx.files.filter((f) => (dir === '' || f.relPath.startsWith(dir + '/')) && !nested.some((n) => f.relPath.startsWith(n + '/')));
+// ---------------------------------------------------------------- 静的解析（CLI sp_extract / sp_observed と同じ）
+function frontmatterName(text: string): string {
+  const lines = text.replace(/^﻿/, '').split(/\r?\n/);
+  if (!/^---\s*$/.test(lines[0] ?? '')) return '';
+  for (let i = 1; i < lines.length; i++) {
+    const l = lines[i]!;
+    if (/^---\s*$/.test(l)) return '';
+    if (l.startsWith('name:')) {
+      const v = l.replace(/^name:\s*/, '').replace(/\s+$/, '');
+      return /^".*"$|^'.*'$/.test(v) ? v.slice(1, -1) : v;
+    }
+  }
+  return '';
 }
+
+function observe(ctx: RuleCtx, files: FileInput[], policyPaths: Set<string>): Observed {
+  const R = ctx.ioc.skillpact;
+  let code = '';
+  let tools = '';
+  let shell = false;
+  for (const f of files) {
+    if (f.name === CONTRACT || policyPaths.has(f.relPath) || f.text == null) continue;
+    if (f.name.endsWith('.md')) {
+      const lines = f.text.split('\n');
+      let i = 0;
+      if (/^---\s*$/.test(lines[0] ?? '')) {
+        i = 1;
+        while (i < lines.length && !/^---\s*$/.test(lines[i]!)) { const l = lines[i]!; if (l.startsWith('allowed-tools:')) tools += l + '\n'; code += l + '\n'; i++; }
+        i++;
+      }
+      let infence = false;
+      for (; i < lines.length; i++) {
+        const l = lines[i]!;
+        if (/^\s*(```|~~~)/.test(l)) {
+          if (!infence) { const lang = l.replace(/^\s*(```|~~~)\s*/, '').replace(/[\s{].*$/, '').toLowerCase(); if (R.shell_fence_langs.includes(lang)) shell = true; }
+          infence = !infence;
+          continue;
+        }
+        if (infence) code += l + '\n';
+      }
+    } else if (R.script_extensions.includes(f.name.split('.').pop() ?? '') || f.text.startsWith('#!')) {
+      shell = true;
+      code += f.text + '\n';
+    } else if (/\.(json|ya?ml|toml|ini|cfg)$/.test(f.name)) {
+      code += f.text + '\n';
+    }
+  }
+  const pat = (e: string) => ere((R.observed_effect_patterns[e] ?? []).join('|'), 'm');
+  const o: Observed = {
+    exec: !!pat('exec')?.test(code) || shell || /(^|[^A-Za-z])Bash([^A-Za-z]|$)/m.test(tools),
+    network: !!pat('network')?.test(code) || /(WebFetch|WebSearch)/.test(tools),
+    write: !!pat('write')?.test(code.replace(/[0-9&]?>>?\s*\/dev\/null/g, '')) || /(^|[^A-Za-z])(Write|Edit|MultiEdit|NotebookEdit)([^A-Za-z]|$)/m.test(tools),
+    spend: !!pat('spend')?.test(code), send: !!pat('send')?.test(code),
+    read: !!ere(R.sensitive_read_patterns.join('|'), 'm')?.test(code), durable: false,
+  };
+  const persist = R.persistence_markers.map((m) => (m === 'registry run' ? /registry\s+run|CurrentVersion\\Run|reg\s+add[^\n]*\\Run/i : ere(reEsc(m).replace(/ /g, '\\s+'), 'i')));
+  if (persist.some((r) => r?.test(code))) { o.durable = true; o.write = true; }
+  return o;
+}
+
+// ---------------------------------------------------------------- ポリシー（構造検査のみ）
+function policyProblem(p: Obj, R: RuleCtx['ioc']['skillpact']): string {
+  const bad: string[] = [];
+  const extra = Object.keys(p).filter((k) => !R.policy_keys.includes(k));
+  if (extra.length) bad.push('unknown key ' + extra.sort().join(','));
+  if (!R.policy_versions.includes(p['policy_version'] as string)) bad.push('policy_version');
+  const d = p['defaults'];
+  if (!isObj(d) || JSON.stringify(Object.keys(d).sort()) !== JSON.stringify([...R.effects].sort()) || Object.values(d).some((v) => !R.decision_values.includes(v as string))) bad.push('defaults');
+  const rules = p['rules'] ?? [];
+  if (!Array.isArray(rules) || rules.some((r) => !isObj(r) || Object.keys(r).some((k) => !['id', 'effect', 'scope', 'decision'].includes(k)) || !R.effects.includes(r['effect'] as Effect)
+    || !R.decision_values.includes(r['decision'] as string) || ('scope' in r && (!Array.isArray(r['scope']) || r['scope'].some((x) => !isStr(x)))))) bad.push('rules');
+  for (const k of ['never_auto_allow_any', 'trusted_keys']) if (k in p && (!Array.isArray(p[k]) || (p[k] as unknown[]).some((x) => !isStr(x)))) bad.push(k);
+  for (const k of ['require_signature', 'ask_on_destructive', 'allowlist_overrides_ask']) if (k in p && typeof p[k] !== 'boolean') bad.push(k);
+  if ('min_contract_version' in p && !(isStr(p['min_contract_version']) && /^\d+\.\d+$/.test(p['min_contract_version']))) bad.push('min_contract_version');
+  const co = p['compositions'];
+  if ('compositions' in p && (!isObj(co) || Object.keys(co).some((k) => !['exfiltration', 'persistence', 'spend_untrusted'].includes(k)) || Object.values(co).some((v) => !R.decision_values.includes(v as string)))) bad.push('compositions');
+  return [...new Set(bad)].sort().join(', ');
+}
+
+// ---------------------------------------------------------------- 本体
+const EFFECT_LABEL: Record<Effect, string> = {
+  exec: 'exec（他のプログラムの実行）', network: 'network（外部ホストとの通信）', spend: 'spend（課金・決済）', send: 'send（メール・投稿・メッセージの送信）',
+  read: 'read（機密ファイル: ~/.ssh・.env・認証情報など）', write: 'write（ファイルの書き込み）',
+};
+export const RULE_TITLES: [string, Severity][] = [
+  ['契約を JSON / 構造として検証できる', 'MEDIUM'], ['対応する contract_version（0.1〜0.8）', 'MEDIUM'],
+  ['未宣言の exec', 'HIGH'], ['未宣言の network', 'HIGH'], ['未宣言の spend', 'HIGH'], ['未宣言の send', 'HIGH'],
+  ['未宣言の read（機密ファイル）', 'MEDIUM'], ['未宣言の write（作業領域外を含む）', 'MEDIUM'], ['前版から major を上げずに権限拡大', 'HIGH'],
+];
+
+const emptyField = (): SkillPactFindingField => ({
+  contract_path: null, contract_version: null, level: null, signed: false, author: null, declared_effects: [], observed_effects: [],
+  policy_decision: null, l2_tested: false, divergence: [], diff_anomaly: false,
+});
 
 export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
   ctx.checks.add('s49');
-  const sp = ctx.ioc.skillpact;
-  const dirs = skillDirs(ctx, sp.contract_filenames);
-  const threshold = sp.trust_model.diff_anomaly_detection?.threshold ?? 0.3;
-  const patterns = Object.fromEntries(Object.entries(sp.observed_effect_patterns).map(([k, v]) => [k, ere(v.join('|'))]));
-  const destr = sp.destructive_markers.map((m) => (m.includes(' | ') ? ere(`${esc(m.split(' | ')[0] ?? '')}[^|\\n]*\\|\\s*${esc(m.split(' | ')[1] ?? '')}`, 'i') : ere(esc(m).replace(/ /g, '\\s+'), 'i')));
-  const persist = sp.persistence_markers.map((m) => (m === 'registry run' ? /registry\s+run|CurrentVersion\\Run|reg\s+add[^\n]*\\Run/i : ere(esc(m).replace(/ /g, '\\s+'), 'i')));
-  const prose = sp.prose_claims.map((c) => ({ ...c, re: ere(c.patterns.map(esc).join('|'), 'i') }));
-  // 前バージョン比較用: 投入されたすべての契約（ブラウザはレジストリを取得しない）
-  const allContracts = ctx.files
-    .filter((f) => sp.contract_filenames.some((n) => f.relPath === n || f.relPath.endsWith('/' + n)))
-    .map((f) => ({ f, c: parse(f) }))
-    .filter((x): x is { f: FileInput; c: Contract } => x.c !== null && x.c !== 'invalid');
+  const R = ctx.ioc.skillpact;
+  const EFF = R.effects;
+
+  // ポリシー（policy_version と defaults を持つ JSON。ファイル名は問わない）
+  const policyPaths = new Set<string>();
+  for (const f of ctx.files) {
+    if (!f.name.endsWith('.json') || f.name === CONTRACT || f.text == null || !f.text.includes('"policy_version"')) continue;
+    let p: unknown;
+    try { p = JSON.parse(f.text.replace(/^﻿/, '')); } catch { continue; }
+    if (!isObj(p) || !('policy_version' in p) || !('defaults' in p)) continue;
+    policyPaths.add(f.relPath);
+    const prob = ijsonProblem(f.text);
+    const bad = prob ? `JSON: ${prob}` : policyProblem(p, R);
+    if (bad) push(ctx, { level: 'MEDIUM', module: '§49', campaign: 'skillpact-invalid', path: f.relPath, detail: `SkillPact ポリシーを検証できません（${bad}）。ZES はポリシーの allow/ask/deny 判定を行いません`, ruleId: 's49-policy', skillpact: emptyField() });
+  }
+
+  const dirs = [...new Set(ctx.files.filter((f) => f.name === 'SKILL.md' || f.name === CONTRACT).map((f) => dirname(f.relPath)))].sort();
+  const hasContract = (d: string) => ctx.byPath.has(d ? `${d}/${CONTRACT}` : CONTRACT);
+  const under = (d: string) => { let x = d; while (x !== '') { x = dirname(x); if (hasContract(x)) return true; } return false; };
+  const skillDirSet = new Set(dirs);
+  // 前版比較用の索引（投入されたすべての契約。ブラウザはレジストリやキャッシュを取得しない）
+  const index = ctx.files.filter((f) => f.name === CONTRACT && f.text != null).flatMap((f) => {
+    try {
+      const c = JSON.parse(f.text!) as unknown;
+      if (!isObj(c) || !isObj(c['skill']) || !isStr((c['skill'] as Obj)['name']) || !isStr((c['skill'] as Obj)['version']) || !isObj(c['permissions'])) return [];
+      return [{ path: f.relPath, name: (c['skill'] as Obj)['name'] as string, ver: (c['skill'] as Obj)['version'] as string, perms: c['permissions'] as Obj, authors: authors(c) }];
+    } catch { return []; }
+  });
 
   const out: SkillPactAnalysis[] = [];
   for (const dir of dirs) {
-    const files = skillFiles(ctx, dir, dirs);
-    const inSkill = (rel: string) => ctx.byPath.get(dir ? `${dir}/${rel}` : rel);
-    const cfile = sp.contract_filenames.map(inSkill).find(Boolean);
-    let code = '';
-    let proseText = '';
-    let tools = '';
-    let scripts = false;
-    let fences: string[] = [];
-    for (const f of files) {
-      if (/(^|\/)\.skillpact\/|(^|\/)(skill\.contract\.json|policy-v0\.8\.json|l2-test-record\.json)$|\.(sig|bundle)$/.test(f.relPath)) continue;
-      if (f.text == null) continue;
-      if (f.name.endsWith('.md')) {
-        const m = splitMarkdown(f.text);
-        code += '\n' + m.code + '\n' + m.frontmatter;
-        proseText += '\n' + m.prose;
-        fences = fences.concat(m.fenceLangs);
-        tools += m.frontmatter.split('\n').filter((l) => l.startsWith('allowed-tools:')).join('\n');
-      } else if (sp.script_extensions.includes(f.name.split('.').pop() ?? '') || f.text.startsWith('#!')) {
-        scripts = true;
-        code += '\n' + f.text;
-      } else if (/\.(json|ya?ml|toml|ini|cfg)$/.test(f.name)) {
-        code += '\n' + f.text;
-      }
-    }
-    const observed = new Set<Effect>(['read']);
-    for (const e of ['exec', 'network', 'write', 'secrets', 'spend'] as Effect[]) {
-      if (patterns[e]?.test(code)) observed.add(e);
-    }
-    if (scripts || fences.some((l) => SCRIPT_FENCES.has(l)) || /(^|[^A-Za-z])Bash([^A-Za-z]|$)/.test(tools)) observed.add('exec');
-    if (/(WebFetch|WebSearch)/.test(tools)) observed.add('network');
-    if (/(^|[^A-Za-z])(Write|Edit|MultiEdit|NotebookEdit)([^A-Za-z]|$)/.test(tools)) observed.add('write');
-    const destructive = destr.some((r) => r?.test(code));
-    const persistence = persist.some((r) => r?.test(code));
-    if (persistence) observed.add('write');
-    if (destructive) { observed.add('exec'); observed.add('write'); }
-    const observedSorted = EFFECTS.filter((e) => observed.has(e));
-
+    const cfile = ctx.byPath.get(dir ? `${dir}/${CONTRACT}` : CONTRACT);
+    if (!cfile && under(dir)) continue;
+    const prefix = dir ? dir + '/' : '';
+    const all = ctx.files.filter((f) => f.relPath.startsWith(prefix));
+    const own = all.filter((f) => {
+      const rest = f.relPath.slice(prefix.length).split('/');
+      let sub = dir;
+      for (let i = 0; i < rest.length - 1; i++) { sub = sub ? `${sub}/${rest[i]}` : rest[i]!; if (skillDirSet.has(sub)) return false; }
+      return true;
+    });
+    const obs = observe(ctx, own, policyPaths);
+    const observed = EFF.filter((e) => obs[e as keyof Observed]);
     const a: SkillPactAnalysis = {
       skillId: dir || '.', name: basename(dir) || '.',
-      contract: { found: !!cfile, path: cfile?.relPath ?? null, parseError: false, schemaVersion: null, supported: false },
-      author: null, version: null, level: null, signed: false, l2Tested: false, declared: [], declaredTokens: [],
-      observed: observedSorted, divergence: [], destructive, persistence,
-      policy: { file: null, decision: null, violations: [] }, irreversibleAllowed: [], proseConflicts: [], diffAnomaly: null,
-      results: [], maxLevel: null, counts: {},
+      contract: { found: !!cfile, path: cfile?.relPath ?? null, status: cfile ? 'ok' : 'none', problem: null, contractVersion: null, errors: [] },
+      skillName: null, skillVersion: null, level: null, signed: false, signers: [], author: null,
+      declared: [], observed, divergence: [], diffAnomaly: null, results: [], maxLevel: null, counts: {},
     };
+    const hits: { level: Severity; path: string; detail: string; ruleId: string; campaign: string }[] = [];
     const field = (): SkillPactFindingField => ({
-      contract_path: a.contract.path, contract_version: a.contract.schemaVersion, level: a.level, signed: a.signed, author: a.author,
-      declared_effects: a.declared, observed_effects: a.observed, policy_decision: a.policy.decision, l2_tested: a.l2Tested,
-      divergence: a.divergence, diff_anomaly: a.diffAnomaly !== null,
+      contract_path: a.contract.path, contract_version: a.contract.contractVersion, level: a.level, signed: a.signed, author: a.author,
+      declared_effects: a.declared, observed_effects: a.observed, policy_decision: null, l2_tested: false,
+      divergence: EFF.filter((e) => a.divergence.some((d) => d.effect === e)), diff_anomaly: a.diffAnomaly !== null,
     });
-    const hits: { level: Severity; path: string; detail: string; ruleId: string; ruleNo: number }[] = [];
-    const hit = (ruleNo: number, level: Severity, path: string, detail: string, ruleId: string) => hits.push({ level, path, detail, ruleId, ruleNo });
-    const skillPath = dir || '.';
-    const c = parse(cfile);
-    if (!cfile || c === 'invalid' || c === null) {
-      a.contract.parseError = c === 'invalid';
-      a.divergence = observedSorted.filter((e) => e !== 'read');
-      hit(1, 'HIGH', c === 'invalid' ? cfile!.relPath : skillPath, c === 'invalid' ? 'SkillPact 契約ファイルが JSON オブジェクトとして解析できません（未宣言として扱う）' : 'SkillPact 契約ファイルが存在しません', 's49-undeclared');
+    if (!cfile) {
+      if (ctx.byPath.has(prefix + 'SKILL.md') && (obs.exec || obs.network || obs.spend || obs.send)) {
+        hits.push({ level: 'INFO', campaign: 'skillpact-undeclared', path: dir || '.', ruleId: 's49-no-contract', detail: `このスキルには SkillPact 契約（skill.contract.json）がないため、宣言との比較は行いません（参考: コードに見える効果 ${observed.join(',')}）` });
+      }
     } else {
-      const toks = tokens(c);
-      a.declaredTokens = toks;
-      a.declared = sortEffects(toks.map(baseOf));
-      a.contract.schemaVersion = str(c['schema_version']);
-      a.contract.supported = sp.schema_versions.includes(a.contract.schemaVersion ?? '');
-      a.author = str(c['author'] ?? c['publisher']);
-      a.version = str(c['version']);
-      a.level = str(c['level']);
-      const cdec = str(c['decision'] ?? c['policy_decision']);
-      // ポリシー
-      const pfile = sp.policy_files.map((p) => inSkill(p) ?? ctx.byPath.get(ctx.root ? `${ctx.root}/${p}` : p)).find(Boolean);
-      let pdec = cdec;
-      if (pfile) {
-        a.policy.file = pfile.relPath;
-        const p = parse(pfile);
-        if (p && p !== 'invalid') {
-          const rules = Array.isArray(p['rules']) ? (p['rules'] as Record<string, unknown>[]) : [];
-          const dflt = str(p['default']) ?? 'ask';
-          const decide = (t: string) => rules.find((r) => r['effect'] === t || r['effect'] === baseOf(t) || r['effect'] === `${baseOf(t)}:any`)?.['decision'] as string | undefined ?? dflt;
-          const rank = (d: string) => (d === 'deny' ? 3 : d === 'ask' ? 2 : d === 'allow' ? 1 : 0);
-          if (!pdec) pdec = toks.length ? toks.map(decide).sort((x, y) => rank(y) - rank(x))[0] ?? dflt : dflt;
-          const never = Array.isArray(p['never_auto_allow_any']) ? (p['never_auto_allow_any'] as string[]) : sp.risk_flags;
-          const covers = (flag: string, t: string) => t === flag || (flag.endsWith(':any') && baseOf(t) === baseOf(flag));
-          const explicit = rules.filter((r) => r['decision'] === 'allow').flatMap((r) => never.filter((n) => n === r['effect'] || covers(n, String(r['effect']))));
-          const implicit = toks.flatMap((t) => never.filter((n) => covers(n, t) && decide(t) === 'allow'));
-          a.policy.violations = [...new Set([...explicit, ...implicit])];
-        }
-      }
-      a.policy.decision = pdec;
-      if (!a.policy.violations.length && cdec === 'allow') {
-        a.policy.violations = [...new Set(toks.flatMap((t) => sp.risk_flags.filter((rf) => t === rf || (rf.endsWith(':any') && baseOf(t) === baseOf(rf) && (t.split(':')[1] ?? 'any') === 'any'))))];
-      }
-      // L2
-      const l2 = (c['l2'] ?? (c['tests'] as Record<string, unknown> | undefined)?.['l2']) as Record<string, unknown> | undefined;
-      const rec = str(l2?.['record'] ?? c['l2_record']);
-      const want = str(l2?.['sha256'] ?? c['l2_sha256'])?.replace(/^sha256:/, '') ?? null;
-      const recFile = rec ? (rec.startsWith('/') || rec.includes('..') ? undefined : inSkill(rec)) : sp.l2_record_filenames.map(inSkill).find(Boolean);
-      a.l2Tested = !!recFile && (!want || recFile.sha256 === want);
-      // L3 署名（存在のみ）
-      const sig = str((c['signature'] as Record<string, unknown> | undefined)?.['file'] ?? c['signature_file']);
-      a.signed = (sig && !sig.startsWith('/') && !sig.includes('..') ? !!inSkill(sig) : false) || sp.signature_filenames.some((s) => !!inSkill(s));
-      // 乖離
-      a.divergence = observedSorted.filter((e) => e !== 'read' && !a.declared.includes(e));
-      if (persistence && !a.declared.includes('persist') && !a.declared.includes('write')) a.divergence = sortEffects([...a.divergence, 'persist']);
-      // 差分異常
-      if (a.author && c['name'] && a.version) {
-        const prev = allContracts
-          .filter((x) => x.f !== cfile && str(x.c['author'] ?? x.c['publisher']) === a.author && x.c['name'] === c['name'] && typeof x.c['version'] === 'string' && versionCmp(x.c['version'] as string, a.version!) < 0)
-          .sort((x, y) => versionCmp(String(y.c['version']), String(x.c['version'])))[0];
-        if (prev) {
-          const pt = tokens(prev.c);
-          const added = toks.filter((t) => !pt.includes(t));
-          const delta = new Set([...added, ...pt.filter((t) => !toks.includes(t))]).size;
-          const union = new Set([...toks, ...pt]).size;
-          const reasons: string[] = [];
-          if (a.declared.includes('exec') && !pt.map(baseOf).includes('exec')) reasons.push('exec 新規追加');
-          if (added.some((t) => t.startsWith('network'))) reasons.push('network 送信先の新規追加');
-          if (added.some((t) => t.startsWith('secrets'))) reasons.push('secrets スコープ拡大');
-          const score = union ? delta / union : 0;
-          if (score > threshold) reasons.push(`エフェクト差分率 ${Math.floor(score * 100)}% > 閾値 ${Math.floor(threshold * 100)}%`);
-          if (reasons.length) a.diffAnomaly = { previousVersion: String(prev.c['version']), previousPath: prev.f.relPath, reasons, score, threshold };
-        }
-      }
-      const cp = cfile.relPath;
-      const sig3 = a.signed ? '（L3 署名済みでも重大度は下げません）' : '';
-      if (!a.contract.supported) hit(2, 'MEDIUM', cp, `契約の schema_version が ${a.contract.schemaVersion ?? '未指定'}（対応: ${sp.schema_versions.join(',')}）。互換性不明`, 's49-schema');
-      if (a.level && !sp.levels.includes(a.level)) hit(2, 'MEDIUM', cp, '契約の level が L1/L2/L3 以外', 's49-level');
-      if (a.level === 'L3' && !a.signed) hit(2, 'MEDIUM', cp, 'L3 を宣言しているが署名ファイルが見つかりません', 's49-l3-nosig');
-      if (pdec && !sp.decision_values.includes(pdec)) hit(11, 'MEDIUM', cp, 'ポリシー決定の値が decision_values（allow/ask/deny）外', 's49-decision-value');
-      if (a.declared.some((e) => RISKY.includes(e)) && !a.l2Tested) hit(3, 'HIGH', cp, 'exec/network/secrets を宣言しているが L2 テスト記録がありません（宣言のみで検証なし）', 's49-l2');
-      (['exec', 'network', 'secrets'] as const).forEach((e, i) => {
-        if (a.divergence.includes(e)) hit(4 + i, 'CRITICAL', skillPath, `契約は ${e} を宣言していないが、実態に ${e} を検出${sig3}`, `s49-divergence:${e}`);
-      });
-      if (a.divergence.includes('spend')) hit(4, 'HIGH', skillPath, `契約は spend を宣言していないが、実態に課金/決済処理を検出${sig3}`, 's49-divergence:spend');
-      if (a.divergence.includes('write') && !persistence) hit(8, 'MEDIUM', skillPath, `契約は write を宣言していないが、実態にファイル書き込みを検出${sig3}`, 's49-divergence:write');
-      if (destructive && pdec === 'allow') hit(7, 'HIGH', skillPath, '破壊的操作（destructive_markers）を含むスキルが allow（自動許可）', 's49-destructive');
-      if (persistence && a.divergence.includes('persist')) hit(8, 'CRITICAL', skillPath, `永続化操作（persistence_markers）を検出したが、契約に persist/write の宣言がありません${sig3}`, 's49-persistence');
-      const desc = typeof c['description'] === 'string' ? (c['description'] as string) : '';
-      for (const pc of prose) {
-        if (!pc.re) continue;
-        if (pc.re.test(proseText) || pc.re.test(desc)) {
-          const bad = a.declared.filter((e) => pc.forbids.includes(e));
-          if (bad.length) {
-            a.proseConflicts.push({ claim: pc.claim, sourcePath: cp, contradictedBy: bad });
-            hit(9, 'HIGH', cp, `prose（${pc.claim}）と契約が矛盾: 契約が ${bad.join(',')} を宣言`, `s49-prose:${pc.claim}`);
+      const prob = cfile.text == null ? 'file not readable' : ijsonProblem(cfile.text);
+      if (prob) {
+        a.contract.status = 'unparseable'; a.contract.problem = prob;
+        hits.push({ level: 'MEDIUM', campaign: 'skillpact-invalid', path: cfile.relPath, ruleId: 's49-contract-json', detail: `SkillPact 契約を検証できません（CONTRACT_JSON: ${prob}）。宣言を読めないため乖離判定は行いません` });
+        ctx.errors.push({ module: '§49', reason: `contract_unparseable:${cfile.relPath}` });
+      } else {
+        const c = JSON.parse(cfile.text!.replace(/^﻿/, '')) as Obj;
+        const files = all.map((f) => f.relPath.slice(prefix.length));
+        const hashes = new Map(all.map((f) => [f.relPath.slice(prefix.length), f.sha256] as const));
+        const md = ctx.byPath.get(prefix + 'SKILL.md');
+        const r = analyze(c, R, files, hashes, md?.text ? frontmatterName(md.text) : '', obs);
+        a.contract.contractVersion = r.cv; a.contract.errors = r.errors;
+        a.contract.status = r.vstatus !== 'ok' ? 'unsupported' : r.errors.length ? 'invalid' : 'ok';
+        a.skillName = r.name; a.skillVersion = r.sver; a.level = r.level; a.signed = r.signed; a.signers = r.signers; a.author = r.authors[0] ?? null; a.declared = r.declared;
+        if (r.vstatus !== 'ok') {
+          hits.push({ level: 'MEDIUM', campaign: 'skillpact-invalid', path: cfile.relPath, ruleId: 's49-version', detail: `SkillPact 契約の contract_version「${r.cv ?? '未指定'}」には対応していません（ZES の対応: 0.1〜0.8）。宣言を解釈できないため乖離判定は行いません` });
+        } else {
+          if (r.errors.length) hits.push({ level: 'MEDIUM', campaign: 'skillpact-invalid', path: cfile.relPath, ruleId: 's49-invalid', detail: `SkillPact 契約を検証できません（ZES の部分検査: ${r.errors.join(',')}）。L1 とは見なしません` });
+          const sigNote = r.signed ? '（契約に署名がありますが ZES は署名を検証しません。署名の有無で重大度は変えません）' : '';
+          a.divergence = r.divergence.map((d) => ({ ...d, level: HIGH_EFFECTS.includes(d.effect) ? 'HIGH' : 'MEDIUM' }));
+          for (const d of a.divergence) {
+            let txt: string;
+            if (d.durable) txt = `コードに作業領域外への永続的な書き込み（crontab・.bashrc・authorized_keys など）が見えますが、契約の write は${d.why === 'none' ? '宣言されていません（permissions.write: none）' : ' $WORKDIR / $OUTPUT / $TMPDIR 内に限られています'}`;
+            else if (d.sensitive) txt = `コードが ${EFFECT_LABEL.read}を読む可能性がありますが、契約の read は${d.why === 'none' ? '宣言されていません（permissions.read: none）' : 'その範囲を含みません'}`;
+            else txt = `コードに ${EFFECT_LABEL[d.effect]}が見えますが、契約は ${d.effect} を宣言していません（permissions.${d.effect}: none）`;
+            hits.push({ level: d.level, campaign: 'skillpact-divergence', path: dir || '.', ruleId: `s49-divergence:${d.effect}`, detail: txt + sigNote });
+          }
+          // 前版との差分（spec §17）
+          const cv = semv(r.sver);
+          if (r.permsOk && r.name && cv) {
+            const prev = index.filter((x) => x.name === r.name && x.path !== cfile.relPath && semv(x.ver) && cmpv(semv(x.ver)!, cv) < 0)
+              .sort((x, y) => cmpv(semv(y.ver)!, semv(x.ver)!))[0];
+            if (prev) {
+              const widened: { effect: Effect; text: string }[] = [];
+              for (const e of EFF) {
+                const ca = (c['permissions'] as Record<string, Obj>)[e] ?? { level: 'none' };
+                const pb = (isObj(prev.perms[e]) ? prev.perms[e] : { level: 'none' }) as Obj;
+                if (rank(ca['level']) > rank(pb['level'])) widened.push({ effect: e, text: `${e}: ${String(pb['level'] ?? 'none')}→${String(ca['level'])}` });
+                else if (ca['level'] === 'scoped' && pb['level'] === 'scoped') {
+                  const nw = strs(ca['scope']).filter((s) => !covered([s], strs(pb['scope']), kindOf(e)));
+                  if (nw.length) widened.push({ effect: e, text: `${e}: +${nw.join(',')}` });
+                }
+              }
+              const pv = semv(prev.ver)!;
+              const major = cv[0]! > pv[0]! || (cv[0] === 0 && pv[0] === 0 && cv[1]! > pv[1]!);
+              if (widened.length && !major) {
+                const ident: DiffAnomaly['identity'] = r.authors.length && prev.authors.length ? (r.authors.some((k) => prev.authors.includes(k)) ? 'same' : 'changed') : 'unsigned';
+                const level: Severity = widened.some((w) => HIGH_EFFECTS.includes(w.effect)) ? 'HIGH' : 'MEDIUM';
+                a.diffAnomaly = { previousVersion: prev.ver, previousPath: prev.path, widened: widened.map((w) => w.text), identity: ident, level };
+                const idt = ident === 'same' ? '前版と同一（未検証。正規の鍵で署名された静かな拡大はアカウント侵害の兆候）' : ident === 'changed' ? '前版と異なる（未検証）' : '署名なし';
+                hits.push({ level, campaign: 'skillpact-account-compromise', path: cfile.relPath, ruleId: 's49-diff-anomaly', detail: `前版 ${prev.ver}（${prev.path}）から権限が拡大していますが（${widened.map((w) => w.text).join(' / ')}）、skill.version の major が上がっていません（SkillPact §17）。作者署名鍵: ${idt}` });
+              }
+            }
           }
         }
       }
-      if (a.diffAnomaly) hit(10, 'HIGH', cp, `${a.signed ? 'L3 署名済みだが' : ''}同一作者の前バージョン ${a.diffAnomaly.previousVersion} から差分異常: ${a.diffAnomaly.reasons.join(' / ')}`, 's49-diff-anomaly');
-      if (a.policy.violations.length) {
-        hit(11, 'HIGH', a.policy.file ?? cp, a.policy.file ? `ポリシーが never_auto_allow_any を尊重していません（自動許可: ${a.policy.violations.join(',')}）` : `契約の decision: allow が never_auto_allow_any の対象（${a.policy.violations.join(',')}）を自動許可しています`, 's49-never-auto-allow');
-      }
-      const ops = Array.isArray(c['operations']) ? (c['operations'] as Record<string, unknown>[]) : [];
-      for (const op of ops) {
-        if (op['reversible'] === false && ((op['decision'] as string | undefined) ?? pdec) === 'allow') {
-          const name = String(op['name'] ?? op['id'] ?? 'unnamed');
-          a.irreversibleAllowed.push(name);
-          hit(12, 'CRITICAL', cp, `reversible: false の操作が allow（不可逆操作の自動許可）`, `s49-irreversible:${name}`);
-        }
-      }
     }
-    // §5.7 検出ルール表 12 行
-    const TITLES: [string, Severity][] = [
-      ['契約ファイルが存在しない', 'HIGH'], ['schema_version が 0.8 以外', 'MEDIUM'], ['exec/network/secrets 宣言で L2 記録なし', 'HIGH'],
-      ['未宣言の exec', 'CRITICAL'], ['未宣言の network', 'CRITICAL'], ['未宣言の secrets', 'CRITICAL'],
-      ['破壊的マーカー × allow', 'HIGH'], ['永続化マーカー × persist/write 未宣言', 'CRITICAL'], ['prose と契約の矛盾', 'HIGH'],
-      ['L3 でも前版から exec/network 新規追加', 'HIGH'], ['never_auto_allow_any を尊重していない', 'HIGH'], ['reversible:false 操作が allow', 'CRITICAL'],
-    ];
-    const noContract = !a.contract.found || a.contract.parseError;
-    a.results = TITLES.map(([title, level], i): RuleResult => {
+    // 検出ルール表
+    const noCompare = !cfile || a.contract.status === 'unparseable' || a.contract.status === 'unsupported';
+    a.results = RULE_TITLES.map(([title, level], i): RuleResult => {
       const n = i + 1;
-      const isHit = hits.some((h) => h.ruleNo === n && (n !== 4 || h.ruleId === 's49-divergence:exec') && (n !== 8 || h.ruleId === 's49-persistence'));
-      let status: RuleResult['status'] = isHit ? 'hit' : 'clear';
-      if (!isHit && noContract && n !== 1) status = 'n/a';
-      if (!isHit && n === 10 && !noContract && !a.diffAnomaly) status = 'undetermined';
-      return { ruleNo: n, title, level, status };
+      const eff = (['exec', 'network', 'spend', 'send', 'read', 'write'] as Effect[])[n - 3];
+      const hit = n === 1 ? a.contract.status === 'unparseable' || a.contract.status === 'invalid'
+        : n === 2 ? a.contract.status === 'unsupported'
+          : n === 9 ? a.diffAnomaly !== null : a.divergence.some((d) => d.effect === eff);
+      let status: RuleResult['status'] = hit ? 'hit' : 'clear';
+      if (!hit && !cfile) status = 'n/a';
+      else if (!hit && noCompare && n > 2) status = 'n/a';
+      else if (!hit && n === 9 && !noCompare) status = 'undetermined';
+      return { ruleNo: n, title, level: n === 9 && a.diffAnomaly ? a.diffAnomaly.level : level, status };
     });
     for (const h of hits) {
       a.counts[h.level] = (a.counts[h.level] ?? 0) + 1;
       if (!a.maxLevel || SEVERITY_RANK[h.level] > SEVERITY_RANK[a.maxLevel]) a.maxLevel = h.level;
-      push(ctx, { level: h.level, module: '§49', campaign: h.ruleId === 's49-undeclared' ? 'skillpact-undeclared' : h.ruleId === 's49-diff-anomaly' ? 'skillpact-account-compromise' : 'skillpact-divergence', path: h.path, detail: h.detail, ruleId: h.ruleId, skillpact: field() });
+      push(ctx, { level: h.level, module: '§49', campaign: h.campaign, path: h.path, detail: h.detail, ruleId: h.ruleId, skillpact: field() });
     }
     out.push(a);
   }
   return out;
-}
-
-function esc(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

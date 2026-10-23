@@ -57,7 +57,8 @@ export function reducer(s: ScanState, a: Action): ScanState {
   if ((a.type === 'SCAN_PROGRESS' || a.type === 'SCAN_RESULT' || a.type === 'SCAN_FAIL') && a.scanId !== s.scanId) return s;
   switch (a.type) {
     case 'SCAN_START':
-      return { ...s, phase: 'reading', scanId: a.scanId, progress: { processed: 0, total: a.total }, startedAt: a.startedAt, errorMessage: null };
+      // 前回のスキャン結果は消す（新しい startedAt と古い結果・finishedAt を混ぜて表示・書き出ししない）
+      return { ...s, phase: 'reading', scanId: a.scanId, progress: { processed: 0, total: a.total }, startedAt: a.startedAt, finishedAt: null, durationMs: 0, result: null, errorMessage: null };
     case 'SCAN_PROGRESS':
       return { ...s, phase: a.phase ?? s.phase, progress: { ...s.progress, processed: a.processed } };
     case 'SCAN_RESULT':
@@ -87,7 +88,9 @@ export function reducer(s: ScanState, a: Action): ScanState {
   }
 }
 
-/** 画面に出す全 finding（フォルダ判定 + 貼り付け + CLI 取り込み）。 */
+/** 画面に出す全 finding（フォルダ判定 + 貼り付け + CLI 取り込み）。id で重複を除き、先に出たもの（フォルダ判定 > 貼り付け > 取り込み）を残す
+ *  （自分が書き出した findings.json を取り込み直しても二重に数えない）。 */
 export function allFindings(s: ScanState): Finding[] {
-  return [...(s.result?.findings ?? []), ...s.pasteFindings, ...(s.imported?.findings ?? [])];
+  const seen = new Set<string>();
+  return [...(s.result?.findings ?? []), ...s.pasteFindings, ...(s.imported?.findings ?? [])].filter((f) => (seen.has(f.id) ? false : (seen.add(f.id), true)));
 }

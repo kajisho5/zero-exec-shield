@@ -1,6 +1,8 @@
 // index.html（ビルド成果物）を file:// で開き、外部リクエストゼロと主要操作を確認する。
 import { expect, test, type Page } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validate } from '../unit/schema';
 
@@ -53,33 +55,29 @@ test('フォルダ投入 → 総合タブに検出・重大度フィルタ・パ
   await expect(page.getByTestId('blast-radius')).toBeVisible();
 });
 
-test('SkillPact タブ: 乖離の赤ハイライト、L3 を「安全」と表示しない', async ({ page }) => {
+test('SkillPact タブ: 乖離の赤ハイライト、署名を「安全」と表示しない', async ({ page }) => {
   await open(page);
   await scan(page, 'skillpact-signed-divergence');
   await page.getByRole('tab', { name: /^SkillPact/ }).click();
   const viewer = page.getByTestId('skillpact-viewer');
   await expect(viewer).toBeVisible();
-  for (const e of ['exec', 'network', 'secrets']) {
-    await expect(viewer.locator(`td[data-effect=${e}][data-divergence=true]`)).toHaveCount(1);
-  }
-  const badge = page.getByTestId('l3-badge').first();
-  await expect(badge).toContainText('L3 署名済みファイル');
-  for (const word of ['安全', '信頼済み', 'Verified', 'Trusted']) await expect(badge).not.toContainText(word);
+  await expect(viewer.locator('td[data-effect=network][data-divergence=true]')).toHaveCount(1);
+  await expect(viewer.locator('td[data-effect=exec][data-divergence=true]')).toHaveCount(0);
+  const badge = page.getByTestId('signed-badge').first();
+  await expect(badge).toContainText('署名あり（未検証）');
+  for (const word of ['安全', '信頼済み', 'Verified', 'Trusted', 'L3']) await expect(badge).not.toContainText(word);
+  await expect(page.getByTestId('level-note')).toContainText('実験的');
   // SkillPact タブでは SAFE バッジ・安全色（緑）の表示を使わない
   await expect(page.getByRole('tabpanel').locator('[data-severity=SAFE], .text-safe, .bg-safe')).toHaveCount(0);
   await expect(page.getByTestId('rule-row').filter({ hasText: '未宣言の network' })).toHaveAttribute('data-status', 'hit');
 });
 
-test('SkillPact: prose 矛盾と差分異常の警告', async ({ page }) => {
+test('SkillPact: 前版から major を上げない権限拡大の警告', async ({ page }) => {
   await open(page);
-  await scan(page, 'skillpact-prose');
-  await page.getByRole('tab', { name: /^SkillPact/ }).click();
-  await expect(page.getByTestId('prose-alert')).toContainText('read_only');
-  await page.getByRole('tab', { name: /^総合/ }).click();
   await scan(page, 'skillpact-diff-anomaly');
   await page.getByRole('tab', { name: /^SkillPact/ }).click();
   await page.getByTestId('skill-item').filter({ hasText: 'v2' }).click();
-  await expect(page.getByTestId('diff-alert')).toContainText('exec 新規追加');
+  await expect(page.getByTestId('diff-alert')).toContainText('network: none→scoped');
 });
 
 test('MCP / Actions / 拡張ビューアと CLI 案内', async ({ page, browserName }) => {
@@ -94,8 +92,8 @@ test('MCP / Actions / 拡張ビューアと CLI 案内', async ({ page, browserN
   await page.getByRole('tab', { name: /^総合/ }).click();
   await scan(page, 'github-actions');
   await page.getByRole('tab', { name: /^GitHub Actions/ }).click();
-  // tag-ref.yml と case-variant.yml がタグ参照、tag-ref.yml と flow-mapping.yml が汚染タグ
-  await expect(page.getByTestId('actions-viewer').locator('[data-kind=tag]')).toHaveCount(2);
+  // tag-ref.yml・case-variant.yml・next-line-uses.yml（値が次行の uses:）がタグ参照、tag-ref.yml と flow-mapping.yml が汚染タグ
+  await expect(page.getByTestId('actions-viewer').locator('[data-kind=tag]')).toHaveCount(3);
   await expect(page.getByTestId('actions-viewer').locator('[data-kind=compromised]')).toHaveCount(2);
   await page.getByRole('tab', { name: /^アンチフォレンジック/ }).click();
   await expect(page.getByTestId('cli-only').first()).toContainText('noatime');
@@ -120,8 +118,8 @@ test('findings.json の書き出し（ネットワーク不使用のダウンロ
   const path = await dl.path();
   const doc = JSON.parse(readFileSync(path, 'utf8'));
   expect(doc.schema_version).toBe('1.0');
-  expect(doc.status).toBe('partial');
-  expect(doc.findings[0].skillpact.divergence).toEqual(['exec']);
+  expect(['ok', 'partial']).toContain(doc.status);
+  expect(doc.findings.find((f: { level: string }) => f.level === 'HIGH').skillpact.divergence).toEqual(['read', 'network']);
 });
 
 test('隠しファイルだけのフォルダでも無反応にならない（完了または 0 件の通知）', async ({ page, browserName }, info) => {
@@ -159,17 +157,48 @@ test('敵対的な findings.json の取り込みで画面が消えない・書�
   expect(errors).toEqual([]);
 });
 
-test('375px 幅でページ全体が横スクロールしない', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 800 });
-  await open(page);
-  await scan(page, 'chaindrop');
-  await expect(page.getByTestId('finding-row').first()).toBeVisible();
-  for (const tab of [/^総合/, /^SkillPact/, /^MCP/]) {
-    await page.getByRole('tab', { name: tab }).click();
-    const { sw, cw } = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
-    expect(sw, `${tab}`).toBeLessThanOrEqual(cw);
-  }
-});
+/** ページ全体の横スクロール量と、はみ出している要素（スクロール領域内を除く）を返す。 */
+async function overflow(page: Page) {
+  return page.evaluate(() => {
+    const cw = document.documentElement.clientWidth;
+    const clipped = (e: Element) => { for (let p = e.parentElement; p; p = p.parentElement) { if (['auto', 'scroll', 'hidden'].includes(getComputedStyle(p).overflowX)) return true; } return false; };
+    const bad = [...document.querySelectorAll('body *')].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.right > cw + 1 && !clipped(e); })
+      .slice(-3).map((e) => `${e.tagName}.${String(e.className).slice(0, 60)} "${(e.textContent ?? '').slice(0, 30)}"`);
+    return { sw: document.documentElement.scrollWidth, cw, bad };
+  });
+}
+
+// 各ビューアが実際に描画されるフィクスチャで、狭い幅でもページ全体が横スクロールしないこと
+const NARROW: [string, RegExp, string?][] = [
+  ['chaindrop', /^総合/],
+  ['skillpact-signed-divergence', /^SkillPact/, 'skillpact-viewer'],
+  ['skillpact-divergence', /^SkillPact/, 'rule-row'],
+  ['skillpact-diff-anomaly', /^SkillPact/, 'skill-item'],
+  ['mcp-visible', /^MCP/, 'mcp-viewer'],
+  ['github-actions', /^GitHub Actions/, 'actions-viewer'],
+  ['browser-ext', /^ブラウザ拡張/, 'extension-viewer'],
+];
+for (const width of [375, 320]) {
+  test(`${width}px 幅でページ全体が横スクロールしない（総合 / SkillPact / MCP / Actions / 拡張）`, async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', 'Playwright WebKit は隠しエントリだけのフォルダを setInputFiles できない（github-actions）');
+    await page.setViewportSize({ width, height: 800 });
+    await open(page);
+    for (const [fixture, tab, testid] of NARROW) {
+      await page.getByRole('tab', { name: /^総合/ }).click();
+      await scan(page, fixture);
+      await page.getByRole('tab', { name: tab }).click();
+      if (testid) await expect(page.getByTestId(testid).first()).toBeVisible();
+      const r = await overflow(page);
+      expect(r.sw, `${fixture} ${tab} ${width}px: ${r.bad.join(' | ')}`).toBeLessThanOrEqual(r.cw);
+    }
+    // 17 タブすべても確認する（最後のフィクスチャの結果で）
+    for (const t of await page.getByRole('tab').all()) {
+      await t.click();
+      const r = await overflow(page);
+      expect(r.sw, `${await t.textContent()} ${width}px: ${r.bad.join(' | ')}`).toBeLessThanOrEqual(r.cw);
+    }
+  });
+}
 
 test('「すべてのタブ」メニュー: Escape・外側クリックで閉じ、フォーカスを戻す', async ({ page }) => {
   await open(page);
@@ -195,4 +224,38 @@ test('「すべてのタブ」メニュー: Escape・外側クリックで閉じ
   await expect(menu).toBeHidden();
   await expect(page.getByRole('tab', { name: /^SkillPact/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tab', { name: /^SkillPact/ })).toBeFocused();
+});
+
+test('書き出した findings.json を取り込み直しても件数が増えず、再書き出しの id は一意', async ({ page }) => {
+  await open(page);
+  await scan(page, 'chaindrop');
+  const n = await page.getByTestId('finding-row').count();
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export').click()]);
+  const first = readFileSync(await dl.path(), 'utf8');
+  await page.getByTestId('import-input').setInputFiles({ name: 'findings.json', mimeType: 'application/json', buffer: Buffer.from(first) });
+  await expect(page.getByTestId('import-status')).toBeVisible();
+  await expect(page.getByTestId('finding-row')).toHaveCount(n);
+  const [dl2] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export').click()]);
+  const ids = JSON.parse(readFileSync(await dl2.path(), 'utf8')).findings.map((f: { id: string }) => f.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  expect(ids.length).toBe(JSON.parse(first).findings.length);
+});
+
+test('次のスキャン中は前回の結果を表示せず、書き出しもできない', async ({ page }) => {
+  await open(page);
+  await scan(page, 'chaindrop');
+  await expect(page.getByTestId('count-CRITICAL')).not.toHaveText('0');
+  const big = mkdtempSync(join(tmpdir(), 'zes-big-'));
+  mkdirSync(join(big, 'd'));
+  for (let i = 0; i < 1500; i++) writeFileSync(join(big, 'd', `f${i}.txt`), 'hello ' + i);
+  await page.getByTestId('dir-input').setInputFiles(big);
+  const status = page.getByTestId('scan-status');
+  await expect(status).toContainText(/読み取り中|判定中|スキャン完了/);
+  if (!(await status.textContent())?.includes('スキャン完了')) {
+    await expect(page.getByTestId('count-CRITICAL')).toHaveText('0');
+    await expect(page.getByTestId('export')).toBeDisabled();
+  }
+  await expect(status).toContainText('スキャン完了', { timeout: 30_000 });
+  await expect(page.getByTestId('count-CRITICAL')).toHaveText('0');
+  await expect(page.getByTestId('export')).toBeEnabled();
 });

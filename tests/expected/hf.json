@@ -1,10 +1,22 @@
 {
   "findings": [
     {
+      "campaign": "hf-lerobot-rce",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "requirements.txt"
+    },
+    {
       "campaign": "hf-dataset-poisoning",
       "level": "HIGH",
       "module": "§36",
       "path": "dataset.py"
+    },
+    {
+      "campaign": "hf-lerobot-rce",
+      "level": "HIGH",
+      "module": "§36",
+      "path": "requirements.txt"
     },
     {
       "campaign": "hf-supply-chain",

@@ -2,9 +2,9 @@
   "findings": [
     {
       "campaign": "skillpact-undeclared",
-      "level": "HIGH",
+      "level": "INFO",
       "module": "§49",
-      "path": "."
+      "path": "standalone"
     }
   ],
   "home": "_home",

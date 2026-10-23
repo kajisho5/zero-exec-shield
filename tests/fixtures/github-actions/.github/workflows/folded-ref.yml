@@ -1,0 +1,14 @@
+# ZES test fixture: "ref: >-" の値が次の行にある pwn request
+on:
+  pull_request_target:
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: >-
+            ${{ github.head_ref }}
+      - run: make
+        env:
+          T: ${{ secrets.DEPLOY_TOKEN }}

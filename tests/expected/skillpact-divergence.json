@@ -2,9 +2,21 @@
   "findings": [
     {
       "campaign": "skillpact-divergence",
-      "level": "CRITICAL",
+      "level": "HIGH",
       "module": "§49",
-      "path": "."
+      "path": "net-tool"
+    },
+    {
+      "campaign": "skillpact-divergence",
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "net-tool"
+    },
+    {
+      "campaign": "skillpact-divergence",
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "persist-tool"
     }
   ],
   "home": "_home",

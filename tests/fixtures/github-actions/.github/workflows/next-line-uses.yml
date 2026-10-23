@@ -1,0 +1,13 @@
+# ZES test fixture: "- uses:" の値（プレーンスカラー）が次の行にある pwn request
+on: pull_request_target
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses:
+          actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - run: make
+        env:
+          T: ${{ secrets.DEPLOY_TOKEN }}

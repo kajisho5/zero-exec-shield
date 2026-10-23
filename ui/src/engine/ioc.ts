@@ -1,5 +1,6 @@
 // rules/ioc.json をビルド時にバンドルへ取り込む（単一の真実の源。再ビルドで最新の IoC が反映される）。
 import raw from '../../../rules/ioc.json';
+import type { Effect } from './types';
 
 export interface IocPackage {
   campaign: string;
@@ -12,20 +13,24 @@ export interface IocPackage {
 }
 
 export interface SkillPactRules {
-  contract_filenames: string[];
-  schema_versions: string[];
-  effects: string[];
-  levels: string[];
-  policy_files: string[];
+  spec: { name: string; version: string; url: string; attribution: string; zes_support: string };
+  contract_filename: string;
+  contract_keys: string[];
+  capability_keys: string[];
+  contract_versions: string[];
+  effects: Effect[];
   decision_values: string[];
-  risk_flags: string[];
-  destructive_markers: string[];
-  persistence_markers: string[];
-  trust_model: { l3_means: string; l3_does_not_mean: string; diff_anomaly_detection?: { threshold?: number } };
-  prose_claims: { claim: string; patterns: string[]; forbids: string[] }[];
+  policy_versions: string[];
+  policy_keys: string[];
+  trust_model: { l3_means: string; l3_does_not_mean: string; zes_level: string };
   observed_effect_patterns: Record<string, string[]>;
-  l2_record_filenames: string[];
-  signature_filenames: string[];
+  sensitive_read_patterns: string[];
+  persistence_markers: string[];
+  sensitive_scope_regex: string;
+  broad_scopes: string[];
+  ephemeral_scope_prefixes: string[];
+  integrity: { default_exclude: string[]; protected: string[]; code_extensions: string[] };
+  shell_fence_langs: string[];
   script_extensions: string[];
 }
 
@@ -55,7 +60,7 @@ export interface IntelDb {
   workflow_strings?: { campaign: string; severity?: string; strings?: string[] }[];
   strings?: { campaign: string; module: string; severity?: string; file_regex?: string; strings?: string[] }[];
   extensions?: { campaign: string; eco: string; severity?: string; ids?: string[]; bad_versions?: string[] }[];
-  host?: { campaign: string; severity?: string; paths?: string[]; modified_files?: string[]; launch_labels?: string[]; systemd_units?: string[]; process_names?: string[] }[];
+  host?: { campaign: string; severity?: string; paths?: string[]; file_names?: string[] | null; modified_files?: string[]; launch_labels?: string[]; systemd_units?: string[]; process_names?: string[] }[];
   apps?: { campaign: string; bundle: string; cve: string; severity?: string; fixed: string }[];
 }
 
@@ -65,8 +70,17 @@ export interface EmudhraRules {
   [k: string]: unknown;
 }
 
+/** PHP2Shell の upstream 修正版・旧ブランチ・ベンダーのパッケージ修正版（CLI php_status / php_distro_packages と同じ表） */
+export interface Php2ShellDistro {
+  upstream_fixed?: string[];
+  older_branches?: string[];
+  packages?: { vendor: string; release: string; codename?: string; source_package: string; fixed: string; advisory?: string; url?: string }[];
+  [k: string]: unknown;
+}
+
 export interface IocDb {
   incident_bundle: string;
+  php2shell_distro?: Php2ShellDistro;
   packages: IocPackage[];
   infrastructures?: Infrastructure[];
   intel?: IntelDb;

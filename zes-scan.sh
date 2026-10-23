@@ -5,7 +5,7 @@
 #
 # 絶対原則（Master Spec §1）
 #   - Zero-Execution: 検査対象のランタイム・スクリプトを一切起動しない
-#   - 静的・受動的解析のみ（find / grep / readlink / stat / curl -sI / ps / lsof / uname / docker version）
+#   - 静的・受動的解析のみ（find / grep / readlink / stat / curl -sI / ps / lsof / uname / docker --version）
 #   - 内容非読取: 検出時もファイル内容は出力せず、パスとメタ情報のみ提示
 #   - fail-closed: 検査できなかったモジュールは errors[] に記録し、0件扱いしない
 #   - Bash 4+ / set -u / jq 優先・grep フォールバック / macOS・Linux 両対応
@@ -18,6 +18,7 @@
 #   ZES_SKILLPACT_CACHE  §49 前バージョン契約のローカルキャッシュ
 #   ZES_NOW          現在時刻の上書き（epoch秒、テスト用）
 #   ZES_FORCE_NO_JQ  1 で jq を使わず grep フォールバックを強制（テスト用）
+#   ZES_GIT_TIMEOUT  §38/§46 の git 呼び出しの打ち切り秒数（既定 60）
 # =============================================================================
 set -u
 set -o pipefail
@@ -60,7 +61,7 @@ Usage: zes-scan.sh [--quick|--standard|--full|--worm|--skillpact] [--root <dir>]
   --quick        §1〜19（既定）
   --worm         §15/18/25/45 のみ
   --skillpact    §49 のみ
-  --url <URL>    §4 の非侵襲URLチェック（X-Powered-By ヘッダのみ取得）
+  --url <URL>    §4 の非侵襲URLチェック（Server / X-Powered-By ヘッダのみ取得。HEAD、405/501 時のみ GET、リダイレクト非追従）
   --json         findings.json を標準出力へ（人間向けログは標準エラーへ）
   --skillpact-cache <dir>  §49 差分異常検出用の前バージョン契約キャッシュ
 
@@ -101,6 +102,23 @@ case "$ROOT" in -*) ROOT="./$ROOT" ;; esac  # "-" や "-dash" を cd のオプ�
 ROOT="$(cd -- "$ROOT" 2>/dev/null && pwd -P)"
 if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
   echo "ZES: --root を解決できません" >&2
+  exit 64
+fi
+
+# ホーム（ZES_HOME / HOME）も ROOT と同様に実パスへ正規化する（相対パス・末尾スラッシュ・シンボリックリンクのまま
+# 出力すると findings[].path が絶対パスにならない / "//" を含む / 実体と異なるパスになるため）
+if [ -z "$HOME_DIR" ]; then
+  echo "ZES: ホームディレクトリが未設定です（ZES_HOME または HOME を指定してください）" >&2
+  exit 64
+fi
+if [ ! -d "$HOME_DIR" ]; then
+  echo "ZES: ZES_HOME/HOME がディレクトリではありません: $HOME_DIR" >&2
+  exit 64
+fi
+case "$HOME_DIR" in -*) HOME_DIR="./$HOME_DIR" ;; esac
+HOME_DIR="$(cd -- "$HOME_DIR" 2>/dev/null && pwd -P)"
+if [ -z "$HOME_DIR" ] || [ ! -d "$HOME_DIR" ]; then
+  echo "ZES: ZES_HOME/HOME を解決できません" >&2
   exit 64
 fi
 
@@ -145,37 +163,78 @@ log_section() {
   CURRENT_MODULE="$1"
   printf '\n%s== %s %s ==%s\n' "$C_CYN" "$1" "${2:-}" "$C_OFF" >&3
 }
-log_info() { printf '%s  %s%s\n' "$C_DIM" "$*" "$C_OFF" >&3; }
+log_info() { zes_enc "$*"; printf '%s  %s%s\n' "$C_DIM" "$ENC_TERM" "$C_OFF" >&3; }
 
 sha256_str() {
   if command -v sha256sum >/dev/null 2>&1; then printf '%s' "$1" | sha256sum | awk '{print $1}'
   else printf '%s' "$1" | shasum -a 256 | awk '{print $1}'; fi
 }
 sha256_file() {
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum -- "$1" 2>/dev/null | awk '{print $1}'
-  else shasum -a 256 -- "$1" 2>/dev/null | awk '{print $1}'; fi
+  # 標準入力から読む（ファイル名に \ や改行があると sha256sum は行頭に "\" を付けてエスケープするため）
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum <"$1" 2>/dev/null | awk '{print $1}'
+  else shasum -a 256 <"$1" 2>/dev/null | awk '{print $1}'; fi
 }
 
-json_escape() {
+# 文字列の符号化（JSON / 人間向けログ / ID 計算で同じ正規形を使う）
+#   zes_enc STR は次の変数を設定する:
+#     ENC_NORM … 正規形。不正な UTF-8 バイトを 1 バイトずつ "\xHH"（4 文字のテキスト）に置き換え、それ以外は元のまま。
+#                findings[].id と JSON の値（デコード後）はこの正規形に一致する
+#     ENC_JSON … ENC_NORM の JSON 文字列表現（引用符なし）。" と \ をエスケープし、制御文字（U+0000〜U+001F・U+007F）と
+#                C1 制御文字（U+0080〜U+009F）を \u00XX にする（往復可能）
+#     ENC_TERM … 人間向けログ用。制御文字を \xHH、C1 制御文字を \u00HH で表示（端末エスケープ注入の防止）
+#     ENC_BAD  … 不正な UTF-8 バイトを含んでいれば 1
+#   印字可能 ASCII のみの文字列は awk を起動せずに処理する
+ZES_ENC_AWK='
+  BEGIN {
+    for (k = 1; k < 256; k++) ord[sprintf("%c", k)] = k
+    s = ENVIRON["ZES_ENC"]; n = length(s); nb = ""; js = ""; tm = ""; bad = 0; i = 1
+    while (i <= n) {
+      c = substr(s, i, 1); b = ord[c]
+      if (b < 128) {
+        if (b < 32 || b == 127) { h = sprintf("%02x", b); nb = nb "\\x" h; js = js "\\u00" h; tm = tm "\\x" h }
+        else if (c == "\\") { nb = nb "\\x5c"; js = js "\\\\"; tm = tm c }
+        else if (c == "\"") { nb = nb c; js = js "\\\""; tm = tm c }
+        else { nb = nb c; js = js c; tm = tm c }
+        i++; continue }
+      L = 0; cp = 0
+      if (b >= 194 && b <= 223) { L = 2; cp = b - 192 } else if (b >= 224 && b <= 239) { L = 3; cp = b - 224 } else if (b >= 240 && b <= 244) { L = 4; cp = b - 240 }
+      ok = (L > 0 && i + L - 1 <= n)
+      for (k = 1; ok && k < L; k++) { b2 = ord[substr(s, i + k, 1)]; if (b2 < 128 || b2 > 191) ok = 0; else cp = cp * 64 + b2 - 128 }
+      if (ok && ((L == 3 && (cp < 2048 || (cp >= 55296 && cp <= 57343))) || (L == 4 && (cp < 65536 || cp > 1114111)))) ok = 0
+      if (!ok) { h = sprintf("%02x", b); nb = nb "\\x5cx" h; js = js "\\\\x" h; tm = tm "\\x" h; bad = 1; i++; continue }
+      q = substr(s, i, L); nb = nb q
+      if (cp >= 128 && cp <= 159) { js = js sprintf("\\u%04x", cp); tm = tm sprintf("\\u%04x", cp) } else { js = js q; tm = tm q }
+      i += L }
+    print nb; print js; print tm; print bad }'
+zes_enc() {
   local s="$1"
-  s="${s//\\/\\\\}"
-  s="${s//\"/\\\"}"
-  s="${s//$'\n'/\\n}"
-  s="${s//$'\r'/\\r}"
-  s="${s//$'\t'/\\t}"
-  printf '%s' "$s" | tr -d '\000-\010\013\014\016-\037\177'
+  if [[ "$s" != *[![:print:]]* ]]; then
+    ENC_NORM="$s"; ENC_TERM="$s"; ENC_BAD=0
+    s="${s//\\/\\\\}"; ENC_JSON="${s//\"/\\\"}"
+    return 0
+  fi
+  local -a enc_r=()
+  mapfile -t enc_r < <(ZES_ENC="$s" awk "$ZES_ENC_AWK")
+  # 1 行目は %b 形式（全てのバックスラッシュは \xHH）で、制御文字を含む正規形を改行なしで受け渡す
+  printf -v ENC_NORM '%b' "${enc_r[0]-}"
+  ENC_JSON="${enc_r[1]-}"; ENC_TERM="${enc_r[2]-}"; ENC_BAD="${enc_r[3]:-0}"
 }
+json_escape() { zes_enc "$1"; printf '%s' "$ENC_JSON"; }
 json_str_or_null() { if [ -n "$1" ]; then printf '"%s"' "$(json_escape "$1")"; else printf 'null'; fi; }
 
 # emit LEVEL CAMPAIGN PATH DETAIL [SKILLPACT_JSON]
-#   findings[].id は module|campaign|path|detail から決定的に生成（§6 保証）
+#   findings[].id は module|campaign|path|detail（JSON に出力する値そのもの＝zes_enc の正規形）から決定的に生成（§6 保証）
 #   evidence_hash は通常ファイルならその SHA-256、それ以外は detail の SHA-256
+#   パスに不正な UTF-8 バイトがある場合、path は "\xHH" 置換後の値になるため errors[] に non_utf8_path を記録する
 declare -A SEEN_IDS=()
 emit() {
   local level="$1" campaign="$2" path="$3" detail="$4" sp="${5:-}"
   local module="$CURRENT_MODULE"
-  local id ev color
-  id="sha256:$(sha256_str "$module|$campaign|$path|$detail")"
+  local id ev color np jp tp pbad nd jd td nc jc
+  zes_enc "$path"; np="$ENC_NORM"; jp="$ENC_JSON"; tp="$ENC_TERM"; pbad="$ENC_BAD"
+  zes_enc "$detail"; nd="$ENC_NORM"; jd="$ENC_JSON"; td="$ENC_TERM"
+  zes_enc "$campaign"; nc="$ENC_NORM"; jc="$ENC_JSON"
+  id="sha256:$(sha256_str "$module|$nc|$np|$nd")"
   [ -n "${SEEN_IDS[$id]:-}" ] && return 0
   SEEN_IDS[$id]=1
   ev=""
@@ -183,32 +242,34 @@ emit() {
     # 100MB 超（モデル重み等）は全体ハッシュを避け、パス・サイズ・mtime のハッシュで代替
     local sz; sz="$(stat_size "$path")"
     if [ "${sz:-0}" -le 104857600 ]; then ev="$(sha256_file "$path")"
-    else ev="$(sha256_str "$path|$sz|$(stat_mtime "$path")")"; fi
+    else ev="$(sha256_str "$np|$sz|$(stat_mtime "$path")")"; fi
   fi
-  [ -n "$ev" ] || ev="$(sha256_str "$detail")"
+  [ -n "$ev" ] || ev="$(sha256_str "$nd")"
   {
     printf '{"id":"%s","level":"%s","module":"%s","campaign":%s,"path":%s,"detail":%s,"evidence_hash":"sha256:%s"' \
-      "$id" "$level" "$(json_escape "$module")" "$(json_str_or_null "$campaign")" "$(json_str_or_null "$path")" \
-      "$(json_str_or_null "$detail")" "$ev"
+      "$id" "$level" "$(json_escape "$module")" "$( [ -n "$campaign" ] && printf '"%s"' "$jc" || printf null)" \
+      "$( [ -n "$path" ] && printf '"%s"' "$jp" || printf null)" "$( [ -n "$detail" ] && printf '"%s"' "$jd" || printf null)" "$ev"
     [ -n "$sp" ] && printf ',"skillpact":%s' "$sp"
     printf '}\n'
   } >>"$FINDINGS_FILE"
+  [ "$pbad" = "1" ] && record_error "core" "non_utf8_path:$np"
   case "$level" in
     CRITICAL) color="$C_RED" ;; HIGH) color="$C_MAG" ;; MEDIUM) color="$C_YEL" ;; *) color="$C_DIM" ;;
   esac
-  printf '%s[%s]%s %s%s\n' "$color" "$level" "$C_OFF" "$detail" "${path:+ : $path}" >&3
+  printf '%s[%s]%s %s%s\n' "$color" "$level" "$C_OFF" "$td" "${path:+ : $tp}" >&3
 }
 critical() { emit CRITICAL "$@"; }
 high()     { emit HIGH "$@"; }
 medium()   { emit MEDIUM "$@"; }
 low()      { emit LOW "$@"; }
 info()     { emit INFO "$@"; }
-safe()     { printf '%s[SAFE]%s %s\n' "$C_GRN" "$C_OFF" "$*" >&3; }
+safe()     { zes_enc "$*"; printf '%s[SAFE]%s %s\n' "$C_GRN" "$C_OFF" "$ENC_TERM" >&3; }
 
 record_error() {
-  local module="$1" reason="$2"
-  printf '{"module":"%s","reason":"%s"}\n' "$(json_escape "$module")" "$(json_escape "$reason")" >>"$ERRORS_FILE"
-  printf '%s[ERROR]%s %s: %s\n' "$C_YEL" "$C_OFF" "$module" "$reason" >&3
+  local module="$1" reason="$2" jr tr
+  zes_enc "$reason"; jr="$ENC_JSON"; tr="$ENC_TERM"
+  printf '{"module":"%s","reason":"%s"}\n' "$(json_escape "$module")" "$jr" >>"$ERRORS_FILE"
+  printf '%s[ERROR]%s %s: %s\n' "$C_YEL" "$C_OFF" "$module" "$tr" >&3
 }
 
 # ---------------------------------------------------------------------------
@@ -291,6 +352,7 @@ version_matches_spec() {
 refang() { printf '%s' "$1" | sed -e 's/\[\.\]/./g' -e 's/^hxxp/http/'; }
 
 # 対象バイナリが検査ルート内・一時領域にある場合は起動しない（偽装バイナリ対策）
+#   プローブはバージョン表示等のローカルで完結する引数のみで呼ぶ（ネットワーク接続しうる呼び出しは使わない）
 safe_probe() {
   local bin="$1"; shift
   local p rp
@@ -298,26 +360,115 @@ safe_probe() {
   rp="$(resolve_path "$p")" || return 127
   case "$rp" in "$ROOT"/*|/tmp/*|/var/tmp/*|/dev/shm/*) return 126 ;; esac
   case "$rp" in "$HOME_DIR"/*) [ "$HOST_CHECKS" = "1" ] || return 126 ;; esac
-  ( cd / && GOTOOLCHAIN=local GOFLAGS='' PYTHONSTARTUP='' PYTHONPATH='' "$rp" "$@" </dev/null 2>/dev/null )
+  # 環境は引き継がない（env -i）。検査対象 HOME の設定（~/.docker/config.json の context → ssh 実行、~/.kube/config の
+  # exec プラグイン等）や DOCKER_HOST / KUBECONFIG 等を読ませないため、空の HOME と最小の変数だけを渡す
+  local ph="$TMP_DIR/probe-home"
+  mkdir -p -- "$ph/.docker" 2>/dev/null || return 126
+  ( cd / && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$ph" DOCKER_CONFIG="$ph/.docker" XDG_CONFIG_HOME="$ph" \
+      TMPDIR="$TMP_DIR" LC_ALL=C GOTOOLCHAIN=local "$rp" "$@" </dev/null 2>/dev/null )
 }
 
-# git は検査対象リポジトリの設定（.git/config）経由でコマンドを起動しうるため、危険な設定を無効化して呼ぶ
-#   コマンドライン -c はリポジトリ設定より優先される。プログラムを値に取る設定は全て無害化する:
+# git は検査対象リポジトリの設定（.git/config）経由でコマンドを起動しうる。また include.path / includeIf は
+# 任意のファイル（FIFO 等）を読ませて走査を無期限に停止させうる。そこで git には検査対象の .git/config を一切読ませない:
+#   $TMP_DIR/git-shadow に最小の GIT_DIR を作り（config は ZES が書く。objects / refs / packed-refs / reftable は
+#   元リポジトリへのシンボリックリンク、HEAD / shallow は通常ファイルのみ複製）、GIT_DIR としてそれを使う。
+#   元の config からは repositoryformatversion / extensions.objectformat / extensions.refstorage だけを
+#   git を使わずに静的に読み（git_cfg_get）、partialclone 等の拡張は引き継がない（遅延フェッチをさせない）。
+# 加えて、プログラムを値に取る設定はコマンドライン -c でも無害化し（多重防御）、全体を timeout で打ち切る:
 #   署名検証（gpg.program / gpg.openpgp.program / gpg.x509.program / gpg.ssh.program / gpg.ssh.defaultKeyCommand）、
 #   ssh・プロキシ（core.sshCommand / core.gitProxy）、エディタ・ページャ・認証（core.editor / sequence.editor /
 #   core.pager / core.askPass / credential.helper）、diff（diff.external、textconv は --no-textconv を呼び出し側で指定）
 #   ※ 署名の有無は検証させずに生のコミットオブジェクトのヘッダから判定する（§46）
+#   ※ refs 配下の FIFO 等で git が停止した場合は ZES_GIT_TIMEOUT 秒（既定 60）で打ち切り、errors[] に git_timeout を記録
+GIT_TIMEOUT="${ZES_GIT_TIMEOUT:-60}"
+case "$GIT_TIMEOUT" in ''|*[!0-9]*) GIT_TIMEOUT=60 ;; esac
+
+# git_cfg_get SECTION SUBSECTION KEY … $ROOT/.git/config の値を git を起動せずに読む（最後の値。include は辿らない）
+#   通常ファイル以外（FIFO・デバイス）は読まない。[sec "sub"] と旧形式 [sec.sub] の両方に対応
+git_cfg_get() {
+  local cfg="$ROOT/.git/config"
+  [ -f "$cfg" ] || return 1
+  head -c 1048576 -- "$cfg" 2>/dev/null | ZES_S="$1" ZES_SS="$2" ZES_K="$3" awk '
+    BEGIN { ws = tolower(ENVIRON["ZES_S"]); wss = ENVIRON["ZES_SS"]; wk = tolower(ENVIRON["ZES_K"]); found = 0 }
+    { line = $0; sub(/\r$/, "", line) }
+    line ~ /^[[:space:]]*\[/ {
+      h = line; sub(/^[[:space:]]*\[[[:space:]]*/, "", h); sub(/\][^]]*$/, "", h)
+      if (match(h, /[[:space:]]+"/)) { sec = tolower(substr(h, 1, RSTART - 1)); ss = substr(h, RSTART + RLENGTH); sub(/"[[:space:]]*$/, "", ss); gsub(/\\\\/, "\001", ss); gsub(/\\/, "", ss); gsub(/\001/, "\\", ss) }
+      else if (index(h, ".")) { sec = tolower(substr(h, 1, index(h, ".") - 1)); ss = tolower(substr(h, index(h, ".") + 1)) }
+      else { sec = tolower(h); ss = "" }
+      sub(/[[:space:]]+$/, "", sec); next }
+    sec == ws && ss == wss {
+      l = line; sub(/^[[:space:]]+/, "", l)
+      if (!match(l, /^[A-Za-z][A-Za-z0-9-]*/)) next
+      k = tolower(substr(l, 1, RLENGTH)); if (k != wk) next
+      r = substr(l, RLENGTH + 1); sub(/^[[:space:]]*/, "", r)
+      if (r == "") { v = "true"; found = 1; next }
+      if (substr(r, 1, 1) != "=") next
+      r = substr(r, 2); v = ""; inq = 0
+      for (i = 1; i <= length(r); i++) { c = substr(r, i, 1)
+        if (c == "\\" && i < length(r)) { i++; c = substr(r, i, 1); v = v (c == "n" ? "\n" : c == "t" ? "\t" : c == "b" ? "" : c); continue }
+        if (c == "\"") { inq = !inq; continue }
+        if (!inq && (c == "#" || c == ";")) break
+        v = v c }
+      sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); found = 1 }
+    END { if (found) print v; else exit 1 }'
+}
+
+# 検査対象 .git から ZES 管理の最小 GIT_DIR を作る（作成済みなら何もしない）
+git_shadow_prepare() {
+  local g="$ROOT/.git" d="$TMP_DIR/git-shadow" x rfv of rs
+  [ -f "$d/config" ] && return 0
+  [ -d "$g" ] && [ -f "$g/HEAD" ] || return 1
+  rm -rf -- "$d" && mkdir -p -- "$d" || return 1
+  head -c 4096 -- "$g/HEAD" >"$d/HEAD" 2>/dev/null || return 1
+  [ -f "$g/shallow" ] && { cp -- "$g/shallow" "$d/shallow" 2>/dev/null || return 1; }
+  for x in objects refs packed-refs reftable; do
+    if [ -e "$g/$x" ] || [ -L "$g/$x" ]; then ln -s -- "$g/$x" "$d/$x" || return 1; fi
+  done
+  [ -e "$d/refs" ] || mkdir -p -- "$d/refs"
+  rfv="$(git_cfg_get core '' repositoryformatversion)"; of="$(git_cfg_get extensions '' objectformat)"; rs="$(git_cfg_get extensions '' refstorage)"
+  case "${rfv:-0}" in 0|1) ;; *) return 1 ;; esac
+  {
+    printf '[core]\n\trepositoryformatversion = %s\n\tbare = false\n' "${rfv:-0}"
+    if [ -n "$of$rs" ]; then
+      printf '[extensions]\n'
+      case "$of" in '') ;; sha1|sha256) printf '\tobjectformat = %s\n' "$of" ;; *) return 1 ;; esac
+      case "$rs" in '') ;; files|reftable) printf '\trefstorage = %s\n' "$rs" ;; *) return 1 ;; esac
+    fi
+  } >"$d/config.tmp" && mv -- "$d/config.tmp" "$d/config"
+}
+
+# run_timeout SECONDS CMD... … coreutils timeout があれば使い、無ければ bash のウォッチドッグで打ち切る（124 を返す）
+run_timeout() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then timeout -k 5 "$secs" "$@"; return $?; fi
+  "$@" 0<&0 &
+  local pid=$! w rc mark="$TMP_DIR/timeout.$BASHPID.$RANDOM"
+  ( sleep "$secs"; : >"$mark"; kill -TERM "$pid" 2>/dev/null && { sleep 5; kill -KILL "$pid" 2>/dev/null; } ) >/dev/null 2>&1 &
+  w=$!
+  wait "$pid"; rc=$?
+  kill "$w" 2>/dev/null; wait "$w" 2>/dev/null
+  if [ -e "$mark" ]; then rm -f -- "$mark"; return 124; fi
+  return "$rc"
+}
+
 safe_git() {
   command -v git >/dev/null 2>&1 || return 127
-  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat GIT_EXTERNAL_DIFF='' \
+  git_shadow_prepare || { record_error "${CURRENT_MODULE:-core}" "git_dir_unreadable"; return 1; }
+  local rc
+  GIT_DIR="$TMP_DIR/git-shadow" GIT_WORK_TREE="$ROOT" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_COUNT=0 \
+  GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat GIT_EXTERNAL_DIFF='' \
   GIT_SSH_COMMAND=/bin/false GIT_SSH=/bin/false GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false GIT_EDITOR=/bin/false \
   GIT_SEQUENCE_EDITOR=/bin/false GIT_PROXY_COMMAND=/bin/false GIT_OPTIONAL_LOCKS=0 \
-    git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.pager=cat -c log.showSignature=false \
+    run_timeout "$GIT_TIMEOUT" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.pager=cat -c log.showSignature=false \
         -c gpg.program=/bin/false -c gpg.openpgp.program=/bin/false -c gpg.x509.program=/bin/false \
         -c gpg.ssh.program=/bin/false -c gpg.ssh.defaultKeyCommand=/bin/false \
         -c diff.external= -c core.sshCommand=/bin/false -c core.gitProxy=/bin/false \
         -c core.editor=/bin/false -c sequence.editor=/bin/false -c core.askPass=/bin/false -c credential.helper= \
         -c core.alternateRefsCommand=/bin/false -c protocol.allow=never -C "$ROOT" --no-pager "$@" </dev/null 2>/dev/null
+  rc=$?
+  [ "$rc" -eq 124 ] && record_error "${CURRENT_MODULE:-core}" "git_timeout"
+  return "$rc"
 }
 
 # ---------------------------------------------------------------------------
@@ -392,6 +543,9 @@ build_inventory() {
     if [ -L "$p" ]; then printf '%s\n' "$p" >>"$LINKS_LIST"
     elif [ -f "$p" ]; then printf '%s\n' "$p" >>"$FILES_LIST"
     elif [ -d "$p" ]; then printf '%s\n' "$p" >>"$DIRS_LIST"
+    else
+      # FIFO・ソケット・デバイスは開かない（読むと停止しうる）。検査していないことを errors[] に残す（fail-closed）
+      record_error "core" "special_file:$p"
     fi
   done <"$TMP_DIR/all.z"
   sort -o "$FILES_LIST" "$FILES_LIST"; sort -o "$LINKS_LIST" "$LINKS_LIST"; sort -o "$DIRS_LIST" "$DIRS_LIST"
@@ -478,20 +632,41 @@ build_deps() {
         want && /"version": *"/ { v=$0; sub(/.*"version": *"/,"",v); sub(/".*/,"",v); print "npm\t" n "\t" v "\t" src; want=0 }' "$f" >>"$DEPS_TSV"
     fi
   done < <(files_named '^(package-lock\.json|npm-shrinkwrap\.json)$')
-  # npm: yarn.lock
+  # npm: yarn.lock（v1 / Berry）
+  #   エイリアス（"kv@npm:keyv@6.0.0"）は別名ではなく実パッケージ名（keyv）で照合する。
+  #   Berry の resolution: "keyv@npm:6.0.0" があればそれを優先（ブロック末尾でまとめて出力）
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     text_lines "$f" | awk -v src="$f" '
-      /^[^ #].*:$/ { h=$0; sub(/:$/,"",h); split(h,parts,/, */); n=parts[1]; gsub(/"/,"",n);
-                     if (n ~ /^@/) { sub(/^@/,"",n); sub(/@.*/,"",n); n="@" n } else { sub(/@.*/,"",n) } ; next }
-      /^  version:? / { v=$0; sub(/^  version:? +/,"",v); gsub(/"/,"",v); if (n!="") print "npm\t" n "\t" v "\t" src; n="" }' >>"$DEPS_TSV"
+      function pname(spec,   at, t, n0) {   # "name@range" → name（range が npm:<target> なら target の名前）
+        gsub(/"/, "", spec)
+        at = (spec ~ /^@/) ? index(substr(spec, 2), "@") + 1 : index(spec, "@")
+        if (at <= 1) return spec
+        t = substr(spec, at + 1)
+        n0 = substr(spec, 1, at - 1)
+        if (t !~ /^npm:/) return n0
+        t = substr(t, 5)
+        if (t ~ /^[0-9^~<>=*]/ || t == "") return n0              # "keyv@npm:^6.0.0"（Berry の通常表記）
+        at = (t ~ /^@/) ? index(substr(t, 2), "@") + 1 : index(t, "@")
+        return (at > 1) ? substr(t, 1, at - 1) : t }               # "kv@npm:keyv@6.0.0" / "kv@npm:keyv"
+      function flush() { if (n != "" && v != "") print "npm\t" (rn != "" ? rn : n) "\t" v "\t" src; n = ""; v = ""; rn = "" }
+      /^[^ #].*:$/ { flush(); h=$0; sub(/:$/,"",h); split(h,parts,/, */); n = pname(parts[1]); next }
+      /^  version:? / { v=$0; sub(/^  version:? +/,"",v); gsub(/"/,"",v); next }
+      /^  resolution:? / { r=$0; sub(/^  resolution:? +/,"",r); gsub(/"/,"",r); if (index(r, "@npm:") > 1) rn = substr(r, 1, index(r, "@npm:") - 1); next }
+      END { flush() }' >>"$DEPS_TSV"
   done < <(files_named '^yarn\.lock$')
-  # npm: pnpm-lock.yaml（"/name@1.2.3:" / "name@1.2.3:" 形式）
+  # npm: pnpm-lock.yaml
+  #   v6+: "/name@1.2.3:" / "name@1.2.3(peer@x):"、v5: "/name/1.2.3:" / "/@scope/name/1.2.3:" / "/name/1.2.3_peer@x:"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     text_lines "$f" | awk -v src="$f" '
-      /^  ['"'"'\/]?@?[^ @]+@[0-9][^:]*:/ {
-        s=$0; sub(/^  /,"",s); gsub(/'"'"'/,"",s); sub(/^\//,"",s); sub(/:.*$/,"",s); sub(/\(.*$/,"",s)
+      /^  ['"'"'"]?\/(@[^\/ ]+\/)?[^\/@ ]+\/[0-9][^:]*['"'"'"]?:/ {
+        s=$0; sub(/^  /,"",s); gsub(/['"'"'"]/,"",s); sub(/^\//,"",s); sub(/:.*$/,"",s)
+        k = 0; while (match(substr(s, k + 1), /\//)) k += RSTART
+        v = substr(s, k + 1); sub(/[_(].*$/, "", v)
+        print "npm\t" substr(s, 1, k - 1) "\t" v "\t" src; next }
+      /^  ['"'"'"\/]?@?[^ @]+@[0-9][^:]*:/ {
+        s=$0; sub(/^  /,"",s); gsub(/['"'"'"]/,"",s); sub(/^\//,"",s); sub(/:.*$/,"",s); sub(/\(.*$/,"",s)
         if (s ~ /^@/) { at=index(substr(s,2),"@")+1 } else { at=index(s,"@") }
         if (at>1) print "npm\t" substr(s,1,at-1) "\t" substr(s,at+1) "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^pnpm-lock\.yaml$')
@@ -679,7 +854,10 @@ intel_files() {
     cut -f3 "$TMP_DIR/intel_sha.tsv" | sort -u >"$TMP_DIR/intel_sha.lst"
     # sha256sum に一括で渡し、既知ハッシュと一致した行だけを残す（ファイル内容は出力しない）
     tr '\n' '\0' <"$FILES_LIST" | xargs -0 sha256sum -- 2>/dev/null \
-      | awk 'NR==FNR {want[$1]=1; next} ($1 in want) { h=$1; sub(/^[0-9a-f]+  /,""); print h "\t" $0 }' "$TMP_DIR/intel_sha.lst" - \
+      | awk 'NR==FNR {want[$1]=1; next}
+          # ファイル名に \ を含む行は GNU sha256sum が先頭に "\" を付け、名前の \ を \\ にエスケープする
+          { esc = 0; if (substr($0, 1, 1) == "\\") { esc = 1; $0 = substr($0, 2) } }
+          ($1 in want) { h=$1; sub(/^[0-9a-f]+  /,""); if (esc) { gsub(/\\\\/, "\001"); gsub(/\001/, "\\") } print h "\t" $0 }' "$TMP_DIR/intel_sha.lst" - \
       | while IFS=$'\t' read -r h f; do
           IFS=$'\t' read -r camp sev _ < <(grep -F -- "$h" "$TMP_DIR/intel_sha.tsv" | head -n1)
           critical "$camp" "$f" "既知の悪性ファイル（SHA-256 一致）"
@@ -772,17 +950,25 @@ intel_host_files() {
     [ -n "$val" ] || continue
     case "$kind" in
       path)
-        e="$(expand_home "$val")"
-        # ホーム外の絶対パス（/tmp・/etc 等）はホスト状態のため ZES_HOST_CHECKS=0 では見ない
-        case "$val" in "~/"*|'$HOME/'*) ;; /*) host_enabled || e="" ;; *) e="" ;; esac
+        # パスの種類ごとに照合先を分ける（検査ルート内の同名サフィックスを一律に照合すると誤検知になるため）
+        #   ~/… / $HOME/…   … 検査対象 HOME（ZES_HOME）配下の実パスのみ
+        #   /… / $TMPDIR/…  … ホストの実パスのみ（ZES_HOST_CHECKS=0 では見ない）
+        #   それ以外（site-packages/cook.pth 等の相対パス）… 検査ルート内のサフィックス一致
+        e=""
+        case "$val" in
+          "~/"*|'$HOME/'*) e="$(expand_home "$val")" ;;
+          '$TMPDIR/'*) host_enabled && e="${TMPDIR:-/tmp}/${val#\$TMPDIR/}" ;;
+          /*) host_enabled && e="$val" ;;
+          *)
+            while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス（検査ルート内）"; done < <(files_path "/$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
+            ;;
+        esac
         if [ -n "$e" ]; then
           # 空白を含むパス（Application Support 等）を分割せず、グロブ文字のみ展開する
           local IFS=$'\n'
-          for f in $e; do [ -e "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス"; done
+          for f in $e; do [ -e "$f" ] || [ -L "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス"; done
           unset IFS
         fi
-        local rel="${val#\~/}"; rel="${rel#\$HOME/}"; rel="${rel#/}"
-        while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェア痕跡パス（検査ルート内）"; done < <(files_path "/$(printf '%s' "$rel" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
         ;;
       file_name)
         while IFS= read -r f; do [ -n "$f" ] && lvl_emit "$sev" "$camp" "$f" "既知のマルウェアのファイル名（${val}）"; done < <(files_named "^$(printf '%s' "$val" | sed 's/[.[\*^$+?(){}|]/\\&/g')\$")
@@ -1030,7 +1216,7 @@ check_s3() {
     fgrep_q "^[[:space:]]*nginx\['custom_gitlab_server_config'\]" "$f" && medium "" "$f" "gitlab.rb に nginx['custom_gitlab_server_config'] が設定されています（設定注入の確認）"
   done < <(files_named '^gitlab\.rb$'; host_enabled && [ -f /etc/gitlab/gitlab.rb ] && echo /etc/gitlab/gitlab.rb)
   if host_enabled && [ -f "$TMP_DIR/ps.txt" ] && grep -q -E 'gitlab-(workhorse|rails)|gitaly' "$TMP_DIR/ps.txt"; then
-    high "" "process:gitlab" "GitLab プロセスが稼働中。バージョンと修正適用を確認してください"
+    high "" "" "GitLab プロセスが稼働中（ps）。バージョンと修正適用を確認してください"
     found=1
   fi
   [ "$found" -eq 0 ] && safe "GitLab の痕跡なし"
@@ -1038,34 +1224,149 @@ check_s3() {
 }
 
 # §4 PHP
+# php_status VERSION → vulnerable / fixed / prerelease / unknown_branch / unparsed（PHP2Shell、upstream 版番号での判定）
+#   判定は openai/php2shell-checker（Apache-2.0）の versionStatus と同じ意味論:
+#   - x.y.z の後ろが -,+,~ 以外で始まる・x.y.z でない → unparsed（要確認）
+#   - dev / alpha / beta / RC 等のプレリリース → prerelease（x.y.z 部分だけで修正済みと判断しない）
+#   - 5.4〜8.1（公式の修正リリースなし）→ vulnerable、修正版のあるブランチ（8.2〜8.5）→ パッチ番号で判定
+#   - 修正版一覧にない新しいブランチ（8.6+ / 9.x 等）や 5.3 以前 → unknown_branch（修正済み扱いにしない）
+php_status() {
+  local v="${1#v}" maj min pat suf br fx
+  [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(.*)$ ]] || { echo unparsed; return 0; }
+  maj="${BASH_REMATCH[1]}"; min="${BASH_REMATCH[2]}"; pat="${BASH_REMATCH[3]}"; suf="${BASH_REMATCH[4]}"
+  if printf '%s' "$suf" | grep -q -i -E '(^|[-+~.])(dev|alpha|beta|rc)'; then echo prerelease; return 0; fi
+  case "$suf" in ''|[-+~]*) ;; *) echo unparsed; return 0 ;; esac
+  br="$((10#$maj)).$((10#$min))"
+  if read_ioc '.php2shell_distro.older_branches' | grep -q -x -F -- "$br"; then echo vulnerable; return 0; fi
+  fx="$(read_ioc '.php2shell_distro.upstream_fixed' | awk -F. -v b="$br" '$1 "." $2 == b { print $3; exit }')"
+  [ -n "$fx" ] || { echo unknown_branch; return 0; }
+  if [ "$((10#$pat))" -lt "$fx" ]; then echo vulnerable; else echo fixed; fi
+}
+
+# deb_version_lt A B … Debian のバージョン順序（epoch:upstream-revision、~ は空より前）で A < B なら真
+deb_version_lt() {
+  awk -v a="$1" -v b="$2" '
+    function ord(c) { if (c == "~") return -1; if (c ~ /[A-Za-z]/) return O[c]; return O[c] + 256 }
+    function isd(c) { return c ~ /^[0-9]$/ }
+    function vrc(x, y,   cx, cy, dx, dy) {
+      while (x != "" || y != "") {
+        while ((x != "" && !isd(substr(x, 1, 1))) || (y != "" && !isd(substr(y, 1, 1)))) {
+          cx = (x != "" && !isd(substr(x, 1, 1))) ? ord(substr(x, 1, 1)) : 0
+          cy = (y != "" && !isd(substr(y, 1, 1))) ? ord(substr(y, 1, 1)) : 0
+          if (cx != cy) return cx < cy ? -1 : 1
+          x = substr(x, 2); y = substr(y, 2) }
+        match(x, /^[0-9]*/); dx = substr(x, 1, RLENGTH); x = substr(x, RLENGTH + 1)
+        match(y, /^[0-9]*/); dy = substr(y, 1, RLENGTH); y = substr(y, RLENGTH + 1)
+        sub(/^0+/, "", dx); sub(/^0+/, "", dy)
+        if (length(dx) != length(dy)) return length(dx) < length(dy) ? -1 : 1
+        if (dx != dy) return dx < dy ? -1 : 1 }
+      return 0 }
+    function split3(v, P,   k) {
+      P[1] = 0; if (match(v, /^[0-9]+:/)) { P[1] = substr(v, 1, RLENGTH - 1) + 0; v = substr(v, RLENGTH + 1) }
+      P[3] = ""; k = 0; while (match(substr(v, k + 1), /-/)) k += RSTART
+      if (k > 0) { P[3] = substr(v, k + 1); v = substr(v, 1, k - 1) }
+      P[2] = v }
+    BEGIN { for (k = 33; k < 127; k++) O[sprintf("%c", k)] = k
+      split3(a, A); split3(b, B)
+      r = (A[1] != B[1]) ? (A[1] < B[1] ? -1 : 1) : vrc(A[2], B[2]); if (r == 0) r = vrc(A[3], B[3])
+      exit (r < 0 ? 0 : 1) }'
+}
+
+# os-release（通常ファイルのみ）から ID<TAB>VERSION_ID
+os_release_id() {
+  local f
+  for f in "$1/etc/os-release" "$1/usr/lib/os-release"; do
+    [ -f "$f" ] || continue
+    awk -F= '$1 == "ID" || $1 == "VERSION_ID" { v = $2; gsub(/^["\047]|["\047]$/, "", v); r[$1] = v }
+      END { print r["ID"] "\t" r["VERSION_ID"] }' "$f" 2>/dev/null
+    return 0
+  done
+  printf '\t\n'
+}
+
+# PHP2Shell: dpkg のパッケージ DB（/var/lib/dpkg/status。ROOT 内のコンテナイメージ展開物も対象）を静的に読み、
+# 実際に配信に使われるパッケージ（php*-fpm / libapache2-mod-php* / php*-cgi / php*-cli）をベンダー修正版と比較する
+#   出力: php_distro_packages が判定したパッケージ数（ホストの dpkg を判定できたら 0 以外）
+php_distro_packages() {
+  local f base id vid pkg ver src row fixed adv url note n=0
+  note="パッケージが修正済みでも、稼働中の PHP-FPM / Apache ワーカーが更新後に再起動されたか（配信中のバイナリ）を確認"
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    awk 'BEGIN { RS = "" } {
+        p = ""; v = ""; s = ""; st = ""
+        n = split($0, L, "\n")
+        for (i = 1; i <= n; i++) {
+          if (L[i] ~ /^Package: /) p = substr(L[i], 10)
+          else if (L[i] ~ /^Version: /) v = substr(L[i], 10)
+          else if (L[i] ~ /^Source: /) { s = substr(L[i], 9); sub(/ .*/, "", s) }
+          else if (L[i] ~ /^Status: /) st = substr(L[i], 9) }
+        if (st !~ /installed$/ || st ~ /not-installed|config-files/) next
+        if (p !~ /^(php[0-9.]*-(fpm|cgi|cli)|libapache2-mod-php[0-9.]*)$/) next
+        if (s == "") { s = p; sub(/^libapache2-mod-/, "", s); sub(/-(fpm|cgi|cli)$/, "", s) }
+        print p "\t" v "\t" s }' "$f" >"$TMP_DIR/php-dpkg.tsv" 2>/dev/null
+    [ -s "$TMP_DIR/php-dpkg.tsv" ] || continue
+    if [ "$HAVE_JQ" -ne 1 ]; then record_error "§4" "php_distro_table_jq_unavailable:$f"; continue; fi
+    base="${f%/var/lib/dpkg/status}"
+    IFS=$'\t' read -r id vid < <(os_release_id "$base")
+    while IFS=$'\t' read -r pkg ver src; do
+      [ -n "$pkg" ] || continue
+      n=$((n + 1))
+      row="$(jq -r --arg v "$id" --arg r "$vid" --arg s "$src" '.php2shell_distro.packages[]? | select(.vendor == $v and .release == $r and .source_package == $s) | [.fixed, .advisory, .url] | @tsv' "$IOC_FILE" 2>/dev/null | head -n1)"
+      if [ -z "$row" ]; then
+        medium "" "$f" "${pkg} ${ver}（${id:-OS 不明} ${vid}、ソース ${src}）: PHP2Shell（CVE-2026-109618/109619）の対応するベンダー勧告を特定できません。修正状況は不明（ベンダーの勧告で確認）。${note}"
+        continue
+      fi
+      IFS=$'\t' read -r fixed adv url <<<"$row"
+      if deb_version_lt "$ver" "$fixed"; then
+        high "" "$f" "${pkg} ${ver}（${id} ${vid}）は PHP2Shell（CVE-2026-109618/109619）のベンダー修正版 ${fixed}（${adv} ${url}）未満。潜在的に脆弱。${note}"
+      else
+        info "" "$f" "${pkg} ${ver}（${id} ${vid}）は PHP2Shell のベンダー修正版 ${fixed}（${adv}）以上。${note}"
+      fi
+    done <"$TMP_DIR/php-dpkg.tsv"
+  done < <(host_enabled && echo /var/lib/dpkg/status; files_path '/var/lib/dpkg/status$')
+  echo "$n"
+}
+
 check_s4() {
   log_section "§4" "PHP"
   local f
   local -a pfix; mapfile -t pfix < <(infra_fixed php CVE-2026-109618)
-  php_judge() {  # php_judge VERSION PATH SOURCE(upstream|distro)
-    local ver="$1" path="$2" src="$3" core
-    core="$(printf '%s' "$ver" | grep -o -E '^[0-9]+\.[0-9]+\.[0-9]+')"
-    [ -n "$core" ] && [ "${#pfix[@]}" -gt 0 ] || return 0
-    version_branch_vulnerable "$core" "${pfix[@]}" || return 0
-    local eol=""; version_lt "$core" "8.2.0" && eol="（8.1 以前は公式の修正リリースなし。サポート版へ移行）"
-    if [ "$src" = "distro" ]; then
-      high "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の upstream 修正版（${pfix[*]}）未満${eol}。ディストリビューションのバックポート有無を確認"
-    else
-      critical "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の影響範囲（修正版: ${pfix[*]}）${eol}"
-    fi
+  php_judge() {  # php_judge VERSION PATH SOURCE(upstream|distro|header)
+    local ver="$1" path="$2" src="$3" st
+    st="$(php_status "$ver")"
+    local eol=""; [[ "$ver" =~ ^v?([0-9]+)\.([0-9]+)\. ]] && version_lt "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.0" "8.2.0" && eol="（8.1 以前は公式の修正リリースなし。サポート版へ移行）"
+    case "$src:$st" in
+      *:fixed) [ "$src" = "header" ] && safe "PHP ${ver}（ヘッダ申告）は upstream 修正版以上（インストール自体は未検証）" ;;
+      *:prerelease) medium "" "$path" "PHP ${ver} はプレリリース版（dev/alpha/beta/RC）。PHP2Shell（CVE-2026-109618/109619）の修正有無を版番号から判断できません（要確認）" ;;
+      *:unknown_branch) medium "" "$path" "PHP ${ver} は PHP2Shell の修正版一覧（${pfix[*]}）にないブランチ。修正済みとは判断できません（要確認）" ;;
+      *:unparsed) medium "" "$path" "PHP のバージョン表記（${ver}）を解釈できません。PHP2Shell（CVE-2026-109618/109619）の修正状況は不明（要確認）" ;;
+      distro:vulnerable) high "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の upstream 修正版（${pfix[*]}）未満${eol}。ディストリビューションのバックポート有無を確認" ;;
+      header:vulnerable) high "" "$path" "PHP ${ver}（HTTP ヘッダで申告された版）は PHP2Shell（CVE-2026-109618/109619）の影響範囲の可能性（潜在的に脆弱）${eol}。ヘッダではバックポートの有無を判断できないため、サーバー上のパッケージを確認" ;;
+      *:vulnerable) critical "" "$path" "PHP ${ver} は PHP2Shell（CVE-2026-109618/109619、認証不要 RCE、悪用試行あり）の影響範囲（修正版: ${pfix[*]}）${eol}" ;;
+    esac
   }
+  local ndeb; ndeb="$(php_distro_packages)"
   if host_enabled; then
     local v
     v="$(safe_probe php -n -v | head -n1 | awk '{print $2}')"
     if [ -n "$v" ]; then
       info "" "" "PHP ${v} がインストールされています"
-      case "$v" in *ubuntu*|*deb*|*el[0-9]*|*fc[0-9]*|*-[0-9]*) php_judge "$v" "$(command -v php)" distro ;; *) php_judge "$v" "$(command -v php)" upstream ;; esac
+      case "$v" in
+        *ubuntu*|*deb*|*el[0-9]*|*fc[0-9]*|*-[0-9]*)
+          # dpkg のパッケージ DB でベンダー修正版と比較できた場合は、版番号だけの判定（バックポート不明）を重ねない
+          if [ "${ndeb:-0}" -gt 0 ]; then log_info "PHP ${v}: dpkg のパッケージ版で判定済み"; else php_judge "$v" "$(command -v php)" distro; fi ;;
+        *) php_judge "$v" "$(command -v php)" upstream ;;
+      esac
+      if [ -f /etc/redhat-release ]; then
+        local rows; rows="$(intel_jq '.php2shell_distro.packages[]? | select(.vendor == "rhel") | "RHEL \(.release) \(.source_package) ≥ \(.fixed)（\(.advisory)）"' | paste -sd'/' -)"
+        medium "" "/etc/redhat-release" "RHEL 系: rpm DB は静的に読めないため PHP2Shell の修正状況を判定できません。配信中の php-fpm / mod_php の所有パッケージを rpm -qf で確認し、ベンダー修正版と比較（${rows:-Red Hat の CVE-2026-109618/109619 情報を参照}）"
+      fi
     fi
   fi
   local ver
   while IFS=$'\t' read -r ver f; do
     [ -n "$ver" ] && php_judge "$ver" "$f" upstream
-  done < <(detect_service_version '(^|[[:space:]/"=])php' | sed -E 's/^[^0-9]*//')
+  done < <(detect_service_version '(^|[[:space:]/"=])php' | awk -F'\t' '{ v = $1; sub(/^[^0-9]*/, "", v); if (v != "") print v "\t" $2 }')  # latest 等の浮動タグは下の FROM 検査で扱う
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     ver="$(grep -E '^php[[:space:]]+[0-9]' "$f" | head -n1 | awk '{print $2}')"
@@ -1087,10 +1388,31 @@ check_s4() {
   done < <(files_named '^php.*\.ini$'; host_enabled && ls /etc/php*/php.ini /etc/php/*/*/php.ini /usr/local/etc/php/php.ini 2>/dev/null)
   if [ -n "$TARGET_URL" ]; then
     if [ "$OFFLINE" = "1" ]; then record_error "§4" "skipped_offline"; return 0; fi
-    local hdr
-    hdr="$(curl -sI --connect-timeout 5 --max-time 10 --proto '=http,https' -- "$TARGET_URL" 2>/dev/null | tr -d '\r' | grep -i '^x-powered-by:' | head -n1)"
-    if [ -n "$hdr" ]; then medium "" "$TARGET_URL" "X-Powered-By ヘッダでバージョンを露出: ${hdr#*: }"
-    else safe "X-Powered-By ヘッダなし（$TARGET_URL）"; fi
+    # ヘッダのみ取得（HEAD。405/501 のときだけ GET）。リダイレクトは追わない・本文は読まない・~/.curlrc は読まない（-q）
+    local hdrs code
+    hdrs="$(curl -q -sS -I --connect-timeout 5 --max-time 10 --proto '=http,https' -- "$TARGET_URL" 2>/dev/null | tr -d '\r')"
+    code="$(printf '%s\n' "$hdrs" | awk '/^HTTP\// { c = $2 } END { print c }')"
+    if [ "$code" = "405" ] || [ "$code" = "501" ]; then
+      hdrs="$(curl -q -sS -o /dev/null -D - --connect-timeout 5 --max-time 10 --max-filesize 1048576 --proto '=http,https' -- "$TARGET_URL" 2>/dev/null | tr -d '\r')"
+      code="$(printf '%s\n' "$hdrs" | awk '/^HTTP\// { c = $2 } END { print c }')"
+    fi
+    if [ -z "$code" ]; then record_error "§4" "url_fetch_failed"; return 0; fi
+    local xpb srv pv st best="" bst=""
+    # 同名ヘッダが複数ある場合は全て見る（最後の応答のヘッダのみ。値は "; " で連結）
+    hdrs="$(printf '%s\n' "$hdrs" | awk '/^HTTP\// { b = "" } { b = b $0 "\n" } END { printf "%s", b }')"
+    xpb="$(printf '%s\n' "$hdrs" | grep -i '^x-powered-by:' | sed -E 's/^[^:]*:[[:space:]]*//' | paste -sd';' - | sed 's/;/; /g')"
+    srv="$(printf '%s\n' "$hdrs" | grep -i '^server:' | sed -E 's/^[^:]*:[[:space:]]*//' | paste -sd';' - | sed 's/;/; /g')"
+    [ -n "$xpb" ] && medium "" "" "${TARGET_URL}: X-Powered-By ヘッダでバージョンを露出: ${xpb}"
+    printf '%s' "$srv" | grep -q -i -E '(^|[^A-Za-z])PHP[ /]' && medium "" "" "${TARGET_URL}: Server ヘッダで PHP のバージョンを露出: ${srv}"
+    # 両ヘッダの PHP/x.y.z を全て判定し、警告（vulnerable）> 不明 > 修正済み の順で最も悪いものを採用（安心材料を優先しない）
+    while IFS= read -r pv; do
+      [ -n "$pv" ] || continue
+      st="$(php_status "$pv")"
+      if [ -z "$best" ] || [ "$st" = "vulnerable" ] || { [ "$bst" = "fixed" ] && [ "$st" != "fixed" ]; }; then best="$pv"; bst="$st"; fi
+      [ "$bst" = "vulnerable" ] && break
+    done < <(printf '%s\n%s\n' "$srv" "$xpb" | grep -o -i -E '(^|[^A-Za-z])PHP[ /][^[:space:],;)]+' | sed -E 's/^[^Pp]*[Pp][Hh][Pp][ \/]//')
+    if [ -n "$best" ]; then php_judge "$best" "" header
+    else safe "PHP のバージョンを示すヘッダなし（$TARGET_URL。修正状況はヘッダからは不明）"; fi
   fi
   return 0
 }
@@ -1137,10 +1459,10 @@ check_s6() {
     while IFS= read -r host; do
       [ -n "$host" ] || continue
       host="$(refang "$host")"
-      curl -sI --connect-timeout 5 --max-time 10 --proto '=https' -o /dev/null -- "https://$host/" 2>/dev/null
+      curl -q -sI --connect-timeout 5 --max-time 10 --proto '=https' -o /dev/null -- "https://$host/" 2>/dev/null
       local rc=$?
       case "$rc" in
-        0) critical "$camp" "https://$host/" "危殆化した eMudhra 中間 CA をシステムの curl が信頼しています（接続成功）" ;;
+        0) critical "$camp" "" "危殆化した eMudhra 中間 CA をシステムの curl が信頼しています（https://$host/ への接続成功）" ;;
         35|51|53|54|58|59|60|77|80|83|90|91) safe "eMudhra テスト接続は SSL エラー（$host、信頼ストア更新済み）" ;;
         *) record_error "§6" "network_timeout" ;;
       esac
@@ -1357,9 +1679,9 @@ check_s10() {
     crontab -l 2>/dev/null >"$TMP_DIR/crontab.txt"
     if [ -s "$TMP_DIR/crontab.txt" ]; then
       if grep -v '^[[:space:]]*#' "$TMP_DIR/crontab.txt" | grep -q -E '(curl|wget|base64|/tmp/|/dev/shm/|nc )'; then
-        high "" "crontab:$(id -un 2>/dev/null)" "ユーザー crontab に通信/一時領域実行のエントリ"
+        high "" "" "ユーザー crontab（$(id -un 2>/dev/null)）に通信/一時領域実行のエントリ"
       else
-        info "" "crontab:$(id -un 2>/dev/null)" "ユーザー crontab にエントリがあります"
+        info "" "" "ユーザー crontab（$(id -un 2>/dev/null)）にエントリがあります"
       fi
     fi
   fi
@@ -1570,56 +1892,158 @@ jsonc_to_json() {
       if (pc) printf "," }' "$1" 2>/dev/null
 }
 
-# Codex CLI の .codex/config.toml から MCP サーバーの command/args を 1 行ずつ出力する最小パーサ（依存なし）
-#   対応: [mcp_servers.<name>] テーブルの command = "…" / '…'、args = [ … ]（複数行可）、
-#         [mcp_servers] 直下のインラインテーブル（name = { command = "…", args = […] }、1 行）
-#   未対応の構文（複数行文字列・解釈できない command 行・command も url も無いサーバー）は
-#   "?<理由>" 行で知らせ、呼び出し側が errors[] に記録する（読めなかった設定を 0 件扱いしない）
+# Codex CLI の .codex/config.toml から MCP サーバーの command/args を 1 行ずつ出力する TOML パーサ（依存なし）
+#   1 段目: ファイル全体を字句解析し、全ての値を「種別 US キーパス(\034 区切り) US 値」で出力する。
+#     対応: テーブル見出し [a . "b" . 'c'] / [[配列テーブル]]、ドット区切りキー（a.b.c = …、前後の空白可）、
+#           基本文字列（\" \\ \n \uXXXX \UXXXXXXXX 等のエスケープを復号）、リテラル文字列、
+#           複数行文字列（""" / '''）、入れ子の配列（複数行・コメント・末尾カンマ可、文字列内の ] / # は無視）、
+#           インラインテーブル（入れ子可）、その他のスカラー（数値・真偽値・日時）
+#     値の中の制御文字（復号後の改行・タブ等）は空白に置き換える（1 行の command 行として照合するため）
+#   2 段目: mcp_servers.<name>.command / .args / .url を集め、サーバーごとに "command args…" を出力する。
+#     args は配列（要素ごと）と文字列（1 引数として扱う）の両方を受け付ける
+#   構文として解釈できない箇所（不正な TOML・未知のエスケープ等）や、command が文字列でない・command も url も
+#   無いサーバーは "?<理由>" 行で知らせ、呼び出し側が errors[] に記録する（読めなかった設定を 0 件扱いしない）
 codex_toml_mcp_commands() {
   text_lines "$1" | awk '
-    function strs(t,   out, v) {
+    function perr(why) { print "?parse_error:" why ":line" line; exit }
+    function ch(k) { return substr(S, i + k, 1) }
+    function skip_ws() { while (i <= n && (ch(0) == " " || ch(0) == "\t")) i++ }
+    function skip_wsnl(   c) {
+      while (i <= n) { c = ch(0)
+        if (c == " " || c == "\t") i++
+        else if (c == "\n") { line++; i++ }
+        else if (c == "#") { while (i <= n && ch(0) != "\n") i++ }
+        else break } }
+    function eol(   c) {
+      skip_ws(); if (ch(0) == "#") while (i <= n && ch(0) != "\n") i++
+      if (i > n) return
+      if (ch(0) != "\n") perr("trailing_characters")
+      line++; i++ }
+    function hexval(h,   k, v, d) {
+      v = 0
+      for (k = 1; k <= length(h); k++) { d = index("0123456789abcdef", tolower(substr(h, k, 1))); if (d == 0) return -1; v = v * 16 + d - 1 }
+      return v }
+    function utf8(cp) {
+      if (cp < 32 || cp == 127) return " "
+      if (cp < 128) return sprintf("%c", cp)
+      if (cp < 2048) return sprintf("%c%c", 192 + int(cp / 64), 128 + cp % 64)
+      if (cp < 65536) return sprintf("%c%c%c", 224 + int(cp / 4096), 128 + int(cp / 64) % 64, 128 + cp % 64)
+      return sprintf("%c%c%c%c", 240 + int(cp / 262144), 128 + int(cp / 4096) % 64, 128 + int(cp / 64) % 64, 128 + cp % 64) }
+    # バックスラッシュの直後（i はエスケープ文字）から 1 文字分を復号する
+    function esc(   c, h, cp, L) {
+      c = ch(0); i++
+      if (c == "\"" || c == "\\") return c
+      if (c == "n" || c == "t" || c == "r" || c == "b" || c == "f" || c == "e") return " "
+      if (c == "u" || c == "U" || c == "x") {
+        L = (c == "u") ? 4 : (c == "U") ? 8 : 2
+        h = substr(S, i, L); cp = hexval(h)
+        if (length(h) != L || cp < 0 || cp > 1114111) perr("bad_escape")
+        i += L; return utf8(cp) }
+      perr("bad_escape") }
+    function strch(c) { if (c == "\t") return " "; if (c < " " && c != "") perr("control_character"); return c }
+    function bstr(   out, c) {
+      i++; out = ""
+      while (1) { if (i > n) perr("unterminated_string"); c = ch(0)
+        if (c == "\"") { i++; return out }
+        if (c == "\n") perr("newline_in_string")
+        if (c == "\\") { i++; out = out esc(); continue }
+        out = out strch(c); i++ } }
+    function lstr(   out, c) {
+      i++; out = ""
+      while (1) { if (i > n) perr("unterminated_string"); c = ch(0)
+        if (c == "\047") { i++; return out }
+        if (c == "\n") perr("newline_in_string")
+        out = out strch(c); i++ } }
+    # 複数行文字列。q は区切り文字（" または \047）。閉じ区切りの直前には区切り文字を 2 個まで含められる
+    function mlstr(q,   out, c, k, j) {
+      i += 3; if (ch(0) == "\n") { line++; i++ }
       out = ""
-      while (match(t, /"([^"\\]|\\.)*"|\047[^\047]*\047/)) {
-        v = substr(t, RSTART + 1, RLENGTH - 2); out = out (out == "" ? "" : " ") v
-        t = substr(t, RSTART + RLENGTH) }
-      return out }
-    function flush() {
-      if (cur != "" && cmd != "") print cmd (args != "" ? " " args : "")
-      else if (cur != "" && !hasurl) print "?no_command:" cur
-      cur = ""; cmd = ""; args = ""; hasurl = 0; inargs = 0 }
-    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    inargs { t = strs(line); if (t != "") args = args (args == "" ? "" : " ") t; if (line ~ /\]/) inargs = 0; next }
-    line ~ /"""|\047\047\047/ { if (cur != "" || intable) print "?multiline_string"; next }
-    line ~ /^[[:space:]]*\[/ {
-      h = line; sub(/^[[:space:]]*\[+[[:space:]]*/, "", h); sub(/[[:space:]]*\]+[[:space:]]*(#.*)?$/, "", h)
-      if (h ~ /^mcp_servers\./) {
-        nm = substr(h, 13)
-        if (nm ~ /^"/) { nm = substr(nm, 2); q = index(nm, "\""); rest = substr(nm, q + 1); nm = substr(nm, 1, q - 1) }
-        else { rest = nm; sub(/^[^.]*/, "", rest); sub(/\..*$/, "", nm) }
-        if (rest != "") next   # [mcp_servers.<name>.env] 等のサブテーブルは同じサーバーの続き
-        flush(); cur = nm; intable = 0; next }
-      flush(); intable = (h == "mcp_servers"); next }
-    cur != "" && line ~ /^[[:space:]]*command[[:space:]]*=/ {
-      v = line; sub(/^[[:space:]]*command[[:space:]]*=[[:space:]]*/, "", v); c = strs(v)
-      if (c == "") print "?unparsed_command:" cur; else cmd = c
+      while (1) { if (i > n) perr("unterminated_string"); c = ch(0)
+        if (c == q && ch(1) == q && ch(2) == q) {
+          k = 0; while (ch(k) == q) k++
+          if (k > 5) perr("bad_multiline_string")
+          for (j = 3; j < k; j++) out = out q
+          i += k; return out }
+        if (c == "\\" && q == "\"") {
+          j = 1; while (ch(j) == " " || ch(j) == "\t") j++
+          if (ch(j) == "\n") { i += j; while (i <= n && (ch(0) == " " || ch(0) == "\t" || ch(0) == "\n")) { if (ch(0) == "\n") line++; i++ }; continue }
+          i++; out = out esc(); continue }
+        if (c == "\n") { line++; out = out " "; i++; continue }
+        out = out strch(c); i++ } }
+    # キー（ドット区切り・引用キー可）を KS[1..nk] に読む
+    function key(   nk, k, c) {
+      nk = 0
+      while (1) { skip_ws(); c = ch(0)
+        if (c == "\"") { if (ch(1) == "\"" && ch(2) == "\"") perr("bad_key"); k = bstr() }
+        else if (c == "\047") { if (ch(1) == "\047" && ch(2) == "\047") perr("bad_key"); k = lstr() }
+        else { k = ""; while (i <= n && ch(0) ~ /[A-Za-z0-9_-]/) { k = k ch(0); i++ }; if (k == "") perr("bad_key") }
+        KS[++nk] = k; skip_ws()
+        if (ch(0) == ".") { i++; continue }
+        return nk } }
+    function rec(t, p, v) { print t "\037" p "\037" v }
+    function value(p,   c, t, idx, nk, kp, k) {
+      c = ch(0)
+      if (c == "\"") { if (ch(1) == "\"" && ch(2) == "\"") t = mlstr("\""); else t = bstr(); rec("s", p, t); return }
+      if (c == "\047") { if (ch(1) == "\047" && ch(2) == "\047") t = mlstr("\047"); else t = lstr(); rec("s", p, t); return }
+      if (c == "[") {
+        i++; idx = 0; rec("a", p, "")
+        while (1) { skip_wsnl(); if (i > n) perr("unterminated_array")
+          if (ch(0) == "]") { i++; return }
+          value(p SUBSEP idx); idx++
+          skip_wsnl(); c = ch(0)
+          if (c == ",") { i++; continue }
+          if (c == "]") { i++; return }
+          perr("bad_array") } }
+      if (c == "{") {
+        i++; rec("t", p, ""); skip_wsnl()
+        if (ch(0) == "}") { i++; return }
+        while (1) { skip_wsnl(); nk = key(); kp = p; for (k = 1; k <= nk; k++) kp = kp SUBSEP KS[k]
+          skip_ws(); if (ch(0) != "=") perr("bad_inline_table"); i++; skip_ws()
+          value(kp); skip_wsnl(); c = ch(0)
+          if (c == ",") { i++; continue }
+          if (c == "}") { i++; return }
+          perr("bad_inline_table") } }
+      t = ""; while (i <= n && ch(0) ~ /[A-Za-z0-9_+.:-]/) { t = t ch(0); i++ }
+      if (t ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ && ch(0) == " " && ch(1) ~ /[0-9]/) { i++; while (i <= n && ch(0) ~ /[0-9:.Zz+-]/) i++ }
+      if (t == "") perr("bad_value")
+      rec("o", p, t) }
+    BEGIN { RS = "\001" }
+    { S = $0; n = length(S); i = 1; line = 1; tbl = ""
+      while (1) {
+        skip_wsnl(); if (i > n) break
+        if (ch(0) == "[") {
+          arr = (ch(1) == "["); i += arr ? 2 : 1
+          nk = key(); p = KS[1]; for (k = 2; k <= nk; k++) p = p SUBSEP KS[k]
+          skip_ws()
+          if (arr) { if (ch(0) != "]" || ch(1) != "]") perr("bad_table_header"); i += 2; p = p SUBSEP (AT[p]++) }
+          else { if (ch(0) != "]") perr("bad_table_header"); i++ }
+          tbl = p; rec("t", p, ""); eol(); continue }
+        nk = key(); p = tbl; for (k = 1; k <= nk; k++) p = (k == 1 && p == "") ? KS[1] : p SUBSEP KS[k]
+        skip_ws(); if (ch(0) != "=") perr("expected_equals"); i++; skip_ws()
+        value(p); eol() } }' | awk -F'\037' '
+    /^\?/ { print; next }
+    { np = split($2, P, "\034") }
+    P[1] != "mcp_servers" { next }
+    np == 1 { if ($1 != "t") print "?unexpected_value:mcp_servers"; next }
+    { nm = P[2]; if (!(nm in seen)) { seen[nm] = 1; order[++no] = nm } }
+    np == 2 { if ($1 != "t") print "?unexpected_value:" nm; next }
+    P[3] == "command" && np == 3 { if ($1 == "s") cmd[nm] = $3; else bad[nm] = "unparsed_command"; next }
+    P[3] == "args" {
+      if ($1 == "s" && (np == 3 || np == 4)) args[nm] = args[nm] (args[nm] == "" ? "" : " ") $3
+      else if (!(np == 3 && $1 == "a")) bad[nm] = "unparsed_args"
       next }
-    cur != "" && line ~ /^[[:space:]]*url[[:space:]]*=/ { hasurl = 1; next }
-    cur != "" && line ~ /^[[:space:]]*args[[:space:]]*=/ {
-      v = line; sub(/^[[:space:]]*args[[:space:]]*=[[:space:]]*/, "", v); args = strs(v)
-      if (v !~ /\]/) inargs = 1
-      next }
-    intable && line ~ /command[[:space:]]*=/ {
-      c = line; sub(/.*command[[:space:]]*=[[:space:]]*/, "", c); sub(/,.*$/, "", c); c = strs(c)
-      a = ""; if (match(line, /args[[:space:]]*=[[:space:]]*\[[^]]*\]/)) a = strs(substr(line, RSTART, RLENGTH))
-      if (c == "") print "?unparsed_inline"; else print c (a != "" ? " " a : "")
-      next }
-    END { flush() }'
+    P[3] == "url" && np == 3 { hasurl[nm] = 1 }
+    END {
+      for (k = 1; k <= no; k++) { nm = order[k]
+        if (cmd[nm] != "") print cmd[nm] (args[nm] != "" ? " " args[nm] : "")
+        if (nm in bad) print "?" bad[nm] ":" nm
+        else if (cmd[nm] == "" && !(nm in hasurl)) print "?no_command:" nm } }'
 }
 
 check_s17() {
   log_section "§17" "MCP静的ポイズニング"
   local f cmdline
-  local mcpq='[.. | objects | select(has("command")) | ((.command | tostring) + " " + ((.args // []) | map(tostring) | join(" ")))] | .[]'
+  local mcpq='[.. | objects | select(has("command")) | ((.command | tostring) + " " + ((.args // []) | if type == "array" then map(tostring) | join(" ") else tostring end))] | .[]'
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if [[ "$f" == *.toml ]]; then
@@ -1754,24 +2178,31 @@ check_s20() {
 
 # GitHub Actions ワークフロー一覧
 workflow_files() { files_path '/\.github/workflows/[^/]+\.ya?ml$'; }
-# ワークフロー本文の正規化（CRLF・BOM 除去、"uses: >-" / "uses: |" のブロックスカラーを 1 行に畳む）
-#   uses: >-
-#     actions/checkout@v4      →   uses: actions/checkout@v4
+# ワークフロー本文の正規化（CRLF・BOM 除去、値が次行以降に続くキーを 1 行に畳む）
+#   - ブロックスカラー（"key: >-" / "key: |" 等）: より深くインデントされた後続行を全て空白区切りで連結
+#   - 値が空のキーの後にプレーンスカラーが続く場合（"- uses:" の次行に値）: マッピング/シーケンスでない
+#     より深い後続行を連結（YAML のプレーンスカラーの複数行折り返し）
+#   uses: >-                              - uses:
+#     actions/checkout@v4   → uses: actions/checkout@v4      actions/checkout@v4 → - uses: actions/checkout@v4
 workflow_text() {
   text_lines "$1" | awk '
     pend != "" {
-      if ($0 ~ /^[[:space:]]*$/) next
+      if ($0 ~ /^[[:space:]]*$/ || (!blk && $0 ~ /^[[:space:]]*#/)) next
       match($0, /^[[:space:]]*/)
-      if (RLENGTH > pind) { v = $0; sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+#.*$/, "", v); sub(/[[:space:]]+$/, "", v); print pend v; pend = ""; next }
-      print pend; pend = ""
+      if (RLENGTH > pind && (blk || $0 !~ /^[[:space:]]*(-([[:space:]]|$)|["\047]?[A-Za-z0-9_.$-]+["\047]?:([[:space:]]|$))/)) {
+        v = $0; sub(/^[[:space:]]+/, "", v); if (!blk) sub(/[[:space:]]+#.*$/, "", v); sub(/[[:space:]]+$/, "", v)
+        acc = acc (acc == "" ? "" : " ") v; next }
+      print pend (acc != "" ? " " acc : ""); pend = ""; acc = ""
     }
-    /uses:[[:space:]]*[>|][-+0-9]*[[:space:]]*(#.*)?$/ {
+    /^[[:space:]]*(-[[:space:]]+)?["\047]?[A-Za-z0-9_.$-]+["\047]?:[[:space:]]*([>|][-+0-9]*)?[[:space:]]*(#.*)?$/ {
       match($0, /^[[:space:]]*/); pind = RLENGTH
       if ($0 ~ /^[[:space:]]*-[[:space:]]/) { t = $0; sub(/^[[:space:]]*-[[:space:]]+/, "", t); pind = length($0) - length(t) - 1 }
-      pend = $0; sub(/[>|][-+0-9]*[[:space:]]*(#.*)?$/, "", pend); next
+      pend = $0; sub(/[[:space:]]*(#.*)?$/, "", pend)
+      blk = (pend ~ /:[[:space:]]*[>|][-+0-9]*$/)
+      sub(/[[:space:]]*[>|][-+0-9]*$/, "", pend); acc = ""; next
     }
     { print }
-    END { if (pend != "") print pend }'
+    END { if (pend != "") print pend (acc != "" ? " " acc : "") }'
 }
 
 # §21 GitHub Actions 危険パターン
@@ -1785,12 +2216,19 @@ check_s21() {
       local refs
       refs="$(awk '
         function flush(){ if (inchk) { print (ref=="" ? "noref" : ref) } inchk=0; ref="" }
-        tolower($0) ~ /uses:[[:space:]]*["'"'"']?actions\/checkout@/ { flush(); inchk=1; match($0,/^[[:space:]]*/); ind=RLENGTH; next }
+        # ref はブロックマッピング（行頭の ref:）とフローマッピング（{ ref: … } / , ref: …）の両方を見る
+        function getref(s,   r, q, k) {
+          if (!match(s, /^[[:space:]]*ref:/) && !match(s, /[{,][[:space:]]*ref:/)) return
+          r = substr(s, RSTART + RLENGTH); sub(/^[[:space:]]*/, "", r)
+          if (r ~ /^["\047]/) { q = substr(r, 1, 1); r = substr(r, 2); k = index(r, q); if (k) r = substr(r, 1, k - 1) }
+          else sub(/[,}].*$/, "", r)
+          ref = (r ~ /github\.(event\.pull_request\.head|head_ref)/) ? "prhead" : "otherref" }
+        tolower($0) ~ /^[[:space:]]*(-[[:space:]]+)?(\{([^}#]*,)?[[:space:]]*)?uses:[[:space:]]*["'"'"']?actions\/checkout@/ { flush(); inchk=1; match($0,/^[[:space:]]*/); ind=RLENGTH
+          s = $0; sub(/.*actions\/checkout@/, "", s); getref(s); next }
         inchk {
           match($0,/^[[:space:]]*/)
           if ($0 ~ /^[[:space:]]*-[[:space:]]/ && RLENGTH <= ind) { flush(); next }
-          if ($0 ~ /^[[:space:]]*ref:/) { r=$0; sub(/^[[:space:]]*ref:[[:space:]]*/,"",r)
-            ref = (r ~ /github\.(event\.pull_request\.head|head_ref)/) ? "prhead" : "otherref" }
+          getref($0)
         }
         END{ flush() }' < <(workflow_text "$f"))"
       if printf '%s\n' "$refs" | grep -q -x 'prhead'; then
@@ -1844,7 +2282,9 @@ check_s23() {
   log_section "§23" "コンテナランタイム"
   if host_enabled; then
     local dv kv
-    dv="$(safe_probe docker version --format '{{.Client.Version}}')"
+    # docker version はデーモン（DOCKER_HOST / context。ssh:// なら ssh を起動）へ接続するため使わず、
+    # クライアントのみで完結する docker --version を読む
+    dv="$(safe_probe docker --version | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+[^ ,]*' | head -n1)"
     if [ -n "$dv" ]; then
       local dfix; dfix="$(infra_fixed docker CVE-2026-17106 | head -n1)"
       if [ -z "$dfix" ]; then medium "" "$(command -v docker)" "Docker ${dv}: CVE-2026-17106（CopyEscape）の修正版を公式で確認してください（ioc に修正版未定義）"
@@ -2079,14 +2519,14 @@ check_s30() {
   if [ "$OS_NAME" = "Darwin" ] && host_enabled; then
     local v
     v="$(safe_probe launchctl getenv DYLD_INSERT_LIBRARIES)"
-    [ -n "$v" ] && critical "" "launchctl:DYLD_INSERT_LIBRARIES" "launchctl setenv で DYLD_INSERT_LIBRARIES が設定されています"
+    [ -n "$v" ] && critical "" "" "launchctl setenv で DYLD_INSERT_LIBRARIES が設定されています"
     safe_probe launchctl list | awk 'NR>1 {print $3}' | grep -v -E '\.' | grep -v -E '^-$' | while IFS= read -r lb; do
-      high "" "launchctl:$lb" "launchctl list にランダム Label 様のジョブ（$lb）"
+      high "" "" "launchctl list にランダム Label 様のジョブ（$lb）"
     done
     local li
     li="$(safe_probe osascript -e 'tell application "System Events" to get name of every login item')"
-    [ -n "$li" ] && info "" "loginitems" "ログイン項目: $li"
-    safe_probe profiles show -type configuration | grep -q -i 'attribute' && medium "" "profiles" "構成プロファイルがインストールされています（profiles show で確認）"
+    [ -n "$li" ] && info "" "" "ログイン項目: $li"
+    safe_probe profiles show -type configuration | grep -q -i 'attribute' && medium "" "" "構成プロファイルがインストールされています（profiles show で確認）"
   fi
   intel_host_files
   return 0
@@ -2196,7 +2636,7 @@ check_s35() {
   if host_enabled; then
     if [ "$OS_NAME" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
       local st; st="$(systemctl is-active auditd 2>/dev/null)"
-      [ "$st" = "active" ] && safe "auditd 稼働中" || medium "" "auditd" "auditd が稼働していません（${st:-unknown}）"
+      [ "$st" = "active" ] && safe "auditd 稼働中" || medium "" "" "auditd が稼働していません（${st:-unknown}）"
     elif [ "$OS_NAME" = "Darwin" ]; then
       [ -f /etc/security/audit_control ] || medium "" "/etc/security/audit_control" "OpenBSM の設定がありません"
     fi
@@ -2386,7 +2826,7 @@ check_s40() {
   fi
   local bp; bp="$(safe_probe bpftool prog list)"
   if [ -n "$bp" ]; then
-    printf '%s' "$bp" | grep -q -E '(getdents|tcp4_seq_show|tcp6_seq_show|udp4_seq_show|sys_bpf|kill)' && high "ebpf-rootkit" "bpftool:prog" "ファイル/ソケット/プロセス隠蔽系フックの eBPF プログラム"
+    printf '%s' "$bp" | grep -q -E '(getdents|tcp4_seq_show|tcp6_seq_show|udp4_seq_show|sys_bpf|kill)' && high "ebpf-rootkit" "" "ファイル/ソケット/プロセス隠蔽系フックの eBPF プログラム（bpftool prog list）"
   fi
   if [ -r /proc/modules ]; then
     awk '$NF ~ /\(O/ || $0 ~ /\(OE\)|\(E\)/ {print $1}' /proc/modules 2>/dev/null | while IFS= read -r m; do
@@ -2602,7 +3042,7 @@ check_s46() {
   done
   if [ -f "$ROOT/.gitmodules" ]; then
     local origin_host
-    origin_host="$(safe_git config --get remote.origin.url | sed -E 's#^[a-z+]+://([^@/]+@)?##; s#^[^@]+@##; s#[:/].*##')"
+    origin_host="$(git_cfg_get remote origin url | sed -E 's#^[a-z+]+://([^@/]+@)?##; s#^[^@]+@##; s#[:/].*##')"
     grep -E '^[[:space:]]*url[[:space:]]*=' "$ROOT/.gitmodules" | sed -E 's/.*=[[:space:]]*//' | while IFS= read -r n; do
       case "$n" in
         http://*|git://*) high "" "$ROOT/.gitmodules" "サブモジュールが平文プロトコル（$n）" ;;
@@ -2681,45 +3121,213 @@ check_s48() {
 }
 
 # =============================================================================
-# §49 SkillPact 統合 check_skillpact
-#   - 契約ファイルは jq で JSON としてパースするのみ。スキル本体・スクリプトは実行しない
-#   - L2 テスト記録はファイルの存在と SHA-256 のみ確認（再実行しない）
-#   - L3 署名は署名ファイルの存在のみ確認（cosign verify 等は実行しない）。信頼判定・重大度の軽減には使わない
-#
-#   契約スキーマ（SkillPact v0.8）の一次情報は確認できていないため、以下のフィールドを寛容に読む:
-#     schema_version, name, version, author|publisher, description, level,
-#     effects[]（"exec" / "exec:any" / "network:host" / {"effect":"network","scope":"host"}）,
-#     decision（allow|ask|deny）, operations[]{name, effects[], reversible, decision},
-#     l2{record, sha256} | tests.l2{record, sha256} | l2_record, signature{file} | signature_file
-#   ポリシー: default, rules[]{effect, decision}, never_auto_allow_any（配列 or true）
+# §49 SkillPact 契約（実験的） check_skillpact
+#   AI エージェントのスキルが「宣言した権限」と「コードが実際にしていること」が一致するかを静的に確かめる。
+#   宣言は SkillPact 0.8 形式の skill.contract.json（https://github.com/kajisho5/skillpact、
+#   仕様 © SEVENTHWELL (shogo kajiyama) CC BY 4.0 / スキーマ Apache-2.0）を読む。
+#   - 契約・ポリシーは jq で JSON として読むのみ。スキル本体・テストは実行しない
+#   - 署名は検証しない（signed=true は「署名欄あり・未検証」）。署名の有無で重大度を変えない
+#   - level は契約の自己申告を使わず、ZES の部分検査に合格した場合のみ "L1"。L2/L3 は ZES では判定しない
+#   - 契約のないスキルは対象外（参考 INFO のみ）。契約付きスキルの配下にある SKILL.md は報告しない
+#   - ポリシー（policy_version + defaults を持つ JSON）は構造検査のみ。allow/ask/deny の評価は未実装（README の TODO）
 # =============================================================================
 
-SP_EFFECTS_NORM='def norm: if type=="string" then . elif type=="object" then ((.effect // .type // .name // "") + (if (.scope // null) then ":" + (.scope|tostring) else "" end)) else tostring end;'
+SP_JQ_LIB='
+def sp_esc: gsub("(?<c>[\\\\.^$|()\\[\\]{}+*?])"; "\\\(.c)");
+def sp_glob_re:
+  split("/") as $parts | ($parts | length) as $n |
+  (reduce range(0; $n) as $i ({o: "", g: false};
+    $parts[$i] as $seg | (if $i == 0 or .g then "" else "/" end) as $sep |
+    if $seg == "**" then
+      (if $i == $n - 1 then (.o += (if $i > 0 then "(?:/.*)?" else ".*" end)) | .g = false
+       else (.o += $sep + "(?:[^/]+/)*") | .g = true end)
+    else (.g = false) | (.o += $sep + ($seg | gsub("\\*+"; "*") | explode | map([.] | implode | if . == "*" then "[^/]*" elif . == "?" then "[^/]" else sp_esc end) | join("")))
+    end) | "\\A" + .o + "\\z");
+def sp_gmatch($p): test($p | sp_glob_re);
+def sp_lab($q): test("\\A" + ($q | explode | map([.] | implode | if . == "*" then "[^.]*" elif . == "?" then "." else sp_esc end) | join("")) + "\\z");
+def sp_host_match($p0):
+  if $p0 == "@local" then . == "@local"
+  else (ascii_downcase | rtrimstr(".")) as $h | ($p0 | ascii_downcase | rtrimstr(".")) as $p |
+    if $p == "*" then true else
+    ($h | split(".")) as $hl | ($p | split(".")) as $pl |
+    if ($pl[0] == "*" or $pl[0] == "**") and ($pl | length) > 1 then
+      $pl[1:] as $rest | ($rest | length) as $need |
+      if ($hl | length) < $need + (if $pl[0] == "*" then 1 else 0 end) then false
+      else all(range(0; $need); . as $i | ($hl[($hl | length) - $need + $i] | sp_lab($rest[$i]))) end
+    else ($hl | length) == ($pl | length) and all(range(0; $hl | length); . as $i | ($hl[$i] | sp_lab($pl[$i]))) end end end;
+def sp_literal: split("/") | map(if . == "**" then "\u0002/\u0002" else gsub("\\*"; "\u0001*\u0001") end) | join("/");
+def sp_kind($e): if $e == "read" or $e == "write" then "path" elif $e == "network" then "host" else "generic" end;
+def sp_traversal: test("\\\\") or ((if startswith("/") then .[1:] else . end) | split("/") | any(.[]; . == "" or . == "." or . == ".."));
+def sp_covered($scope; $pats; $kind):
+  if ($scope | length) == 0 then false
+  elif $kind == "path" and ($scope | any(.[]; sp_traversal)) then false
+  else all($scope[]; . as $s | any($pats[]; . as $p | $s == $p or (if $kind == "host" then ($s | sp_host_match($p)) else ($s | sp_literal | sp_gmatch($p)) end))) end;
+def sp_ipath_bad:
+  (type != "string") or (. == "") or (utf8bytelength > 1024) or startswith("/") or test("^[A-Za-z]:") or test("\\\\") or (explode | any(.[]; . < 32))
+  or ((split("/") | length) > 32) or (split("/") | any(.[]; . == "" or . == "." or . == ".."));
+def sp_truthy: . != null and . != false and . != [] and . != "" and . != {} and . != 0;
+def sp_semv: (capture("^(?<a>[0-9]+)\\.(?<b>[0-9]+)\\.(?<c>[0-9]+)(?<pre>-[^+]*)?") // null) | if . == null then null else [(.a | tonumber), (.b | tonumber), (.c | tonumber), (if .pre then 0 else 1 end)] end;
+def sp_rank: if . == "any" then 2 elif . == "scoped" then 1 else 0 end;
+def sp_authors: [(.integrity.signatures // [])[]? | select(type == "object" and ((.role // "author") == "author"))
+  | if .type == "sigstore" then (if .instance == "staging" then "sigstore-staging:" else "sigstore:" end) + "\(.issuer)|\(.identity)" else .key end
+  | select(type == "string")] | unique;
+def sp_lvl($e): (.permissions[$e].level? // "none") | if type == "string" then . else "none" end;
+'
 
-# 前バージョン比較用: ROOT 内とキャッシュ内の全契約を author<TAB>name<TAB>version<TAB>path で列挙
-sp_contract_index() {
-  local f
-  {
-    local cf
-    while IFS= read -r cf; do
-      files_path "/$(printf '%s' "$cf" | sed 's/\./\\./g')\$"
-    done < <(read_ioc '.skillpact.contract_filenames')
-    if [ -n "$SKILLPACT_CACHE" ] && [ -d "$SKILLPACT_CACHE" ]; then
-      find "$SKILLPACT_CACHE" -type f -name '*.json' 2>/dev/null
-    fi
-  } | sort -u | while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    jq -r --arg p "$f" 'select(type=="object") | [(.author // .publisher // ""), (.name // ""), (.version // ""), $p] | @tsv' "$f" 2>/dev/null
-  done
+# 契約の構造・整合性検査（ZES の部分検査）と宣言の正規化
+SP_ANALYZE='
+. as $c | ($R.effects) as $EFF |
+($c.contract_version) as $cv |
+(if ($cv | type) == "string" and ($R.contract_versions | index($cv)) != null then "ok" else "unsupported" end) as $vs |
+(($cv | type) == "string" and ($cv | test("^[0-9]+\\.[0-9]+$")) and (($cv | split(".") | map(tonumber)) >= [0, 8])) as $v08 |
+([
+  ((keys - $R.contract_keys) | if length > 0 then "SCHEMA" else empty end),
+  ((["contract_version", "skill", "permissions", "capabilities"] - keys) | if length > 0 then "SCHEMA" else empty end),
+  (if has("kind") and ((.kind | IN("tool", "instructions")) | not) then "SCHEMA" else empty end),
+  (if has("$schema") and ((.["$schema"] | type) != "string") then "SCHEMA" else empty end),
+  (try (if has("x") and ((.x | type) != "object" or (.x | keys | any(.[]; test("^[a-z0-9][a-z0-9-]*$") | not))) then "SCHEMA" else empty end) catch "SCHEMA"),
+  (try (.skill | if type != "object" then "SCHEMA"
+     elif (keys - ["name", "version", "license", "homepage", "source", "authors", "native_contract"] | length) > 0 then "SCHEMA"
+     elif ((.name | type == "string" and test("^[a-z0-9]+(-[a-z0-9]+)*$") and length <= 64) and (.version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?$"))) | not then "SCHEMA"
+     else empty end) catch "SCHEMA"),
+  (try (.permissions | if type != "object" or ((keys | sort) != ($EFF | sort)) then "SCHEMA"
+     else (.[] | if type != "object" or ((keys - ["level", "scope", "why", "confirm"]) | length) > 0 or ((.level | IN("none", "scoped", "any")) | not)
+       or (has("scope") and ((.scope | type) != "array" or any(.scope[]; type != "string")))
+       or (has("confirm") and ((.confirm | IN("never", "each", "session")) | not)) then "SCHEMA" else empty end) end) catch "SCHEMA"),
+  (try (.capabilities | if type != "array" then "SCHEMA" else (.[] |
+     if type != "object" or ((keys - $R.capability_keys) | length) > 0 then "SCHEMA"
+     elif ((.id | type == "string") and (.summary | type == "string") and ((.effects | type) == "array")) | not then "SCHEMA"
+     elif (.effects | all(.[]; IN($EFF[])) and ((unique | length) == length)) | not then "SCHEMA"
+     elif ((.conditional_effects // []) | type != "array" or any(.[]; type != "object" or ((.effect | IN($EFF[])) | not))) then "SCHEMA"
+     elif ((.effect_scopes // {}) | type != "object" or any(keys[]; IN($EFF[]) | not) or any(.[]; type != "array" or any(.[]; type != "string"))) then "SCHEMA"
+     else empty end) end) catch "SCHEMA"),
+  (try (if has("integrity") then (.integrity | if type != "object" or ((keys - ["algorithm", "canonicalization", "exclude", "files", "signatures"]) | length) > 0 then "SCHEMA"
+     elif has("algorithm") and .algorithm != "sha256" then "SCHEMA"
+     elif ((.files // {}) | type != "object" or any(.[]; type != "string" or (test("^[0-9a-f]{64}$") | not))) then "SCHEMA"
+     elif ((.exclude // []) | type != "array" or any(.[]; type != "string" or length == 0)) then "SCHEMA"
+     elif ((.signatures // []) | type != "array" or any(.[]; type != "object" or ((.type | IN("ed25519", "sigstore")) | not) or (has("role") and ((.role | IN("author", "reviewer", "scanner")) | not)))) then "SCHEMA"
+     else empty end) else empty end) catch "SCHEMA"),
+  (try (if has("tests") then (.tests | if type != "object" or ((keys - ["setup", "cases"]) | length) > 0 then "SCHEMA"
+     elif ((.cases // []) | type != "array" or any(.[]; type != "object" or (has("id") and has("run") and has("expect") | not))) then "SCHEMA"
+     else empty end) else empty end) catch "SCHEMA")
+] | unique) as $schema |
+(if $vs != "ok" or ($schema | length) > 0 then [] else (try [
+  (.capabilities | map(.id) | group_by(.) | map(select(length > 1)) | if length > 0 then "DUP_CAPABILITY" else empty end),
+  (.capabilities[] | (.effects[], ((.conditional_effects // [])[] | .effect)) as $e | select(($c | sp_lvl($e)) == "none") | "UNDECLARED_EFFECT"),
+  ($EFF[] as $e | .permissions[$e] | select(.level == "scoped" and ((.scope // []) | length) == 0) | "SCOPE_EMPTY"),
+  (("read", "write") as $e | (.permissions[$e].scope // [])[] | select(sp_traversal) | "SCOPE_TRAVERSAL"),
+  (.capabilities[] | (.effect_scopes // {}) | to_entries[] | select(.key | IN("read", "write")) | .value[] | select(sp_traversal) | "SCOPE_TRAVERSAL"),
+  (.capabilities[] | (.effect_scopes // {}) | to_entries[] | .key as $e | select(($c | sp_lvl($e)) == "scoped")
+     | select(sp_covered(.value; ($c.permissions[$e].scope // []); sp_kind($e)) | not) | "SCOPE_WIDENED"),
+  (([(.requirements.binaries // [])[]?.name, (.requirements.runtimes // [])[]?.name]) as $rn | (.capabilities[] | (.requires // [])[] | select(IN($rn[]) | not) | "UNKNOWN_REQUIREMENT")),
+  (([(.requirements.binaries // [])[]? | (.features_check // {}) | keys[]]) as $fk | (.capabilities[] | (.requires_features // [])[] | select(type == "string") | select((split(":")[0] | IN($fk[])) | not) | "UNKNOWN_FEATURE_KIND")),
+  (.capabilities[] | (.entry.cli? // []) | if type == "array" then .[] else empty end | select(type == "string" and startswith("$SKILL_DIR/")) | ltrimstr("$SKILL_DIR/") as $r
+     | select((($files + $links) | any(.[]; . == $r or startswith($r + "/"))) | not) | "ENTRY_MISSING"),
+  (if $fm != "" and $fm != .skill.name then "NAME_MISMATCH" else empty end),
+  ((.capabilities | map(.id)) as $ids | (.tests.cases // [])[] |
+     (select(.capability != null and ((.capability | IN($ids[])) | not)) | "TEST_UNKNOWN_CAPABILITY"),
+     (select($v08 and .network == true and ($c | sp_lvl("network")) == "none") | "TEST_UNDECLARED_NETWORK")),
+  (if $v08 and (((.x.init.uncertain? // null) | sp_truthy) or ((.x.import.uncertain? // null) | sp_truthy) or ([del(.x) | .. | strings | select(contains("TODO("))] | length > 0)) then "UNCONFIRMED_DRAFT" else empty end),
+  (if has("integrity") then (.integrity as $I | ($I.files // {}) as $F |
+     (if $v08 and ($F | has("SKILL.md") | not) then "INTEGRITY_EMPTY" else empty end),
+     ($F | keys[] as $rel |
+        if ($rel | sp_ipath_bad) then "INTEGRITY_PATH"
+        elif ($links | any(.[]; . == $rel or ($rel | startswith(. + "/")))) then "INTEGRITY_PATH"
+        elif ($hashes | has($rel) | not) then "INTEGRITY_MISSING"
+        elif $hashes[$rel] != $F[$rel] then "INTEGRITY_MISMATCH" else empty end),
+     (($R.integrity.default_exclude + ($I.exclude // [])) as $ex |
+      ($R.integrity.protected + ($R.integrity.code_extensions | map("**/*." + .))) as $prot |
+      ([(.capabilities[] | (.entry.cli? // []) | if type == "array" then .[] else empty end), ((.tests.cases // [])[] | .run | if type == "array" then .[] else . end), ((.tests.setup // [])[] | if type == "array" then .[] else . end)]
+        | map(select(type == "string") | match("\\$SKILL_DIR/([^\\s\u0027\"]+)"; "g") | .captures[0].string)) as $must |
+      (($files[] | select(. != "skill.contract.json") | . as $rel | select($F | has($rel) | not)
+        | select(any($prot[]; . as $p | $rel | sp_gmatch($p)) or ($rel | IN($must[])) or (any($ex[]; . as $p | $rel | sp_gmatch($p)) | not))
+        | if $v08 then "INTEGRITY_UNLISTED" else empty end),
+       ($links[] | . as $rel | select(any($prot[]; . as $p | $rel | sp_gmatch($p)) or (any($ex[]; . as $p | $rel | sp_gmatch($p)) | not))
+        | if $v08 then "INTEGRITY_PATH" else empty end))),
+     ([($I.signatures // [])[] | if .type == "sigstore" then "sigstore:\(.issuer)|\(.identity)|\(.instance)" else .key end] | group_by(.) | if any(.[]; length > 1) then "DUP_SIGNATURE" else empty end))
+   else empty end)
+] catch ["SCHEMA"]) end | unique) as $cross |
+(($schema + $cross) | unique) as $errors |
+(try (($vs == "ok") and ((.permissions | type) == "object") and all($EFF[]; . as $e | ($c.permissions[$e] | type) == "object" and (($c.permissions[$e].level // "") | IN("none", "scoped", "any")))) catch false) as $permsok |
+(if $permsok then [$EFF[] as $e | select(($c | sp_lvl($e)) != "none") | $e] else [] end) as $declared |
+(try ([(.permissions.read.scope // [])[], ((.capabilities // [])[] | (.conditional_effects // [])[] | select(.effect == "read") | (.scope // [])[])]) catch []) as $rscopes |
+(try ([(.permissions.write.scope // [])[], ((.capabilities // [])[] | (.conditional_effects // [])[] | select(.effect == "write") | (.scope // [])[])]) catch []) as $wscopes |
+(($c | sp_lvl("read")) == "any" or ($rscopes | any(.[]; type == "string" and (IN($R.broad_scopes[]) or test($R.sensitive_scope_regex; "i"))))) as $secret_read |
+(($c | sp_lvl("write")) == "any" or ($wscopes | any(.[]; type == "string" and (. as $s | any($R.ephemeral_scope_prefixes[]; . as $p | $s | startswith($p)) | not)))) as $durable_write |
+(if $permsok then [
+  (("exec", "network", "spend", "send") as $e | select($obs[$e] and ($c | sp_lvl($e)) == "none") | {effect: $e, why: "none"}),
+  (if $obs.read and ($secret_read | not) then {effect: "read", why: (if ($c | sp_lvl("read")) == "none" then "none" else "scope" end), sensitive: true} else empty end),
+  (if $obs.durable and ($durable_write | not) then {effect: "write", why: (if ($c | sp_lvl("write")) == "none" then "none" else "scope" end), durable: true}
+   elif $obs.write and ($c | sp_lvl("write")) == "none" then {effect: "write", why: "none"} else empty end)
+] else [] end) as $div |
+(try sp_authors catch []) as $authors |
+{ vstatus: $vs, cv: (if ($cv | type) == "string" then $cv elif $cv == null then null else ($cv | tojson) end),
+  name: (try (.skill.name | strings) catch null), sver: (try (.skill.version | strings) catch null),
+  errors: $errors, permsok: $permsok, declared: $declared,
+  signed: (try (((.integrity.signatures // []) | type) == "array" and ((.integrity.signatures // []) | length) > 0) catch false),
+  authors: $authors, author: ($authors[0] // null),
+  signers: (try ([(.integrity.signatures // [])[] | select((.role // "author") == "author") | .signer | strings] | unique) catch []),
+  level: (if $vs == "ok" and ($errors | length) == 0 then "L1" else null end),
+  divergence: $div }
+'
+
+# 前版との比較（spec §17: 権限の拡大は major を上げるべき）
+SP_DIFF='
+. as $cur | if ($cur.ver | sp_semv) == null then null else
+[$idx[] | select(.name == $cur.name and .path != $cur.path and (.ver | type) == "string" and (.ver | sp_semv) != null and (.ver | sp_semv) < ($cur.ver | sp_semv))]
+| (max_by(.ver | sp_semv)) as $p |
+if $p == null then null else
+  [ $R.effects[] as $e | ($cur.perms[$e] // {level: "none"}) as $a | ($p.perms[$e] // {level: "none"}) as $b |
+    if (($a.level // "none") | sp_rank) > (($b.level // "none") | sp_rank) then {effect: $e, text: "\($e): \($b.level // "none")→\($a.level)"}
+    elif $a.level == "scoped" and $b.level == "scoped" then
+      [($a.scope // [])[] as $s | select(sp_covered([$s]; ($b.scope // []); sp_kind($e)) | not) | $s] as $new |
+      if ($new | length) > 0 then {effect: $e, text: "\($e): +\($new | join(","))"} else empty end
+    else empty end ] as $w |
+  ($cur.ver | sp_semv) as $cv | ($p.ver | sp_semv) as $pv |
+  ($cv[0] > $pv[0] or ($cv[0] == 0 and $pv[0] == 0 and $cv[1] > $pv[1])) as $major |
+  (if ($cur.authors | length) > 0 and ($p.authors | length) > 0 then (if ([$cur.authors[] | IN($p.authors[])] | any) then "same" else "changed" end) else "unsigned" end) as $ident |
+  if ($w | length) > 0 and ($major | not) then {prev_path: $p.path, prev_ver: $p.ver, widened: $w, ident: $ident} else null end
+end end
+'
+
+# I-JSON（spec §4.1）の問題を 1 つ出力する（問題が無ければ何も出力しない）
+sp_ijson_problem() {
+  local f="$1" a b
+  if ! jq empty "$f" >/dev/null 2>&1; then echo "not valid JSON (or lone surrogate)"; return 0; fi
+  jq -e 'type == "object"' "$f" >/dev/null 2>&1 || { echo "top-level value is not an object"; return 0; }
+  a="$(jq -c --stream 'select(length == 2)' "$f" 2>/dev/null | wc -l | tr -d ' ')"
+  b="$(jq -c 'tostream | select(length == 2)' "$f" 2>/dev/null | wc -l | tr -d ' ')"
+  [ "$a" = "$b" ] || { echo "duplicate member name"; return 0; }
+  jq -e '([paths | length] | max // 0) > 63' "$f" >/dev/null 2>&1 && { echo "nesting deeper than 64"; return 0; }
+  jq -n -e --stream 'any(inputs; length == 2 and (.[1] | type) == "number" and ((.[1] | isinfinite) or (.[1] | isnan) or ((.[1] | if . < 0 then -. else . end) > 9007199254740991)))' "$f" >/dev/null 2>&1 \
+    && { echo "number outside ±(2^53-1)"; return 0; }
+  jq -e '[.. | strings, (objects | keys[])] | any(.[]; contains("\ufffd"))' "$f" >/dev/null 2>&1 && { echo "invalid UTF-8 or lone surrogate"; return 0; }
+  return 0
 }
 
-# スキルディレクトリ（SKILL.md または契約ファイルを含むディレクトリ）
+# SKILL.md frontmatter の name
+sp_fm_name() {
+  awk 'NR == 1 { sub(/^\357\273\277/, "") } { sub(/\r$/, "") }
+    NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; fm = 1; next }
+    fm && /^---[[:space:]]*$/ { exit }
+    fm && /^name:/ { v = $0; sub(/^name:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v)
+      if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2); print v; exit }' "$1" 2>/dev/null
+}
+
+# スキルディレクトリ（SKILL.md または skill.contract.json を含むディレクトリ）
 sp_skill_dirs() {
-  {
-    files_named '^SKILL\.md$' | while IFS= read -r f; do dirname -- "$f"; done
-    files_named '^skill\.contract\.json$' | while IFS= read -r f; do dirname -- "$f"; done
-    files_path '/\.skillpact/contract\.json$' | while IFS= read -r f; do dirname -- "$(dirname -- "$f")"; done
-  } | sort -u
+  { files_named '^SKILL\.md$'; files_named '^skill\.contract\.json$'; } | while IFS= read -r f; do dirname -- "$f"; done | sort -u
+}
+
+# 祖先ディレクトリ（ROOT 内）に契約があるか（契約付きスキルの一部として扱い、個別に報告しない）
+sp_under_contract() {
+  local d="$1"
+  while [ "$d" != "$ROOT" ] && [ "$d" != "/" ] && [ "$d" != "." ]; do
+    d="$(dirname -- "$d")"
+    case "$d/" in "$ROOT"/*) ;; *) return 1 ;; esac
+    [ -f "$d/skill.contract.json" ] && return 0
+  done
+  return 1
 }
 
 # スキル直下のファイル（入れ子スキルの配下は除外）
@@ -2729,37 +3337,35 @@ sp_skill_files() {
     local rel="${f#"$dir"/}" sub="$dir" part nested=0
     while [[ "$rel" == */* ]]; do
       part="${rel%%/*}"; sub="$sub/$part"; rel="${rel#*/}"
-      if [ -f "$sub/SKILL.md" ] || [ -f "$sub/skill.contract.json" ] || [ -f "$sub/.skillpact/contract.json" ]; then
-        [ "$sub" != "$dir/.skillpact" ] && { nested=1; break; }
-      fi
+      if [ -f "$sub/SKILL.md" ] || [ -f "$sub/skill.contract.json" ]; then nested=1; break; fi
     done
     [ "$nested" -eq 0 ] && printf '%s\n' "$f"
   done
 }
 
-# 実態抽出用テキスト（コードスコープ）と prose を分離して一時ファイルに書き出す（出力はしない）
+# 実態抽出用テキスト（コードスコープ）を一時ファイルに書き出す（出力はしない）
 sp_extract() {
-  local dir="$1" code="$2" prose="$3" tools="$4"
-  : >"$code"; : >"$prose"; : >"$tools"
+  local dir="$1" code="$2" tools="$3"
+  : >"$code"; : >"$tools"
   local f base ext
   local -a sexts; mapfile -t sexts < <(read_ioc '.skillpact.script_extensions')
   local sre; sre="$(printf '%s|' "${sexts[@]}" | sed 's/|$//')"
+  local fre; fre="$(read_ioc '.skillpact.shell_fence_langs' | paste -sd'|' -)"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     base="${f##*/}"; ext="${base##*.}"
-    case "$f" in
-      */.skillpact/*|*/skill.contract.json|*/policy-v0.8.json|*.sig|*.bundle|*/l2-test-record.json) continue ;;
-    esac
+    [ "$base" = "skill.contract.json" ] && continue
+    grep -q -x -F -- "$f" "$TMP_DIR/sp_policies.lst" 2>/dev/null && continue
     if [[ "$base" =~ \.md$ ]]; then
-      awk -v code="$code" -v prose="$prose" -v tools="$tools" '
+      ZES_FRE="$fre" awk -v code="$code" -v tools="$tools" '
+        BEGIN { fre = "^(" ENVIRON["ZES_FRE"] ")$" }
         NR==1 && /^---[[:space:]]*$/ { fm=1; next }
         fm && /^---[[:space:]]*$/ { fm=0; next }
         fm { if ($0 ~ /^allowed-tools:/) print $0 >> tools; print $0 >> code; next }
         /^[[:space:]]*(```|~~~)/ {
-          if (!infence) { lang=$0; sub(/^[[:space:]]*(```|~~~)[[:space:]]*/,"",lang); sub(/[[:space:]{].*/,"",lang); print "#ZES-FENCE " tolower(lang) >> code }
+          if (!infence) { lang=$0; sub(/^[[:space:]]*(```|~~~)[[:space:]]*/,"",lang); sub(/[[:space:]{].*/,"",lang); lang=tolower(lang); if (lang ~ fre) print "#ZES-SHELL-FENCE" >> code }
           infence=!infence; next }
-        infence { print $0 >> code; next }
-        { print $0 >> prose }' "$f"
+        infence { print $0 >> code; next }' "$f"
     elif [[ "$ext" =~ ^($sre)$ ]] || head -c 2 -- "$f" 2>/dev/null | grep -q '^#!'; then
       printf '#ZES-SCRIPT %s\n' "$base" >>"$code"
       cat -- "$f" >>"$code"; printf '\n' >>"$code"
@@ -2769,238 +3375,192 @@ sp_extract() {
   done < <(sp_skill_files "$dir")
 }
 
+# 静的解析で見えた効果（SkillPact の 6 効果に対応づける。secrets → read（機密ファイル）、persist → write（作業領域外））
+sp_observed() {
+  local code="$1" tools="$2" e pats m re
+  local exec=false network=false write=false spend=false send=false read=false durable=false
+  for e in exec network write spend send; do
+    pats="$(jq -r --arg e "$e" '.skillpact.observed_effect_patterns[$e] // [] | join("|")' "$IOC_FILE")"
+    if [ "$e" = write ]; then
+      sed -E 's#[0-9&]?>>?[[:space:]]*/dev/null##g' "$code" 2>/dev/null | grep -q -E -- "$pats" && write=true
+    elif [ -n "$pats" ] && grep -q -E -- "$pats" "$code" 2>/dev/null; then printf -v "$e" true; fi
+  done
+  grep -q -E '^#ZES-(SCRIPT |SHELL-FENCE)' "$code" && exec=true
+  grep -q -E '(^|[^A-Za-z])Bash([^A-Za-z]|$)' "$tools" && exec=true
+  grep -q -E '(WebFetch|WebSearch)' "$tools" && network=true
+  grep -q -E '(^|[^A-Za-z])(Write|Edit|MultiEdit|NotebookEdit)([^A-Za-z]|$)' "$tools" && write=true
+  pats="$(jq -r '.skillpact.sensitive_read_patterns | join("|")' "$IOC_FILE")"
+  grep -q -E -- "$pats" "$code" 2>/dev/null && read=true
+  while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    if [ "$m" = "registry run" ]; then re='registry[[:space:]]+run|CurrentVersion\\Run|reg[[:space:]]+add[^\n]*\\Run'
+    else re="$(printf '%s' "$m" | sed 's/[.[\*^$]/\\&/g; s/ /[[:space:]]+/g')"; fi
+    grep -q -i -E -- "$re" "$code" 2>/dev/null && { durable=true; write=true; }
+  done < <(read_ioc '.skillpact.persistence_markers')
+  jq -n -c --argjson x "$exec" --argjson n "$network" --argjson w "$write" --argjson s "$spend" --argjson m "$send" --argjson r "$read" --argjson d "$durable" \
+    '{exec:$x, network:$n, write:$w, spend:$s, send:$m, read:$r, durable:$d}'
+}
+
+# 前版比較用: ROOT 内の skill.contract.json とキャッシュ内の契約を JSONL で列挙
+sp_contract_index() {
+  {
+    files_named '^skill\.contract\.json$'
+    if [ -n "$SKILLPACT_CACHE" ] && [ -d "$SKILLPACT_CACHE" ]; then find "$SKILLPACT_CACHE" -type f -name '*.json' 2>/dev/null; fi
+  } | sort -u | while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    jq -c --arg p "$f" "$SP_JQ_LIB"' select(type == "object" and (.skill.name | type) == "string" and (.skill.version | type) == "string" and (.permissions | type) == "object")
+      | {path: $p, name: .skill.name, ver: .skill.version, perms: .permissions, authors: (try sp_authors catch [])}' "$f" 2>/dev/null
+  done
+}
+
+sp_field() {  # sp_field ANALYSIS_JSON OBSERVED_JSON CONTRACT_PATH DIFF_ANOMALY
+  jq -n -c --argjson a "$1" --argjson o "$2" --arg cp "$3" --argjson da "$4" --argjson R "$SP_RULES" '
+    {contract_path: (if $cp == "" then null else $cp end), contract_version: ($a.cv // null), level: ($a.level // null),
+     signed: ($a.signed // false), author: ($a.author // null), declared_effects: ($a.declared // []),
+     observed_effects: [$R.effects[] as $e | select($o[$e]) | $e], policy_decision: null, l2_tested: false,
+     divergence: [($a.divergence // [])[].effect] | unique | sort_by(. as $e | $R.effects | index($e)), diff_anomaly: $da}'
+}
+
+# SkillPact ポリシー（policy_version と defaults を持つ JSON）の構造検査
+sp_policies() {
+  : >"$TMP_DIR/sp_policies.lst"
+  local f prob bad sp
+  grep -E '\.json$' "$FILES_LIST" | grep -v -E '/skill\.contract\.json$' | tr '\n' '\0' \
+    | xargs -0 grep -l -I -F '"policy_version"' -- /dev/null 2>/dev/null | grep -v '^/dev/null$' | while IFS= read -r f; do
+    jq -e 'type == "object" and has("policy_version") and has("defaults")' "$f" >/dev/null 2>&1 || continue
+    printf '%s\n' "$f" >>"$TMP_DIR/sp_policies.lst"
+    prob="$(sp_ijson_problem "$f")"
+    if [ -z "$prob" ]; then
+      bad="$(jq -r --argjson R "$SP_RULES" '[
+        ((keys - $R.policy_keys) | if length > 0 then "unknown key " + join(",") else empty end),
+        (if (.policy_version | IN($R.policy_versions[])) | not then "policy_version" else empty end),
+        (.defaults | if type != "object" or ((keys | sort) != ($R.effects | sort)) or any(.[]; IN($R.decision_values[]) | not) then "defaults" else empty end),
+        ((.rules // []) | if type != "array" then "rules" else (.[] | if type != "object" or ((keys - ["id", "effect", "scope", "decision"]) | length) > 0 or ((.effect | IN($R.effects[])) | not) or ((.decision | IN($R.decision_values[])) | not) or (has("scope") and ((.scope | type) != "array" or any(.scope[]; type != "string"))) then "rules" else empty end) end),
+        ("never_auto_allow_any", "trusted_keys") as $k | (if has($k) and ((.[$k] | type) != "array" or any(.[$k][]; type != "string")) then $k else empty end),
+        ("require_signature", "ask_on_destructive", "allowlist_overrides_ask") as $k | (if has($k) and ((.[$k] | type) != "boolean") then $k else empty end),
+        (if has("min_contract_version") and ((.min_contract_version | type) != "string" or (.min_contract_version | test("^[0-9]+\\.[0-9]+$") | not)) then "min_contract_version" else empty end),
+        (if has("compositions") and ((.compositions | type) != "object" or ((.compositions | keys) - ["exfiltration", "persistence", "spend_untrusted"] | length) > 0 or any(.compositions[]; IN($R.decision_values[]) | not)) then "compositions" else empty end)
+      ] | unique | join(", ")' "$f" 2>/dev/null)" || bad="SCHEMA"
+    else bad="JSON: $prob"; fi
+    sp="$(jq -n -c '{contract_path:null, contract_version:null, level:null, signed:false, author:null, declared_effects:[], observed_effects:[], policy_decision:null, l2_tested:false, divergence:[], diff_anomaly:false}')"
+    if [ -n "$bad" ]; then
+      medium "skillpact-invalid" "$f" "SkillPact ポリシーを検証できません（${bad}）。ZES はポリシーの allow/ask/deny 判定を行いません" "$sp"
+    else
+      log_info "SkillPact ポリシーを検出（構造は妥当。allow/ask/deny の評価は ZES では未実装）: $f"
+    fi
+  done
+}
+
+sp_effect_label() {
+  case "$1" in
+    exec) printf 'exec（他のプログラムの実行）' ;; network) printf 'network（外部ホストとの通信）' ;;
+    spend) printf 'spend（課金・決済）' ;; send) printf 'send（メール・投稿・メッセージの送信）' ;;
+    read) printf 'read（機密ファイル: ~/.ssh・.env・認証情報など）' ;; write) printf 'write（ファイルの書き込み）' ;;
+  esac
+}
+
 check_skillpact() {
-  log_section "§49" "SkillPact統合"
+  log_section "§49" "SkillPact 契約（実験的）"
   if [ "$HAVE_JQ" -ne 1 ]; then record_error "§49" "jq_unavailable"; return 0; fi
-  local -a cfn pfn l2fn sigfn; mapfile -t cfn < <(read_ioc '.skillpact.contract_filenames')
-  mapfile -t pfn < <(read_ioc '.skillpact.policy_files'); mapfile -t l2fn < <(read_ioc '.skillpact.l2_record_filenames')
-  mapfile -t sigfn < <(read_ioc '.skillpact.signature_filenames')
-  local threshold; threshold="$(jq -r '.skillpact.trust_model.diff_anomaly_detection.threshold // 0.3' "$IOC_FILE")"
-  local schema_ok; schema_ok="$(jq -c '.skillpact.schema_versions' "$IOC_FILE")"
-  local risk_flags; risk_flags="$(jq -c '.skillpact.risk_flags' "$IOC_FILE")"
-  sp_contract_index >"$TMP_DIR/sp_index.tsv"
-  local dir n_skills=0
+  SP_RULES="$(jq -c '.skillpact' "$IOC_FILE")"
+  sp_policies
+  sp_contract_index >"$TMP_DIR/sp_index.jsonl"
+  local dir n_skills=0 n_contracts=0
   while IFS= read -r dir; do
     [ -n "$dir" ] || continue
     n_skills=$((n_skills + 1))
-    local cpath="" c
-    for c in "${cfn[@]}"; do [ -f "$dir/$c" ] && [ ! -L "$dir/$c" ] && { cpath="$dir/$c"; break; }; done
-    local code="$TMP_DIR/sp_code" prose="$TMP_DIR/sp_prose" tools="$TMP_DIR/sp_tools"
-    sp_extract "$dir" "$code" "$prose" "$tools"
-
-    # --- 実態エフェクト（静的解析。§2/§7/§15/§17 と同じ「パスのみ・内容非出力」方針） ---
-    local -a observed=(read)
-    local eff
-    for eff in exec network write secrets spend; do
-      local pats; pats="$(jq -r --arg e "$eff" '.skillpact.observed_effect_patterns[$e] // [] | join("|")' "$IOC_FILE")"
-      if [ -n "$pats" ] && grep -q -E -- "$pats" "$code" 2>/dev/null; then observed+=("$eff"); continue; fi
-      case "$eff" in
-        exec) grep -q '^#ZES-SCRIPT ' "$code" && { observed+=(exec); continue; }
-              grep -q -E '^#ZES-FENCE (bash|sh|shell|zsh|fish|console|shell-session|powershell|ps1|pwsh|cmd|bat|python|python3|py|js|javascript|node|mjs|ts|typescript|ruby|rb|perl|php)$' "$code" && { observed+=(exec); continue; }
-              grep -q -E '(^|[^A-Za-z])Bash([^A-Za-z]|$)' "$tools" && observed+=(exec) ;;
-        network) grep -q -E '(WebFetch|WebSearch)' "$tools" && observed+=(network) ;;
-        write) grep -q -E '(^|[^A-Za-z])(Write|Edit|MultiEdit|NotebookEdit)([^A-Za-z]|$)' "$tools" && observed+=(write) ;;
-      esac
-    done
-    local destructive=0 persistence=0 m
-    while IFS= read -r m; do
-      [ -n "$m" ] || continue
-      local re
-      if [[ "$m" == *' | '* ]]; then re="$(printf '%s' "${m%% | *}" | sed 's/[.[\*^$]/\\&/g')[^|\n]*\|[[:space:]]*$(printf '%s' "${m##* | }" | sed 's/[.[\*^$]/\\&/g')"
-      else re="$(printf '%s' "$m" | sed 's/[.[\*^$]/\\&/g; s/ /[[:space:]]+/g')"; fi
-      grep -q -i -E -- "$re" "$code" 2>/dev/null && destructive=1
-    done < <(read_ioc '.skillpact.destructive_markers')
-    while IFS= read -r m; do
-      [ -n "$m" ] || continue
-      local re
-      if [ "$m" = "registry run" ]; then re='registry[[:space:]]+run|CurrentVersion\\Run|reg[[:space:]]+add[^\n]*\\Run'
-      else re="$(printf '%s' "$m" | sed 's/[.[\*^$]/\\&/g; s/ /[[:space:]]+/g')"; fi
-      grep -q -i -E -- "$re" "$code" 2>/dev/null && persistence=1
-    done < <(read_ioc '.skillpact.persistence_markers')
-    [ "$persistence" -eq 1 ] && observed+=(write)
-    [ "$destructive" -eq 1 ] && observed+=(exec write)
-    local observed_json; observed_json="$(printf '%s\n' "${observed[@]}" | sort -u | jq -R . | jq -s -c 'sort_by(. as $e | ["exec","network","write","read","secrets","spend"] | index($e))')"
+    local cpath="$dir/skill.contract.json"
+    { [ -f "$cpath" ] && [ ! -L "$cpath" ]; } || cpath=""
+    if [ -z "$cpath" ] && sp_under_contract "$dir"; then continue; fi
+    local code="$TMP_DIR/sp_code" tools="$TMP_DIR/sp_tools"
+    sp_extract "$dir" "$code" "$tools"
+    local obs; obs="$(sp_observed "$code" "$tools")"
+    local obs_txt; obs_txt="$(printf '%s' "$obs" | jq -r --argjson R "$SP_RULES" '[$R.effects[] as $e | select(.[$e]) | $e] | join(",")')"
 
     if [ -z "$cpath" ]; then
-      local sp
-      sp="$(jq -n -c --argjson obs "$observed_json" '{contract_path:null, contract_version:null, level:null, signed:false, author:null,
-             declared_effects:[], observed_effects:$obs, policy_decision:null, l2_tested:false,
-             divergence:($obs - ["read"]), diff_anomaly:false}')"
-      high "skillpact-undeclared" "$dir" "SkillPact 契約ファイルが存在しません（実態: $(printf '%s' "$observed_json" | jq -r 'join(",")')）" "$sp"
+      # 契約なし: SkillPact を使わないスキルは対象外。影響の大きい効果が見える場合のみ参考 INFO
+      if [ -f "$dir/SKILL.md" ] && printf '%s' "$obs" | jq -e '.exec or .network or .spend or .send' >/dev/null; then
+        info "skillpact-undeclared" "$dir" "このスキルには SkillPact 契約（skill.contract.json）がないため、宣言との比較は行いません（参考: コードに見える効果 ${obs_txt}）" \
+          "$(sp_field '{}' "$obs" "" false)"
+      fi
       continue
     fi
-    if ! jq -e 'type=="object"' "$cpath" >/dev/null 2>&1; then
-      local sp
-      sp="$(jq -n -c --arg cp "$cpath" --argjson obs "$observed_json" '{contract_path:$cp, contract_version:null, level:null, signed:false, author:null,
-             declared_effects:[], observed_effects:$obs, policy_decision:null, l2_tested:false, divergence:($obs - ["read"]), diff_anomaly:false}')"
-      high "skillpact-undeclared" "$cpath" "SkillPact 契約ファイルが JSON オブジェクトとして解析できません（未宣言として扱う）" "$sp"
+    n_contracts=$((n_contracts + 1))
+    local prob; prob="$(sp_ijson_problem "$cpath")"
+    if [ -n "$prob" ]; then
+      medium "skillpact-invalid" "$cpath" "SkillPact 契約を検証できません（CONTRACT_JSON: ${prob}）。宣言を読めないため乖離判定は行いません" "$(sp_field '{}' "$obs" "$cpath" false)"
+      record_error "§49" "contract_unparseable:$cpath"
+      continue
+    fi
+    # スキル配下の全ファイル・シンボリックリンク（相対パス）と integrity.files に載ったファイルのハッシュ
+    local files_json links_json hashes_json rel
+    files_json="$(awk -v d="$dir/" 'index($0, d)==1 { print substr($0, length(d) + 1) }' "$FILES_LIST" | jq -R . | jq -s -c .)"
+    links_json="$(awk -v d="$dir/" 'index($0, d)==1 { print substr($0, length(d) + 1) }' "$LINKS_LIST" | jq -R . | jq -s -c .)"
+    hashes_json="$(jq -r '(.integrity.files? // {}) | if type == "object" then keys[] else empty end' "$cpath" 2>/dev/null | while IFS= read -r rel; do
+        case "/$rel/" in */../*|*/./*|*//*) continue ;; esac
+        { [ -f "$dir/$rel" ] && [ ! -L "$dir/$rel" ]; } || continue
+        printf '%s\t%s\n' "$rel" "$(sha256_file "$dir/$rel")"
+      done | jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): .[1]}) | add // {}')"
+    local fm=""; [ -f "$dir/SKILL.md" ] && fm="$(sp_fm_name "$dir/SKILL.md")"
+    local a
+    a="$(jq -c --argjson R "$SP_RULES" --argjson files "$files_json" --argjson links "$links_json" --argjson hashes "$hashes_json" \
+          --arg fm "$fm" --argjson obs "$obs" "$SP_JQ_LIB $SP_ANALYZE" "$cpath" 2>/dev/null)"
+    if [ -z "$a" ]; then
+      medium "skillpact-invalid" "$cpath" "SkillPact 契約を検証できません（解析に失敗）。乖離判定は行いません" "$(sp_field '{}' "$obs" "$cpath" false)"
+      record_error "§49" "contract_analysis_failed:$cpath"
       continue
     fi
 
-    # --- 契約の読み取り（JSON パースのみ） ---
-    local cver level author cname cversion decl_tokens decl_bases cdecision
-    cver="$(jq -r '.schema_version // empty | tostring' "$cpath")"
-    level="$(jq -r '.level // empty | tostring' "$cpath")"
-    author="$(jq -r '(.author // .publisher // empty) | if type=="object" then (.name // .id // tojson) else tostring end' "$cpath")"
-    cname="$(jq -r '.name // empty | tostring' "$cpath")"
-    cversion="$(jq -r '.version // empty | tostring' "$cpath")"
-    decl_tokens="$(jq -c "$SP_EFFECTS_NORM"' [(.effects // [])[] | norm] + [(.operations // [])[] | (.effects // [])[] | norm] | map(select(length>0)) | unique' "$cpath")"
-    decl_bases="$(printf '%s' "$decl_tokens" | jq -c 'map(split(":")[0]) | unique | sort_by(. as $e | ["exec","network","write","read","secrets","spend","persist","longrun"] | index($e) // 99)')"
-    cdecision="$(jq -r '.decision // .policy_decision // empty | tostring' "$cpath")"
+    # 前版との差分（spec §17）
+    local diff="null"
+    if printf '%s' "$a" | jq -e '.vstatus == "ok" and .permsok and (.name | type) == "string" and (.sver | type) == "string"' >/dev/null; then
+      diff="$(jq -c -n --argjson R "$SP_RULES" --slurpfile idx "$TMP_DIR/sp_index.jsonl" --arg p "$cpath" --argjson a "$a" \
+        "$SP_JQ_LIB"' {path: $p, name: $a.name, ver: $a.sver, perms: input.permissions, authors: $a.authors} | '"$SP_DIFF" "$cpath" 2>/dev/null)"
+      [ -n "$diff" ] || diff="null"
+    fi
+    local da=false; [ "$diff" != "null" ] && da=true
+    local sp; sp="$(sp_field "$a" "$obs" "$cpath" "$da")"
+    local sig_note=""
+    printf '%s' "$a" | jq -e '.signed' >/dev/null && sig_note="（契約に署名がありますが ZES は署名を検証しません。署名の有無で重大度は変えません）"
 
-    # --- ポリシー評価 ---
-    local ppath="" p
-    for p in "${pfn[@]}"; do
-      if [ -f "$dir/$p" ]; then ppath="$dir/$p"; break; fi
-      if [ -f "$ROOT/$p" ]; then ppath="$ROOT/$p"; break; fi
-    done
-    local pdecision="$cdecision" policy_violation=""
-    if [ -n "$ppath" ]; then
-      if jq -e 'type=="object"' "$ppath" >/dev/null 2>&1; then
-        local evald
-        evald="$(jq -r --argjson toks "$decl_tokens" '
-          def rank: if .=="deny" then 3 elif .=="ask" then 2 elif .=="allow" then 1 else 0 end;
-          . as $p |
-          [ $toks[] as $t | ( [ ($p.rules // [])[] | select(.effect == $t or .effect == ($t|split(":")[0]) or .effect == (($t|split(":")[0]) + ":any")) | .decision ] | first ) // ($p.default // "ask") ]
-          | if length==0 then ($p.default // "ask") else (max_by(rank)) end' "$ppath" 2>/dev/null)"
-        [ -n "$pdecision" ] || pdecision="$evald"
-        policy_violation="$(jq -r --argjson toks "$decl_tokens" --argjson rf "$risk_flags" '
-          . as $p |
-          (if ($p.never_auto_allow_any | type) == "array" then $p.never_auto_allow_any else $rf end) as $never |
-          def covers($flag; $tok): ($tok == $flag) or (($flag|endswith(":any")) and (($tok|split(":")[0]) == ($flag|split(":")[0])));
-          [ ($p.rules // [])[] | select(.decision == "allow") | .effect as $e | $never[] | select(. == $e or covers(.; $e)) ] as $explicit |
-          [ $toks[] as $t | $never[] as $f | select(covers($f; $t)) |
-            ( [ ($p.rules // [])[] | select(.effect == $t or .effect == ($t|split(":")[0]) or .effect == (($t|split(":")[0]) + ":any")) | .decision ] | first ) // ($p.default // "ask")
-            | select(. == "allow") | $f ] as $implicit |
-          ($explicit + $implicit) | unique | join(",")' "$ppath" 2>/dev/null)"
+    local vs cv errs
+    vs="$(printf '%s' "$a" | jq -r '.vstatus')"; cv="$(printf '%s' "$a" | jq -r '.cv // "未指定"')"
+    if [ "$vs" != "ok" ]; then
+      medium "skillpact-invalid" "$cpath" "SkillPact 契約の contract_version「${cv}」には対応していません（ZES の対応: 0.1〜0.8）。宣言を解釈できないため乖離判定は行いません" "$sp"
+      continue
+    fi
+    errs="$(printf '%s' "$a" | jq -r '.errors | join(",")')"
+    [ -n "$errs" ] && medium "skillpact-invalid" "$cpath" "SkillPact 契約を検証できません（ZES の部分検査: ${errs}）。L1 とは見なしません" "$sp"
+
+    local eff why sens durable lv txt
+    while IFS=$'\t' read -r eff why sens durable; do
+      [ -n "$eff" ] || continue
+      case "$eff" in exec|network|spend|send) lv=HIGH ;; *) lv=MEDIUM ;; esac
+      if [ "$durable" = "true" ]; then
+        txt="コードに作業領域外への永続的な書き込み（crontab・.bashrc・authorized_keys など）が見えますが、契約の write は"
+        [ "$why" = "none" ] && txt="${txt}宣言されていません（permissions.write: none）" || txt="${txt} \$WORKDIR / \$OUTPUT / \$TMPDIR 内に限られています"
+      elif [ "$sens" = "true" ]; then
+        txt="コードが $(sp_effect_label read)を読む可能性がありますが、契約の read は"
+        [ "$why" = "none" ] && txt="${txt}宣言されていません（permissions.read: none）" || txt="${txt}その範囲を含みません"
       else
-        record_error "§49" "policy_parse_failed:$ppath"
+        txt="コードに $(sp_effect_label "$eff")が見えますが、契約は ${eff} を宣言していません（permissions.${eff}: none）"
       fi
-    fi
-    if [ -n "$pdecision" ] && ! jq -e --arg d "$pdecision" '.skillpact.decision_values | index($d)' "$IOC_FILE" >/dev/null 2>&1; then
-      medium "skillpact-divergence" "$cpath" "ポリシー決定の値が decision_values（allow/ask/deny）外: $pdecision"
-    fi
-    # 契約自体が allow を宣言し、リスクフラグを含む場合もポリシー違反として扱う
-    local contract_violation=""
-    if [ -z "$policy_violation" ] && [ "$cdecision" = "allow" ]; then
-      contract_violation="$(jq -r --argjson toks "$decl_tokens" '. as $rf | [ $toks[] as $t | $rf[] | select(. == $t or ((endswith(":any")) and (($t|split(":")[0]) == (split(":")[0])) and (($t|split(":")[1] // "any") == "any"))) ] | unique | join(",")' <<<"$risk_flags")"
-    fi
+      emit "$lv" "skillpact-divergence" "$dir" "${txt}${sig_note}" "$sp"
+    done < <(printf '%s' "$a" | jq -r '.divergence[] | [.effect, .why, (.sensitive // false), (.durable // false)] | @tsv')
 
-    # --- L2 テスト記録（存在と SHA-256 のみ） ---
-    local l2_tested=false l2rec l2hash l2bad=""
-    l2rec="$(jq -r '(.l2.record // .tests.l2.record // .l2_record // empty) | tostring' "$cpath")"
-    l2hash="$(jq -r '(.l2.sha256 // .tests.l2.sha256 // .l2_sha256 // empty) | tostring | ltrimstr("sha256:")' "$cpath")"
-    local cand=""
-    if [ -n "$l2rec" ]; then
-      case "$l2rec" in /*|*..*) l2bad="記録パスがスキル外を指しています" ;; *) [ -f "$dir/$l2rec" ] && cand="$dir/$l2rec" ;; esac
-    else
-      for p in "${l2fn[@]}"; do [ -f "$dir/$p" ] && { cand="$dir/$p"; break; }; done
+    if [ "$da" = true ]; then
+      local dl dtxt
+      dl="$(printf '%s' "$diff" | jq -r 'if any(.widened[]; .effect | IN("exec", "network", "spend", "send")) then "HIGH" else "MEDIUM" end')"
+      dtxt="$(printf '%s' "$diff" | jq -r '"前版 \(.prev_ver)（\(.prev_path)）から権限が拡大していますが（\([.widened[].text] | join(" / "))）、skill.version の major が上がっていません（SkillPact §17）。作者署名鍵: " + (if .ident == "same" then "前版と同一（未検証。正規の鍵で署名された静かな拡大はアカウント侵害の兆候）" elif .ident == "changed" then "前版と異なる（未検証）" else "署名なし" end)')"
+      emit "$dl" "skillpact-account-compromise" "$cpath" "$dtxt" "$sp"
     fi
-    if [ -n "$cand" ]; then
-      if [ -n "$l2hash" ] && [ "$(sha256_file "$cand")" != "$l2hash" ]; then l2bad="記録の SHA-256 が契約と不一致"
-      else l2_tested=true; fi
-    fi
-
-    # --- L3 署名（存在のみ。信頼判定には使わない） ---
-    local signed=false sigf
-    sigf="$(jq -r '(.signature.file // .signature_file // empty) | tostring' "$cpath")"
-    if [ -n "$sigf" ]; then case "$sigf" in /*|*..*) ;; *) [ -f "$dir/$sigf" ] && signed=true ;; esac; fi
-    if [ "$signed" = false ]; then for p in "${sigfn[@]}"; do [ -f "$dir/$p" ] && { signed=true; break; }; done; fi
-
-    # --- 乖離（実態 − 宣言） ---
-    local divergence
-    divergence="$(jq -n -c --argjson o "$observed_json" --argjson d "$decl_bases" '$o - $d - ["read"] | map(select(. as $e | ["exec","network","secrets","write","spend"] | index($e)))')"
-    if [ "$persistence" -eq 1 ] && ! printf '%s' "$decl_bases" | jq -e 'index("persist") or index("write")' >/dev/null; then
-      divergence="$(printf '%s' "$divergence" | jq -c '. + ["persist"] | unique')"
-    fi
-
-    # --- 差分異常（同一 author の前バージョン） ---
-    local diff_anomaly=false diff_reason="" prev_path=""
-    if [ -n "$author" ] && [ -n "$cname" ] && [ -n "$cversion" ]; then
-      local pa pn pv pp best=""
-      while IFS="$US" read -r pa pn pv pp; do
-        [ "$pa" = "$author" ] && [ "$pn" = "$cname" ] && [ "$pp" != "$cpath" ] && [ -n "$pv" ] || continue
-        version_lt "$pv" "$cversion" || continue
-        if [ -z "$best" ] || version_lt "$best" "$pv"; then best="$pv"; prev_path="$pp"; fi
-      done < <(tsv_us <"$TMP_DIR/sp_index.tsv")
-      if [ -n "$prev_path" ]; then
-        local prev_tokens
-        prev_tokens="$(jq -c "$SP_EFFECTS_NORM"' [(.effects // [])[] | norm] + [(.operations // [])[] | (.effects // [])[] | norm] | map(select(length>0)) | unique' "$prev_path" 2>/dev/null)"
-        diff_reason="$(jq -n -r --argjson c "$decl_tokens" --argjson p "${prev_tokens:-[]}" --argjson th "$threshold" '
-          def bases: map(split(":")[0]) | unique;
-          ($c - $p) as $added | (($c - $p) + ($p - $c) | unique | length) as $delta | (($c + $p) | unique | length) as $union |
-          [ (if (($c|bases|index("exec")) and (($p|bases|index("exec"))|not)) then "exec 新規追加" else empty end),
-            (if ([$added[] | select(startswith("network"))] | length) > 0 then "network 送信先の新規追加" else empty end),
-            (if ([$added[] | select(startswith("secrets"))] | length) > 0 then "secrets スコープ拡大" else empty end),
-            (if $union > 0 and ($delta / $union) > $th then "エフェクト差分率 \(($delta * 100 / $union) | floor)% > 閾値 \($th * 100 | floor)%" else empty end)
-          ] | join(" / ")')"
-        [ -n "$diff_reason" ] && diff_anomaly=true
-      fi
-    fi
-
-    local sp
-    sp="$(jq -n -c --arg cp "$cpath" --arg cv "$cver" --arg lv "$level" --argjson sg "$signed" --arg au "$author" \
-          --argjson de "$decl_bases" --argjson ob "$observed_json" --arg pd "$pdecision" --argjson l2 "$l2_tested" \
-          --argjson dv "$divergence" --argjson da "$diff_anomaly" '
-          {contract_path:$cp, contract_version:(if $cv=="" then null else $cv end), level:(if $lv=="" then null else $lv end),
-           signed:$sg, author:(if $au=="" then null else $au end), declared_effects:$de, observed_effects:$ob,
-           policy_decision:(if $pd=="" then null else $pd end), l2_tested:$l2, divergence:$dv, diff_anomaly:$da}')"
-
-    # --- 検出ルール（Master Spec §5.7） ---
-    if ! printf '%s' "$schema_ok" | jq -e --arg v "$cver" 'index($v)' >/dev/null; then
-      medium "skillpact-divergence" "$cpath" "契約の schema_version が ${cver:-未指定}（対応: $(printf '%s' "$schema_ok" | jq -r 'join(",")')）。互換性不明" "$sp"
-    fi
-    if [ -n "$level" ] && ! jq -e --arg l "$level" '.skillpact.levels | index($l)' "$IOC_FILE" >/dev/null; then
-      medium "skillpact-divergence" "$cpath" "契約の level が L1/L2/L3 以外: $level" "$sp"
-    fi
-    if [ "$level" = "L3" ] && [ "$signed" = false ]; then
-      medium "skillpact-divergence" "$cpath" "L3 を宣言しているが署名ファイルが見つかりません" "$sp"
-    fi
-    if printf '%s' "$decl_bases" | jq -e 'index("exec") or index("network") or index("secrets")' >/dev/null && [ "$l2_tested" = false ]; then
-      high "skillpact-divergence" "$cpath" "exec/network/secrets を宣言しているが L2 テスト記録がありません${l2bad:+（$l2bad）}（宣言のみで検証なし）" "$sp"
-    fi
-    local sigtxt=""; [ "$signed" = true ] && sigtxt="（L3 署名済みでも重大度は下げません）"
-    for eff in exec network secrets; do
-      if printf '%s' "$divergence" | jq -e --arg e "$eff" 'index($e)' >/dev/null; then
-        critical "skillpact-divergence" "$dir" "契約は ${eff} を宣言していないが、実態に ${eff} を検出（宣言: $(printf '%s' "$decl_bases" | jq -r 'join(",")')）${sigtxt}" "$sp"
-      fi
-    done
-    printf '%s' "$divergence" | jq -e 'index("spend")' >/dev/null && high "skillpact-divergence" "$dir" "契約は spend を宣言していないが、実態に課金/決済処理を検出${sigtxt}" "$sp"
-    if printf '%s' "$divergence" | jq -e 'index("write")' >/dev/null && [ "$persistence" -eq 0 ]; then
-      medium "skillpact-divergence" "$dir" "契約は write を宣言していないが、実態にファイル書き込みを検出${sigtxt}" "$sp"
-    fi
-    if [ "$destructive" -eq 1 ] && [ "$pdecision" = "allow" ]; then
-      high "skillpact-divergence" "$dir" "破壊的操作（destructive_markers）を含むスキルが allow（自動許可）" "$sp"
-    fi
-    if [ "$persistence" -eq 1 ] && printf '%s' "$divergence" | jq -e 'index("persist")' >/dev/null; then
-      critical "skillpact-divergence" "$dir" "永続化操作（persistence_markers）を検出したが、契約に persist/write の宣言がありません${sigtxt}" "$sp"
-    fi
-    # prose と契約の突合
-    local claim
-    while IFS=$'\t' read -r claim pats forbids; do
-      [ -n "$claim" ] || continue
-      if grep -q -i -E -- "$pats" "$prose" 2>/dev/null || jq -r '.description // empty' "$cpath" | grep -q -i -E -- "$pats"; then
-        local hit; hit="$(jq -n -r --argjson d "$decl_bases" --argjson f "$forbids" '[$d[] | select(. as $e | $f | index($e))] | join(",")')"
-        [ -n "$hit" ] && high "skillpact-divergence" "$cpath" "prose（${claim}）と契約が矛盾: 契約が ${hit} を宣言" "$sp"
-      fi
-    done < <(jq -r '.skillpact.prose_claims[] | [.claim, (.patterns | join("|")), (.forbids | tojson)] | @tsv' "$IOC_FILE")
-    if [ "$diff_anomaly" = true ]; then
-      local s3=""; [ "$signed" = true ] && s3="L3 署名済みだが"
-      high "skillpact-account-compromise" "$cpath" "${s3}同一作者（${author}）の前バージョン ${best}（$prev_path）から差分異常: ${diff_reason}" "$sp"
-    fi
-    if [ -n "$policy_violation" ]; then
-      high "skillpact-divergence" "$ppath" "ポリシーが never_auto_allow_any を尊重していません（自動許可: ${policy_violation}）" "$sp"
-    elif [ -n "$contract_violation" ]; then
-      high "skillpact-divergence" "$cpath" "契約の decision: allow が never_auto_allow_any の対象（${contract_violation}）を自動許可しています" "$sp"
-    fi
-    jq -r --arg pd "$pdecision" '(.operations // [])[] | select(.reversible == false and ((.decision // $pd) == "allow")) | (.name // .id // "unnamed") | tostring' "$cpath" 2>/dev/null \
-    | while IFS= read -r m; do
-        critical "skillpact-divergence" "$cpath" "reversible: false の操作（${m}）が allow（不可逆操作の自動許可）" "$sp"
-      done
     local nf; nf="$(grep -c -F "\"contract_path\":\"$(json_escape "$cpath")\"" "$FINDINGS_FILE" 2>/dev/null)"
-    [ "${nf:-0}" -eq 0 ] && safe "SkillPact 契約と実態が一致（$dir）"
+    if [ "${nf:-0}" -eq 0 ]; then
+      log_info "$(printf '%s' "$a" | jq -r '"SkillPact 契約（\(.name // "?")@\(.sver // "?")、contract \(.cv)）: 宣言とコードの静的解析に乖離なし。L1 相当（ZES の部分検査）。L2/L3 は ZES では検証しません（L3 でも安全を意味しません）。署名: " + (if .signed then "あり（未検証）" else "なし" end)')（$dir）"
+    fi
   done < <(sp_skill_dirs)
   [ "$n_skills" -eq 0 ] && log_info "スキル（SKILL.md / skill.contract.json）が見つかりません"
+  [ "$n_skills" -gt 0 ] && [ "$n_contracts" -eq 0 ] && log_info "SkillPact 契約（skill.contract.json）のあるスキルはありません（§49 は契約付きスキルのみ比較します）"
   return 0
 }
 check_s49() { check_skillpact; return 0; }

@@ -1,7 +1,8 @@
 // §10 / §26 / §27 / §28 / §30 / §31 / §32 / §33 / §35 / §36 / §40 / §43 / §48
 // ブラウザで判定できるのは「投入されたファイルの中身」まで。ホスト状態は CliOnlyNotice で CLI に案内する。
-import { named, push, readable, type RuleCtx } from '../context';
+import { HOME_RC_FILES, homeLike, named, push, readable, rootRel, type RuleCtx } from '../context';
 import { extname } from '../util';
+import { collectDeps } from './supplyChain';
 
 const RC = /(^|\/)(\.bashrc|\.bash_profile|\.profile|\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bash_login)$/;
 
@@ -28,7 +29,7 @@ export function buildHookRules(ctx: RuleCtx): void {
 }
 
 export function modelSupplyRules(ctx: RuleCtx): void {
-  ctx.checks.add('s32-pickle-ext').add('s32-weights-only').add('s32-extra-index').add('s36-trust-remote').add('s36-dataset-exec').add('s36-pickle-load');
+  ctx.checks.add('s32-pickle-ext').add('s32-weights-only').add('s32-extra-index').add('s36-trust-remote').add('s36-dataset-exec').add('s36-pickle-load').add('s36-lerobot');
   for (const f of ctx.files) {
     const e = extname(f.name);
     if (f.relPath.includes('node_modules/')) continue;
@@ -46,6 +47,10 @@ export function modelSupplyRules(ctx: RuleCtx): void {
     if (f.name.endsWith('.py') && !/(site|dist)-packages\/|node_modules\//.test(f.relPath) && /(def __reduce__|pickle\.loads?\(|dill\.loads?\(|cloudpickle\.loads?\()/.test(f.text)) {
       push(ctx, { level: 'MEDIUM', module: '§36', campaign: 'hf-supply-chain', path: f.relPath, detail: 'pickle 系デシリアライズ（__reduce__/pickle.loads/dill）', ruleId: 's36-pickle-load', evidenceSha: f.sha256 });
     }
+  }
+  // lerobot（CVE-2026-25874。ioc に修正版が未定義のため版に依らず要確認。CLI check_s36 と同じく依存インベントリから）
+  for (const d of collectDeps(ctx)) {
+    if (d.eco === 'pypi' && d.name === 'lerobot') push(ctx, { level: 'HIGH', module: '§36', campaign: 'hf-lerobot-rce', path: d.path, detail: `lerobot ${d.version}: CVE-2026-25874（CVSS 9.8）の修正版を確認してください（ioc に修正版未定義）`, ruleId: `s36-lerobot:${d.version}`, evidenceSha: d.sha });
   }
 }
 
@@ -97,7 +102,7 @@ export function ebpfRules(ctx: RuleCtx): void {
 }
 
 export function sigstoreRules(ctx: RuleCtx): void {
-  ctx.checks.add('s28-cosign-key').add('s43-identity').add('s43-slsa').add('s48-provenance');
+  ctx.checks.add('s28-cosign-key').add('s28-no-verify').add('s28-from-digest').add('s28-pull-always').add('s43-identity').add('s43-slsa').add('s48-provenance').add('s48-mismatch').add('s48-stale');
   for (const f of named(ctx, /^cosign\.key$/)) push(ctx, { level: 'HIGH', module: '§28', campaign: null, path: f.relPath, detail: 'cosign 秘密鍵（cosign.key）が検査対象内にあります', ruleId: 's28-cosign-key', evidenceSha: f.sha256 });
   for (const f of readable(ctx).filter((x) => /\.(sh|bash|ya?ml|mk)$|(^|\/)(Makefile|Jenkinsfile)$/.test(x.relPath))) {
     const joined = f.text.replace(/\\\r?\n/g, ' ');
@@ -111,12 +116,105 @@ export function sigstoreRules(ctx: RuleCtx): void {
     }
     if (/slsa-verifier\s+verify-/.test(f.text) && !/--source-uri/.test(f.text)) push(ctx, { level: 'HIGH', module: '§43', campaign: null, path: f.relPath, detail: 'slsa-verifier に --source-uri がありません', ruleId: 's43-slsa', evidenceSha: f.sha256 });
   }
-  const sboms = named(ctx, /(\.spdx\.json|\.cdx\.json|^bom\.json$|^sbom\.json$|\.spdx$|^cyclonedx\.json$)/);
-  const prov = named(ctx, /(\.intoto\.jsonl|^provenance\.json$|\.provenance\.json$|\.layout$)/).length > 0;
-  const verify = readable(ctx).some((x) => /(cosign\s+verify-attestation|slsa-verifier\s+verify-artifact|in-toto-verify)/.test(x.text));
-  if (sboms.length && !prov && !verify) {
-    push(ctx, { level: 'MEDIUM', module: '§48', campaign: null, path: sboms[0]?.relPath ?? null, detail: 'SBOM はあるが provenance / in-toto レイアウト / attestation 検証が見当たりません', ruleId: 's48-provenance' });
+  // §28 コンテナ署名（CLI check_s28）
+  const builds = readable(ctx).some((x) => /(^|\/)(\.github\/workflows\/[^/]+\.ya?ml|Jenkinsfile)$|\.gitlab-ci\.yml$|\.sh$/.test(x.relPath) && /(docker\s+push|docker\/build-push-action|buildah\s+push|ko\s+publish)/.test(x.text));
+  const verifies = readable(ctx).some((x) => /(\.ya?ml|\.sh)$|(^|\/)(Makefile|Jenkinsfile)$/.test(x.relPath) && /cosign\s+verify/.test(x.text));
+  if (builds && !verifies) push(ctx, { level: 'MEDIUM', module: '§28', campaign: null, path: rootPath(ctx), detail: 'コンテナイメージを公開しているが cosign verify の実行が見当たりません', ruleId: 's28-no-verify' });
+  for (const f of readable(ctx).filter((x) => DOCKERFILE.test(x.name))) {
+    if (fromImages(f.text).some((img) => !/^(scratch|\$)/.test(img) && !img.includes('@sha256:'))) {
+      push(ctx, { level: 'MEDIUM', module: '§28', campaign: null, path: f.relPath, detail: 'FROM がダイジェスト固定されていません（@sha256: 推奨）', ruleId: 's28-from-digest', evidenceSha: f.sha256 });
+    }
   }
+  for (const f of readable(ctx).filter((x) => /\.ya?ml$/.test(x.name))) {
+    if (/imagePullPolicy:\s*Always/.test(f.text) && !/image:[ \t]*[^\s]+@sha256:/.test(f.text)) {
+      push(ctx, { level: 'MEDIUM', module: '§28', campaign: null, path: f.relPath, detail: 'imagePullPolicy: Always かつダイジェスト未固定（可変タグを毎回取得）', ruleId: 's28-pull-always', evidenceSha: f.sha256 });
+    }
+  }
+
+  // §48 SBOM 整合性（CLI check_s48。同じディレクトリ配下のロックファイル由来の依存と突合）
+  const sboms = named(ctx, /(\.spdx\.json|\.cdx\.json|^bom\.json$|^sbom\.json$|\.spdx$|^cyclonedx\.json$)/);
+  if (!sboms.length) return;
+  const prov = named(ctx, /(\.intoto\.jsonl|^provenance\.json$|\.provenance\.json$|\.layout$)/).length > 0;
+  const verify = readable(ctx).some((x) => /\.(ya?ml|sh)$/.test(x.name) && /(cosign\s+verify-attestation|slsa-verifier\s+verify-artifact|in-toto-verify)/.test(x.text));
+  const deps = collectDeps(ctx);
+  for (const f of sboms) {
+    if (f.text === null) continue;
+    let j: Record<string, unknown>;
+    const sbom: [string, string][] = [];
+    try {
+      const v = JSON.parse(f.text.replace(/^﻿/, '')) as unknown;
+      if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('not object');
+      j = v as Record<string, unknown>;
+      const str = (x: unknown) => (x === undefined || x === null || x === false ? '' : typeof x === 'string' ? x : JSON.stringify(x));
+      for (const [key, vk] of [['components', 'version'], ['packages', 'versionInfo']] as const) {
+        const arr = j[key];
+        if (Array.isArray(arr)) for (const c of arr) if (c && typeof c === 'object') sbom.push([str((c as Record<string, unknown>)['name']), str((c as Record<string, unknown>)[vk])]);
+      }
+    } catch {
+      ctx.errors.push({ module: '§48', reason: `sbom_parse_failed:${f.relPath}` });
+      continue;
+    }
+    const meta = j['metadata'] as Record<string, unknown> | undefined;
+    const ci = j['creationInfo'] as Record<string, unknown> | undefined;
+    const created = (meta && typeof meta === 'object' ? meta['timestamp'] : undefined) ?? (ci && typeof ci === 'object' ? ci['created'] : undefined);
+    const dir = f.relPath.includes('/') ? f.relPath.slice(0, f.relPath.lastIndexOf('/') + 1) : '';
+    const under = deps.filter((d) => d.path.startsWith(dir));
+    const lock = [...new Set(under.filter((d) => (d.eco === 'npm' || d.eco === 'pypi') && !/\/node_modules\/.*\/package\.json$/.test('/' + d.path)).map((d) => `${d.name}\t${d.version}`))].map((x) => x.split('\t') as [string, string]);
+    if (!lock.length) continue;
+    const sbomNames = new Set(sbom.map((x) => x[0]));
+    const uniqSbom = [...new Set(sbom.map((x) => x.join('\t')))].map((x) => x.split('\t') as [string, string]);
+    const missing = new Set(lock.map((x) => x[0]).filter((n) => !sbomNames.has(n))).size;
+    let mism = 0;
+    for (const [n, v] of lock) for (const [sn, sv] of uniqSbom) if (n === sn && v !== sv) mism++;
+    if (missing > 0 || mism > 0) push(ctx, { level: 'HIGH', module: '§48', campaign: null, path: f.relPath, detail: `SBOM とロックファイルが不一致（SBOM 未記載 ${missing} 件 / バージョン相違 ${mism} 件）`, ruleId: 's48-mismatch', evidenceSha: f.sha256 });
+    const ce = typeof created === 'string' && created ? Date.parse(created) : NaN;
+    if (!Number.isNaN(ce)) {
+      const stale = [...new Set(under.map((d) => d.path))].some((p) => { const lf = ctx.byPath.get(p); return !!lf && Math.floor(lf.lastModified / 1000) > Math.floor(ce / 1000) + 60; });
+      if (stale) push(ctx, { level: 'MEDIUM', module: '§48', campaign: null, path: f.relPath, detail: `SBOM 生成日時（${created as string}）がロックファイル更新より古い`, ruleId: 's48-stale', evidenceSha: f.sha256 });
+    }
+  }
+  if (!prov && !verify) {
+    push(ctx, { level: 'MEDIUM', module: '§48', campaign: null, path: rootPath(ctx), detail: 'SBOM はあるが provenance / in-toto レイアウト / attestation 検証（cosign verify-attestation・slsa-verifier）が見当たりません', ruleId: 's48-provenance' });
+  }
+}
+
+/** §8 クラウド/コンテナ（CLI check_s8）: .env ファイル、秘密鍵、Dockerfile の USER root・浮動タグ、docker.sock のマウント。 */
+export function containerRules(ctx: RuleCtx): void {
+  ctx.checks.add('s8-env').add('s8-private-key').add('s8-dockerfile').add('s8-docker-sock');
+  for (const f of ctx.files) {
+    if (/^\.env(\.[A-Za-z0-9_-]+)?$/.test(f.name) && !/\.env\.(example|sample|template|dist)$/.test(f.name)) {
+      push(ctx, { level: 'MEDIUM', module: '§8', campaign: null, path: f.relPath, detail: '.env ファイル（シークレット格納の可能性。内容は読み取りません）', ruleId: 's8-env' });
+    }
+  }
+  for (const f of readable(ctx)) {
+    if (/^(id_rsa|id_dsa|id_ecdsa|id_ed25519|.*\.pem|.*\.key|.*\.p12|.*\.pfx)$/.test(f.name) && f.text.includes('PRIVATE KEY')) {
+      push(ctx, { level: 'HIGH', module: '§8', campaign: null, path: f.relPath, detail: '秘密鍵ファイルがリポジトリ/検査対象内にあります', ruleId: 's8-private-key', evidenceSha: f.sha256 });
+    }
+    if (DOCKERFILE.test(f.name)) {
+      if (/^[ \t]*USER[ \t]+(root|0)([ \t\r]|$)/im.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§8', campaign: null, path: f.relPath, detail: 'Dockerfile が USER root で実行', ruleId: 's8-dockerfile:root', evidenceSha: f.sha256 });
+      for (const img of fromImages(f.text)) {
+        if (img === 'scratch' || img.startsWith('$') || img.includes('@sha256:')) continue;
+        if (img.endsWith(':latest') || !img.slice(img.lastIndexOf('/') + 1).includes(':')) {
+          push(ctx, { level: 'MEDIUM', module: '§8', campaign: null, path: f.relPath, detail: `浮動タグのベースイメージ（${img}）`, ruleId: `s8-dockerfile:floating:${img}`, evidenceSha: f.sha256 });
+        }
+      }
+    }
+    if (/\.(ya?ml|json)$/.test(f.name) && /\/var\/run\/docker\.sock|\/run\/docker\.sock/.test(f.text)) {
+      push(ctx, { level: 'HIGH', module: '§8', campaign: null, path: f.relPath, detail: 'docker.sock のマウント（コンテナからホスト制御が可能）', ruleId: 's8-docker-sock', evidenceSha: f.sha256 });
+    }
+  }
+}
+
+const DOCKERFILE = /^(Dockerfile.*|.*\.dockerfile)$/;
+
+/** Dockerfile の FROM 行の 2 番目のフィールド（CLI の grep -i '^FROM' | awk '{print $2}' と同じ。空のフィールドは除く）。 */
+function fromImages(text: string): string[] {
+  return text.split(/\r?\n/).filter((l) => /^\s*FROM\s+/i.test(l)).map((l) => l.trim().split(/\s+/)[1] ?? '').filter(Boolean);
+}
+
+/** 投入フォルダ自体を指す path（CLI の $ROOT 相当。最上位ディレクトリ名、無ければ null）。 */
+function rootPath(ctx: RuleCtx): string | null {
+  return ctx.root || null;
 }
 
 export function credentialRules(ctx: RuleCtx): void {
@@ -129,4 +227,28 @@ export function credentialRules(ctx: RuleCtx): void {
       push(ctx, { level: 'HIGH', module: '§47', campaign: null, path: f.relPath, detail: 'シェル履歴に export *_TOKEN= 等（平文の認証情報）', ruleId: 's47-history-export', evidenceSha: f.sha256 });
     }
   }
+}
+
+/**
+ * 投入フォルダを HOME と見なせるとき（homeLike）だけ行う、CLI の HOME 前提の検査。
+ *   §10: ~/Library/LaunchAgents/*.plist（参考 INFO）・対話履歴ファイルの存在
+ *   §12: ワクチン 3 点（~/.npmrc の ignore-scripts=true、シェル設定の PYTHONNOUSERSITE=1 / PIP_REQUIRE_VIRTUALENV、pip.conf）
+ * 環境変数（npm_config_ignore_scripts 等）はブラウザから読めないため、CLI のホスト検査を無効にしたときと同じくファイルだけで判定する。
+ */
+export function homeRules(ctx: RuleCtx): void {
+  if (!homeLike(ctx)) return;
+  ctx.checks.add('s10-home').add('s12-vaccines');
+  const at = (rel: string) => ctx.files.find((f) => rootRel(ctx, f) === rel);
+  const prefix = ctx.root ? `${ctx.root}/` : '';
+  for (const f of ctx.files) {
+    const rel = rootRel(ctx, f);
+    if (/^Library\/LaunchAgents\/[^/]+\.plist$/.test(rel)) push(ctx, { level: 'INFO', module: '§10', campaign: null, path: f.relPath, detail: 'LaunchAgent（§30 で詳細検査）', ruleId: 's10-home:launchagent', evidenceSha: f.sha256 });
+    if (/^\.(lesshst|viminfo|python_history|node_repl_history|mysql_history|psql_history)$/.test(rel)) push(ctx, { level: 'INFO', module: '§10', campaign: null, path: f.relPath, detail: '対話履歴ファイル（内容は読み取りません。侵害時はシークレット混入を確認）', ruleId: 's10-home:history' });
+  }
+  const text = (rel: string) => at(rel)?.text ?? '';
+  const rc = HOME_RC_FILES.map(text).join('\n');
+  if (!/^\s*ignore-scripts\s*=\s*true/m.test(text('.npmrc'))) push(ctx, { level: 'MEDIUM', module: '§12', campaign: null, path: `${prefix}.npmrc`, detail: 'npm の ignore-scripts=true が未設定', ruleId: 's12-vaccines:npm' });
+  if (!/PYTHONNOUSERSITE=1/.test(rc)) push(ctx, { level: 'MEDIUM', module: '§12', campaign: null, path: null, detail: 'PYTHONNOUSERSITE=1 が未設定（ユーザー site-packages 経由のフック実行）', ruleId: 's12-vaccines:pythonnousersite' });
+  const pipConf = ['.config/pip/pip.conf', '.pip/pip.conf', 'Library/Application Support/pip/pip.conf'].some((p) => /^\s*require-virtualenv\s*=\s*(true|1)/m.test(text(p)));
+  if (!/PIP_REQUIRE_VIRTUALENV=(true|1)/.test(rc) && !pipConf) push(ctx, { level: 'MEDIUM', module: '§12', campaign: null, path: null, detail: 'PIP_REQUIRE_VIRTUALENV=true が未設定（グローバル環境への pip install）', ruleId: 's12-vaccines:pip' });
 }

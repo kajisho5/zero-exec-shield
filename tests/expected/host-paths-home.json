@@ -1,0 +1,54 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "INFO",
+      "module": "§10",
+      "path": "Library/LaunchAgents/com.zoom.plist"
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§12",
+      "path": null
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§12",
+      "path": null
+    },
+    {
+      "campaign": null,
+      "level": "MEDIUM",
+      "module": "§12",
+      "path": ".npmrc"
+    },
+    {
+      "campaign": "redc2-redshell-npm-streak",
+      "level": "HIGH",
+      "module": "§15",
+      "path": ".config/.rsvc"
+    },
+    {
+      "campaign": "amnesiastealer-clickfix-github",
+      "level": "CRITICAL",
+      "module": "§30",
+      "path": ".pwd"
+    },
+    {
+      "campaign": "redc2-redshell-npm-streak",
+      "level": "CRITICAL",
+      "module": "§30",
+      "path": ".config/.rsvc"
+    },
+    {
+      "campaign": "overlord-fake-zoom-dotnet",
+      "level": "HIGH",
+      "module": "§30",
+      "path": "Library/LaunchAgents/com.zoom.plist"
+    }
+  ],
+  "home": "self",
+  "mode": "full"
+}

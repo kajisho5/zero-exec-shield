@@ -1,16 +1,16 @@
 {
   "findings": [
     {
-      "campaign": "emudhra-ca-oct2026",
-      "level": "CRITICAL",
-      "module": "§15",
-      "path": "site-packages/certifi-2026.9.1.dist-info"
-    },
-    {
       "campaign": "litellm-oct2026",
       "level": "CRITICAL",
       "module": "§15",
       "path": "site-packages/litellm-1.107.0.dist-info"
+    },
+    {
+      "campaign": "emudhra-ca-oct2026",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "site-packages/certifi-2026.9.1.dist-info"
     },
     {
       "campaign": "litellm-oct2026",

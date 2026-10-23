@@ -1,9 +1,10 @@
 // 5.2.2 の検知データ: 開発インフラ CVE（§3 / §4 / §16）、eMudhra（§6）、収集インテル（§7 / §15 / §22 / §30 / §38 / §42）。
 // CLI の check_s3 / check_s4 / emudhra_* / intel_* と同じ rules/ioc.json を参照する。ホスト状態（パッケージ DB 以外）は CLI のみ。
-import { push, readable, type RuleCtx } from '../context';
+import { homeLike, push, readable, rootRel, type RuleCtx } from '../context';
 import type { InfraCve } from '../ioc';
 import type { Severity } from '../types';
 import { basename, ere, versionCmp, versionMatches } from '../util';
+import { workflowText } from './ciAndExtensions';
 import { collectDeps } from './supplyChain';
 
 const NUM = /^\d+(\.\d+)+$/;
@@ -37,15 +38,16 @@ function imageVersions(ctx: RuleCtx, pattern: string): { ver: string; path: stri
 const cveLevel = (c: InfraCve): Severity => sev(c.severity, (c.cvss ?? 0) >= 9 || c.kev ? 'CRITICAL' : 'HIGH');
 
 export function infraRules(ctx: RuleCtx): void {
-  ctx.checks.add('s3-gitlab').add('s4-php2shell').add('s16-infra');
+  ctx.checks.add('s3-gitlab').add('s16-infra');
   for (const inf of ctx.ioc.infrastructures ?? []) {
     const pats = inf.image_patterns ?? [];
-    if (!pats.length) continue;
-    // GitLab は全 CVE（§3）、PHP は PHP2Shell（§4）、その他は generic 製品と追記 CVE（§16）
-    const cves = inf.cves.filter((c) => (c.fixed ?? []).length && (inf.id === 'gitlab' || (inf.id === 'php' ? c.id === 'CVE-2026-109618' : inf.generic || c.generic)));
+    // PHP（§4 PHP2Shell）は php.ts が CLI check_s4 と同じ表（php2shell_distro）で判定する
+    if (!pats.length || inf.id === 'php') continue;
+    // GitLab は全 CVE（§3）、その他は generic 製品と追記 CVE（§16）
+    const cves = inf.cves.filter((c) => (c.fixed ?? []).length && (inf.id === 'gitlab' || inf.generic || c.generic));
     if (!cves.length) continue;
-    const module = inf.id === 'gitlab' ? '§3' : inf.id === 'php' ? '§4' : '§16';
-    const rule = inf.id === 'gitlab' ? 's3-gitlab' : inf.id === 'php' ? 's4-php2shell' : 's16-infra';
+    const module = inf.id === 'gitlab' ? '§3' : '§16';
+    const rule = inf.id === 'gitlab' ? 's3-gitlab' : 's16-infra';
     for (const { ver, path, sha } of imageVersions(ctx, pats.join('|'))) {
       const v = ver.replace(/^v/, '');
       if (!NUM.test(v)) {
@@ -57,8 +59,8 @@ export function infraRules(ctx: RuleCtx): void {
         const fixed = c.fixed ?? [];
         if (!versionBranchVulnerable(v, fixed)) continue;
         const level: Severity = module === '§16' ? cveLevel(c) : 'CRITICAL';
-        const name = inf.id === 'gitlab' ? 'GitLab' : inf.id === 'php' ? 'PHP' : inf.id;
-        const what = inf.id === 'php' ? 'PHP2Shell（CVE-2026-109618/109619、認証不要 RCE）' : `${c.id}${c.cvss ? `（CVSS ${c.cvss}）` : ''}`;
+        const name = inf.id === 'gitlab' ? 'GitLab' : inf.id;
+        const what = `${c.id}${c.cvss ? `（CVSS ${c.cvss}）` : ''}`;
         push(ctx, { level, module, campaign: null, path, detail: `${name} ${v} は ${what}の影響範囲（修正版: ${fixed.join(' ')}）`, ruleId: `${rule}:${inf.id}:${c.id}:${v}`, evidenceSha: sha });
       }
     }
@@ -157,10 +159,12 @@ export function intelRules(ctx: RuleCtx): void {
 
   // §22 侵害されたアクション（bad_refs は CRITICAL、safe_refs 以外のタグ参照は severity）
   const wfFiles = readable(ctx).filter((f) => wf.test(f.relPath));
+  // CLI intel_actions と同じく GitHub Actions のワークフローと action.yml だけを、workflowText で正規化して見る
+  const ghFiles = wfFiles.filter((f) => /(^|\/)(\.github\/workflows\/[^/]+|action)\.ya?ml$/.test(f.relPath)).map((f) => ({ f, text: workflowText(f.text).join('\n') }));
   for (const a of intel.actions ?? []) {
     const re = new RegExp(`uses:\\s*["']?${escapeRe(a.action)}@([^"'\\s#,}]+)`, 'gi');
-    for (const f of wfFiles) {
-      for (const ref of new Set([...f.text.matchAll(re)].map((m) => m[1] ?? ''))) {
+    for (const { f, text } of ghFiles) {
+      for (const ref of new Set([...text.matchAll(re)].map((m) => m[1] ?? ''))) {
         if ((a.bad_refs ?? []).includes(ref)) {
           push(ctx, { level: 'CRITICAL', module: '§22', campaign: a.campaign, path: f.relPath, detail: `侵害が報告されたアクション ${a.action}@${ref}`, ruleId: `s22-intel-actions:${a.action}@${ref}`, evidenceSha: f.sha256 });
         } else if ((a.safe_refs ?? []).length && !(a.safe_refs ?? []).includes(ref) && !/^[0-9a-f]{40}$/.test(ref)) {
@@ -205,14 +209,26 @@ export function intelRules(ctx: RuleCtx): void {
     }
   }
 
-  // §30 ホストの痕跡（投入フォルダ内のパス・LaunchAgent Label・systemd ユニット）
+  // §30 ホストの痕跡（CLI intel_host_files と同じく、パスの種類ごとに照合先を分ける）
+  //   ~/… / $HOME/… … 投入フォルダが HOME と見なせるとき（homeLike）に限り、その直下からの相対パスと完全一致
+  //   /… / $TMPDIR/… … ホストの実パス。ブラウザは読めないため照合しない（CLI のホスト検査）
+  //   それ以外（site-packages/cook.pth 等）… 投入フォルダ内のサフィックス一致
+  const asHome = homeLike(ctx);
   for (const h of intel.host ?? []) {
     const level = sev(h.severity, 'HIGH');
     for (const p of h.paths ?? []) {
-      const rel = p.replace(/^~\//, '').replace(/^\//, '');
+      if (p.startsWith('/') || p.startsWith('$TMPDIR/')) continue;
+      const home = /^(~|\$HOME)\//.exec(p);
+      if (home && !asHome) continue;
+      const rel = home ? p.slice(home[0].length) : p;
       for (const f of ctx.files) {
-        if (('/' + f.relPath).endsWith('/' + rel)) push(ctx, { level, module: '§30', campaign: h.campaign, path: f.relPath, detail: '既知のマルウェア痕跡パス', ruleId: `s30-intel-host:path:${rel}`, evidenceSha: f.sha256 });
+        if (home ? rootRel(ctx, f) !== rel : !('/' + f.relPath).endsWith('/' + rel)) continue;
+        push(ctx, { level, module: '§30', campaign: h.campaign, path: f.relPath, detail: home ? '既知のマルウェア痕跡パス' : '既知のマルウェア痕跡パス（検査ルート内）', ruleId: `s30-intel-host:path:${rel}`, evidenceSha: f.sha256 });
       }
+    }
+    const fileNames = new Set(h.file_names ?? []);
+    for (const f of ctx.files) {
+      if (fileNames.has(f.name)) push(ctx, { level, module: '§30', campaign: h.campaign, path: f.relPath, detail: `既知のマルウェアのファイル名（${f.name}）`, ruleId: `s30-intel-host:file:${f.name}`, evidenceSha: f.sha256 });
     }
     const labels = new Set(h.launch_labels ?? []);
     for (const f of readable(ctx).filter((x) => /(^|\/)Launch(Agents|Daemons)\/[^/]+\.plist$/.test(x.relPath))) {

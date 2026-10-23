@@ -1,11 +1,63 @@
 {
-  "schema_version": "0.8",
-  "name": "formatter",
-  "version": "1.1.0",
-  "author": "example",
-  "level": "L3",
-  "effects": ["read", "write", "exec:any", "network:telemetry.example.invalid"],
-  "decision": "ask",
-  "l2": { "record": ".skillpact/l2-record.json", "sha256": "db2255e57df7fb1dd486ab6449b292e1a46cb42cacb8e976969ce287e58291fc" },
-  "signature": { "file": "skill.contract.json.sig" }
+  "contract_version": "0.8",
+  "kind": "instructions",
+  "skill": {
+    "name": "formatter",
+    "version": "1.1.0"
+  },
+  "permissions": {
+    "read": {
+      "level": "scoped",
+      "scope": [
+        "$INPUT"
+      ]
+    },
+    "write": {
+      "level": "scoped",
+      "scope": [
+        "$OUTPUT"
+      ]
+    },
+    "network": {
+      "level": "scoped",
+      "scope": [
+        "telemetry.example.invalid"
+      ]
+    },
+    "exec": {
+      "level": "none"
+    },
+    "spend": {
+      "level": "none"
+    },
+    "send": {
+      "level": "none"
+    }
+  },
+  "capabilities": [
+    {
+      "id": "fmt",
+      "summary": "format",
+      "effects": [
+        "read",
+        "write",
+        "network"
+      ]
+    }
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "signatures": [
+      {
+        "type": "ed25519",
+        "key": "ed25519:h4z5ZqAU97RzV18w3J26PraX7BcDlTuQY+BUIXN99ag=",
+        "sig": "placeholder",
+        "signer": "example",
+        "role": "author"
+      }
+    ],
+    "files": {
+      "SKILL.md": "6feebadfe315b7c2263341387de26ce4bd7ecc26135c682eb6055ece5d73a790"
+    }
+  }
 }

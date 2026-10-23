@@ -1,0 +1,3 @@
+# ZES test fixture: command も url も無いサーバー
+[mcp_servers.y]
+args = ["-v"]

@@ -1,0 +1,11 @@
+# ZES test fixture: yarn v1 の npm: エイリアス（別名 kv の実体は keyv@6.0.0）
+# yarn lockfile v1
+
+
+"kv@npm:keyv@6.0.0":
+  version "6.0.0"
+  resolved "https://registry.yarnpkg.com/keyv/-/keyv-6.0.0.tgz#0000"
+
+"@x/mem@npm:@cacheable/memory@^2.2.0":
+  version "2.2.1"
+  resolved "https://registry.yarnpkg.com/@cacheable/memory/-/memory-2.2.1.tgz#0000"

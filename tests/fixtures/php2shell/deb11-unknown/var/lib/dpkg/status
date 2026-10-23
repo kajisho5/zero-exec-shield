@@ -1,0 +1,6 @@
+Package: php7.4-fpm
+Status: install ok installed
+Source: php7.4
+Version: 7.4.33-1+deb11u8
+Description: ZES test fixture
+

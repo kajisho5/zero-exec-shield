@@ -1,0 +1,78 @@
+{
+  "contract_version": "0.8",
+  "kind": "tool",
+  "skill": {
+    "name": "v08-valid-signed",
+    "version": "1.0.0"
+  },
+  "permissions": {
+    "read": {
+      "level": "none"
+    },
+    "write": {
+      "level": "none"
+    },
+    "network": {
+      "level": "none"
+    },
+    "exec": {
+      "level": "scoped",
+      "scope": [
+        "sh"
+      ]
+    },
+    "spend": {
+      "level": "none"
+    },
+    "send": {
+      "level": "none"
+    }
+  },
+  "capabilities": [
+    {
+      "id": "hello",
+      "summary": "print",
+      "entry": {
+        "cli": [
+          "sh",
+          "$SKILL_DIR/scripts/run.sh"
+        ]
+      },
+      "effects": [
+        "exec"
+      ]
+    }
+  ],
+  "tests": {
+    "cases": [
+      {
+        "id": "t1",
+        "capability": "hello",
+        "run": [
+          "sh",
+          "$SKILL_DIR/scripts/run.sh"
+        ],
+        "expect": {
+          "exit_code": 0,
+          "stdout_contains": "hi"
+        }
+      }
+    ]
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "SKILL.md": "d9af626f0032c2acb3a3d52d5ceabed689ab7bfc8916486f6bba9daab85f686a",
+      "scripts/run.sh": "ab08508fdf5ca4da5c4995987bc41c56c048aaa5eeb046417ae4049b7d40286e"
+    },
+    "signatures": [
+      {
+        "type": "ed25519",
+        "key": "ed25519:h4z5ZqAU97RzV18w3J26PraX7BcDlTuQY+BUIXN99ag=",
+        "sig": "cPzdlFZ5LRWlZx+FBG6b8K8aBMHauquN+kLgDAIaVG8OCkQt8oHrgOT0nIM0zXYE57Y0ZWbkhYEBRn2BQYR/Cg==",
+        "signer": "test",
+        "role": "author"
+      }
+    ]
+  }
+}
