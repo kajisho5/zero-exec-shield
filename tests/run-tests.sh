@@ -202,6 +202,12 @@ mkdir -p "$TMP/empty-root"
 ZES_IOC="$TMP/ioc-broken-intel.json" run_scan "$TMP/empty-root" standard "$FIX/_home" | jq -e '[.errors[] | select(.module == "§30" and (.reason | startswith("intel_jq_failed:")))] | length >= 1' >/dev/null \
   && ok "intel の jq 失敗を errors[] に記録（fail-closed）" || ng "intel の jq 失敗が errors[] に記録されていません"
 
+# ホスト検査を有効にしても findings[].path は絶対パスか null（"auditd" / "crontab:user" 等の疑似パスを出さない）
+mkdir -p "$TMP/host-root" "$TMP/host-home"
+bad="$(ZES_HOST_CHECKS=1 ZES_OFFLINE=1 ZES_HOME="$TMP/host-home" "$SCAN" --full --root "$TMP/host-root" --json 2>/dev/null \
+  | jq -r '[.findings[] | select(.path != null and (.path | startswith("/") | not)) | .path] | join(",")' 2>/dev/null)"
+[ -z "$bad" ] && ok "ホスト検査の findings[].path が絶対パスか null" || ng "ホスト検査で絶対パスでない path: $bad"
+
 # 引数検証（fail-closed）
 "$SCAN" --root /nonexistent-zes-dir >/dev/null 2>&1; [ $? -eq 64 ] && ok "存在しない --root を拒否" || ng "存在しない --root を受理"
 "$SCAN" --quick --url 'file:///etc/passwd' >/dev/null 2>&1; [ $? -eq 64 ] && ok "http(s) 以外の --url を拒否" || ng "不正な --url を受理"

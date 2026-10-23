@@ -1030,7 +1030,7 @@ check_s3() {
     fgrep_q "^[[:space:]]*nginx\['custom_gitlab_server_config'\]" "$f" && medium "" "$f" "gitlab.rb に nginx['custom_gitlab_server_config'] が設定されています（設定注入の確認）"
   done < <(files_named '^gitlab\.rb$'; host_enabled && [ -f /etc/gitlab/gitlab.rb ] && echo /etc/gitlab/gitlab.rb)
   if host_enabled && [ -f "$TMP_DIR/ps.txt" ] && grep -q -E 'gitlab-(workhorse|rails)|gitaly' "$TMP_DIR/ps.txt"; then
-    high "" "process:gitlab" "GitLab プロセスが稼働中。バージョンと修正適用を確認してください"
+    high "" "" "GitLab プロセスが稼働中（ps）。バージョンと修正適用を確認してください"
     found=1
   fi
   [ "$found" -eq 0 ] && safe "GitLab の痕跡なし"
@@ -1089,7 +1089,7 @@ check_s4() {
     if [ "$OFFLINE" = "1" ]; then record_error "§4" "skipped_offline"; return 0; fi
     local hdr
     hdr="$(curl -sI --connect-timeout 5 --max-time 10 --proto '=http,https' -- "$TARGET_URL" 2>/dev/null | tr -d '\r' | grep -i '^x-powered-by:' | head -n1)"
-    if [ -n "$hdr" ]; then medium "" "$TARGET_URL" "X-Powered-By ヘッダでバージョンを露出: ${hdr#*: }"
+    if [ -n "$hdr" ]; then medium "" "" "${TARGET_URL}: X-Powered-By ヘッダでバージョンを露出: ${hdr#*: }"
     else safe "X-Powered-By ヘッダなし（$TARGET_URL）"; fi
   fi
   return 0
@@ -1140,7 +1140,7 @@ check_s6() {
       curl -sI --connect-timeout 5 --max-time 10 --proto '=https' -o /dev/null -- "https://$host/" 2>/dev/null
       local rc=$?
       case "$rc" in
-        0) critical "$camp" "https://$host/" "危殆化した eMudhra 中間 CA をシステムの curl が信頼しています（接続成功）" ;;
+        0) critical "$camp" "" "危殆化した eMudhra 中間 CA をシステムの curl が信頼しています（https://$host/ への接続成功）" ;;
         35|51|53|54|58|59|60|77|80|83|90|91) safe "eMudhra テスト接続は SSL エラー（$host、信頼ストア更新済み）" ;;
         *) record_error "§6" "network_timeout" ;;
       esac
@@ -1357,9 +1357,9 @@ check_s10() {
     crontab -l 2>/dev/null >"$TMP_DIR/crontab.txt"
     if [ -s "$TMP_DIR/crontab.txt" ]; then
       if grep -v '^[[:space:]]*#' "$TMP_DIR/crontab.txt" | grep -q -E '(curl|wget|base64|/tmp/|/dev/shm/|nc )'; then
-        high "" "crontab:$(id -un 2>/dev/null)" "ユーザー crontab に通信/一時領域実行のエントリ"
+        high "" "" "ユーザー crontab（$(id -un 2>/dev/null)）に通信/一時領域実行のエントリ"
       else
-        info "" "crontab:$(id -un 2>/dev/null)" "ユーザー crontab にエントリがあります"
+        info "" "" "ユーザー crontab（$(id -un 2>/dev/null)）にエントリがあります"
       fi
     fi
   fi
@@ -2079,14 +2079,14 @@ check_s30() {
   if [ "$OS_NAME" = "Darwin" ] && host_enabled; then
     local v
     v="$(safe_probe launchctl getenv DYLD_INSERT_LIBRARIES)"
-    [ -n "$v" ] && critical "" "launchctl:DYLD_INSERT_LIBRARIES" "launchctl setenv で DYLD_INSERT_LIBRARIES が設定されています"
+    [ -n "$v" ] && critical "" "" "launchctl setenv で DYLD_INSERT_LIBRARIES が設定されています"
     safe_probe launchctl list | awk 'NR>1 {print $3}' | grep -v -E '\.' | grep -v -E '^-$' | while IFS= read -r lb; do
-      high "" "launchctl:$lb" "launchctl list にランダム Label 様のジョブ（$lb）"
+      high "" "" "launchctl list にランダム Label 様のジョブ（$lb）"
     done
     local li
     li="$(safe_probe osascript -e 'tell application "System Events" to get name of every login item')"
-    [ -n "$li" ] && info "" "loginitems" "ログイン項目: $li"
-    safe_probe profiles show -type configuration | grep -q -i 'attribute' && medium "" "profiles" "構成プロファイルがインストールされています（profiles show で確認）"
+    [ -n "$li" ] && info "" "" "ログイン項目: $li"
+    safe_probe profiles show -type configuration | grep -q -i 'attribute' && medium "" "" "構成プロファイルがインストールされています（profiles show で確認）"
   fi
   intel_host_files
   return 0
@@ -2196,7 +2196,7 @@ check_s35() {
   if host_enabled; then
     if [ "$OS_NAME" = "Linux" ] && command -v systemctl >/dev/null 2>&1; then
       local st; st="$(systemctl is-active auditd 2>/dev/null)"
-      [ "$st" = "active" ] && safe "auditd 稼働中" || medium "" "auditd" "auditd が稼働していません（${st:-unknown}）"
+      [ "$st" = "active" ] && safe "auditd 稼働中" || medium "" "" "auditd が稼働していません（${st:-unknown}）"
     elif [ "$OS_NAME" = "Darwin" ]; then
       [ -f /etc/security/audit_control ] || medium "" "/etc/security/audit_control" "OpenBSM の設定がありません"
     fi
@@ -2386,7 +2386,7 @@ check_s40() {
   fi
   local bp; bp="$(safe_probe bpftool prog list)"
   if [ -n "$bp" ]; then
-    printf '%s' "$bp" | grep -q -E '(getdents|tcp4_seq_show|tcp6_seq_show|udp4_seq_show|sys_bpf|kill)' && high "ebpf-rootkit" "bpftool:prog" "ファイル/ソケット/プロセス隠蔽系フックの eBPF プログラム"
+    printf '%s' "$bp" | grep -q -E '(getdents|tcp4_seq_show|tcp6_seq_show|udp4_seq_show|sys_bpf|kill)' && high "ebpf-rootkit" "" "ファイル/ソケット/プロセス隠蔽系フックの eBPF プログラム（bpftool prog list）"
   fi
   if [ -r /proc/modules ]; then
     awk '$NF ~ /\(O/ || $0 ~ /\(OE\)|\(E\)/ {print $1}' /proc/modules 2>/dev/null | while IFS= read -r m; do
