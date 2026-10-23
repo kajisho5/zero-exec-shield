@@ -41,56 +41,137 @@ export function filenameRules(ctx: RuleCtx): void {
   }
 }
 
-type Dep = { eco: 'npm' | 'pypi' | 'cargo' | 'packagist' | 'gem' | 'go'; name: string; version: string; path: string; sha: string | null };
+export type Dep = { eco: 'npm' | 'pypi' | 'cargo' | 'packagist' | 'gem' | 'go'; name: string; version: string; path: string; sha: string | null };
 
 function normPypi(n: string): string {
   return n.toLowerCase().replace(/[-_.]+/g, '-'); // PEP 503
 }
 
-function collectDeps(ctx: RuleCtx): Dep[] {
+const noBom = (t: string) => (t.charCodeAt(0) === 0xfeff ? t.slice(1) : t);
+const lines = (t: string) => noBom(t).split(/\r?\n/);
+
+/** package-lock v2/v3 の packages と、v1 の入れ子の dependencies（CLI build_deps の jq と同じ）。 */
+function npmLockDeps(j: unknown, path: string, sha: string | null, out: Dep[]): void {
+  const o = j as { packages?: Record<string, { version?: unknown; name?: unknown }> };
+  if (o && typeof o.packages === 'object' && o.packages) {
+    for (const [k, v] of Object.entries(o.packages)) {
+      if (!k.includes('node_modules/') || !v || typeof v.version !== 'string' || !v.version) continue;
+      out.push({ eco: 'npm', name: typeof v.name === 'string' ? v.name : k.slice(k.lastIndexOf('node_modules/') + 13), version: v.version, path, sha });
+    }
+  }
+  const walk = (x: unknown): void => {
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    if (!x || typeof x !== 'object') return;
+    const deps = (x as Record<string, unknown>)['dependencies'];
+    if (deps && typeof deps === 'object' && !Array.isArray(deps)) {
+      for (const [k, v] of Object.entries(deps as Record<string, unknown>)) {
+        const ver = v && typeof v === 'object' ? (v as Record<string, unknown>)['version'] : undefined;
+        if (typeof ver === 'string') out.push({ eco: 'npm', name: k, version: ver, path, sha });
+      }
+    }
+    for (const v of Object.values(x as Record<string, unknown>)) walk(v);
+  };
+  walk(j);
+}
+
+/** yarn.lock（v1: `  version "1.2.3"` / Berry: `  version: 1.2.3`）。見出し行の先頭の指定子から名前を取る。 */
+export function yarnLockDeps(text: string): { name: string; version: string }[] {
+  const out: { name: string; version: string }[] = [];
+  let n = '';
+  for (const l of lines(text)) {
+    if (/^[^ #].*:$/.test(l)) {
+      const first = (l.slice(0, -1).split(/, */)[0] ?? '').replace(/"/g, '');
+      n = first.startsWith('@') ? '@' + (first.slice(1).split('@')[0] ?? '') : (first.split('@')[0] ?? '');
+      if (n === '__metadata') n = '';
+      continue;
+    }
+    const v = /^ {2}version:? +(.*)$/.exec(l);
+    if (v && n) { out.push({ name: n, version: (v[1] ?? '').replace(/"/g, '').trim() }); n = ''; }
+  }
+  return out;
+}
+
+/** pnpm-lock.yaml の "/name@1.2.3:" / "name@1.2.3(peer):" / "'@scope/name@1.2.3':" 形式。 */
+export function pnpmLockDeps(text: string): { name: string; version: string }[] {
+  const out: { name: string; version: string }[] = [];
+  for (const l of lines(text)) {
+    if (!/^ {2}['/]?@?[^ @]+@[0-9][^:]*:/.test(l)) continue;
+    const s = l.slice(2).replace(/'/g, '').replace(/^\//, '').replace(/:.*$/, '').replace(/\(.*$/, '');
+    const at = s.startsWith('@') ? s.indexOf('@', 1) : s.indexOf('@');
+    if (at > 0) out.push({ name: s.slice(0, at), version: s.slice(at + 1) });
+  }
+  return out;
+}
+
+/** poetry.lock / uv.lock / pdm.lock の [[package]] ブロック（name の直後の version）。名前は PEP 503 で正規化。 */
+export function tomlLockDeps(text: string): { name: string; version: string }[] {
+  const out: { name: string; version: string }[] = [];
+  let n = '';
+  for (const l of lines(text)) {
+    if (/^\[\[package\]\]/.test(l)) { n = ''; continue; }
+    const nm = /^name = "([^"]*)"/.exec(l);
+    if (nm) { n = normPypi(nm[1] ?? ''); continue; }
+    const v = /^version = "([^"]*)"/.exec(l);
+    if (v && n) { out.push({ name: n, version: v[1] ?? '' }); n = ''; }
+  }
+  return out;
+}
+
+export function collectDeps(ctx: RuleCtx): Dep[] {
   const out: Dep[] = [];
+  const parseFailed = (path: string) => ctx.errors.push({ module: '§15', reason: `lockfile_parse_failed:${path}` });
   for (const f of readable(ctx)) {
+    const add = (eco: Dep['eco'], xs: { name: string; version: string }[]) => { for (const x of xs) out.push({ eco, name: x.name, version: x.version, path: f.relPath, sha: f.sha256 }); };
     if (f.name === 'package-lock.json' || f.name === 'npm-shrinkwrap.json') {
-      try {
-        const j = JSON.parse(f.text) as { packages?: Record<string, { version?: string; name?: string }> };
-        for (const [k, v] of Object.entries(j.packages ?? {})) {
-          if (!k.includes('node_modules/') || !v.version) continue;
-          out.push({ eco: 'npm', name: v.name ?? k.slice(k.lastIndexOf('node_modules/') + 13), version: v.version, path: f.relPath, sha: f.sha256 });
-        }
-      } catch { /* 不正な JSON は CLI 側で lockfile_parse_failed として扱う */ }
+      try { npmLockDeps(JSON.parse(noBom(f.text)), f.relPath, f.sha256, out); } catch { parseFailed(f.relPath); }
+    } else if (f.name === 'yarn.lock') {
+      add('npm', yarnLockDeps(f.text));
+    } else if (f.name === 'pnpm-lock.yaml') {
+      add('npm', pnpmLockDeps(f.text));
     } else if (f.name === 'package.json' && /\/node_modules\/(@[^/]+\/)?[^/]+\/package\.json$/.test('/' + f.relPath)) {
       try {
-        const j = JSON.parse(f.text) as { name?: string; version?: string };
-        if (j.name && j.version) out.push({ eco: 'npm', name: j.name, version: j.version, path: f.relPath, sha: f.sha256 });
+        const j = JSON.parse(noBom(f.text)) as { name?: unknown; version?: unknown };
+        if (typeof j.name === 'string' && typeof j.version === 'string' && j.name && j.version) out.push({ eco: 'npm', name: j.name, version: j.version, path: f.relPath, sha: f.sha256 });
       } catch { /* noop */ }
     } else if (f.name === 'Cargo.lock') {
       // [[package]] ブロックの name / version（CLI build_deps と同じ）
-      for (const b of f.text.split(/^\[\[package\]\]\s*$/m).slice(1)) {
+      for (const b of noBom(f.text).split(/^\[\[package\]\]\s*$/m).slice(1)) {
         const n = /^name\s*=\s*"([^"]+)"/m.exec(b)?.[1];
         const v = /^version\s*=\s*"([^"]+)"/m.exec(b)?.[1];
         if (n && v) out.push({ eco: 'cargo', name: n, version: v, path: f.relPath, sha: f.sha256 });
       }
     } else if (f.name === 'composer.lock') {
       try {
-        const j = JSON.parse(f.text) as { packages?: { name?: string; version?: string }[]; 'packages-dev'?: { name?: string; version?: string }[] };
-        for (const p of [...(j.packages ?? []), ...(j['packages-dev'] ?? [])]) {
-          if (p.name && p.version) out.push({ eco: 'packagist', name: p.name, version: p.version.replace(/^v/, ''), path: f.relPath, sha: f.sha256 });
+        const j = JSON.parse(noBom(f.text)) as { packages?: { name?: unknown; version?: unknown }[]; 'packages-dev'?: { name?: unknown; version?: unknown }[] };
+        for (const p of [...(Array.isArray(j.packages) ? j.packages : []), ...(Array.isArray(j['packages-dev']) ? j['packages-dev'] : [])]) {
+          if (p && typeof p.name === 'string' && typeof p.version === 'string') out.push({ eco: 'packagist', name: p.name, version: p.version.replace(/^v/, ''), path: f.relPath, sha: f.sha256 });
         }
       } catch { /* noop */ }
     } else if (f.name === 'go.sum') {
-      for (const line of f.text.split(/\r?\n/)) {
+      for (const line of lines(f.text)) {
         const [mod, ver] = line.split(/\s+/);
         if (mod && ver) out.push({ eco: 'go', name: mod, version: ver.replace(/\/go\.mod$/, ''), path: f.relPath, sha: f.sha256 });
       }
     } else if (f.name === 'Gemfile.lock') {
-      for (const m of f.text.matchAll(/^ {4}([A-Za-z0-9._-]+) \(([0-9][^)\s]*)\)$/gm)) {
+      for (const m of lines(f.text).join('\n').matchAll(/^ {4}([A-Za-z0-9._-]+) \(([0-9][^)\s]*)\)$/gm)) {
         if (m[1] && m[2]) out.push({ eco: 'gem', name: m[1], version: m[2], path: f.relPath, sha: f.sha256 });
       }
     } else if (/^(requirements|constraints).*\.txt$/.test(f.name)) {
-      for (const line of f.text.split(/\r?\n/)) {
+      for (const line of lines(f.text)) {
         const m = /^\s*([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*===?\s*([^\s;,#]+)/.exec(line);
         if (m?.[1] && m[3]) out.push({ eco: 'pypi', name: normPypi(m[1]), version: m[3], path: f.relPath, sha: f.sha256 });
       }
+    } else if (f.name === 'poetry.lock' || f.name === 'uv.lock' || f.name === 'pdm.lock') {
+      add('pypi', tomlLockDeps(f.text));
+    } else if (f.name === 'Pipfile.lock') {
+      try {
+        const j = JSON.parse(noBom(f.text)) as Record<string, unknown>;
+        const sec = (k: string) => (j[k] && typeof j[k] === 'object' && !Array.isArray(j[k]) ? (j[k] as Record<string, unknown>) : {});
+        for (const [k, v] of Object.entries({ ...sec('default'), ...sec('develop') })) {
+          const ver = v && typeof v === 'object' ? (v as Record<string, unknown>)['version'] : undefined;
+          out.push({ eco: 'pypi', name: normPypi(k), version: (typeof ver === 'string' ? ver : '').replace(/^==/, ''), path: f.relPath, sha: f.sha256 });
+        }
+      } catch { parseFailed(f.relPath); }
     }
   }
   // site-packages の *.dist-info（ディレクトリ名からのみ判定）
