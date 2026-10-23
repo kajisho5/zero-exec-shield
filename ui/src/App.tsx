@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { analyzeFiles, analyzePaste, IOC, type Finding } from './engine';
 import { ImportError, parseFindingsDoc, toFindingsDoc } from './engine/export';
 import { fromDataTransfer, fromFileList, readFiles, type PickedFile } from './fileReader';
@@ -20,21 +20,32 @@ function Scanner() {
   const tab = TABS.find((t) => t.id === state.ui.activeTab) ?? TABS[0]!;
   const busy = state.phase === 'reading' || state.phase === 'analyzing';
 
+  // 実行中のスキャン。クリア・次のスキャンで中断し、その結果は reducer が scanId の不一致で捨てる
+  const current = useRef<AbortController | null>(null);
+  const nextId = useRef(0);
+  const cancelScan = () => { current.current?.abort(); current.current = null; };
+
   const scan = async (picked: PickedFile[]) => {
     if (!picked.length) {
       // 何も起きないと「安全」と誤認させるため、0 件であることを必ず知らせる（隠しファイルを渡さないブラウザがある）
       toast({ tone: 'error', text: 'ファイルが 0 件でした。隠しファイル（.mcp.json 等）だけのフォルダはブラウザによって渡されません。ドラッグ＆ドロップか CLI で確認してください' });
       return;
     }
+    cancelScan();
+    const scanId = ++nextId.current;
+    const ctl = new AbortController();
+    current.current = ctl;
     const t0 = performance.now();
-    dispatch({ type: 'SCAN_START', total: picked.length, startedAt: nowIso() });
+    dispatch({ type: 'SCAN_START', scanId, total: picked.length, startedAt: nowIso() });
     try {
-      const files = await readFiles(picked, (n) => dispatch({ type: 'SCAN_PROGRESS', processed: n }));
-      dispatch({ type: 'SCAN_PROGRESS', processed: picked.length, phase: 'analyzing' });
+      const files = await readFiles(picked, (n) => dispatch({ type: 'SCAN_PROGRESS', scanId, processed: n }), ctl.signal);
+      dispatch({ type: 'SCAN_PROGRESS', scanId, processed: picked.length, phase: 'analyzing' });
       const result = await analyzeFiles(files);
-      dispatch({ type: 'SCAN_RESULT', result, finishedAt: nowIso(), durationMs: performance.now() - t0 });
+      if (ctl.signal.aborted) return;
+      dispatch({ type: 'SCAN_RESULT', scanId, result, finishedAt: nowIso(), durationMs: performance.now() - t0 });
     } catch (e) {
-      dispatch({ type: 'SCAN_FAIL', message: e instanceof Error ? e.message : String(e) });
+      if (ctl.signal.aborted) return; // クリア・次のスキャンで中断（エラーではない）
+      dispatch({ type: 'SCAN_FAIL', scanId, message: e instanceof Error ? e.message : String(e) });
       toast({ tone: 'error', text: '判定中にエラーが発生しました（結果は表示しません）' });
     }
   };
@@ -76,10 +87,10 @@ function Scanner() {
 
   return (
     <div className="min-h-full">
-      <Header onExport={exportJson} onClear={() => dispatch({ type: 'CLEAR' })} canExport={findings.length > 0 || !!r} />
+      <Header onExport={exportJson} onClear={() => { cancelScan(); dispatch({ type: 'CLEAR' }); }} canExport={findings.length > 0 || !!r} />
       <TabBar active={tab.id} findings={findings} onSelect={(id) => dispatch({ type: 'SET_TAB', tab: id })} />
       <main id={`panel-${tab.id}`} role="tabpanel" aria-labelledby={`tab-${tab.id}`} className="px-8 py-6">
-        <ErrorBoundary onReset={() => dispatch({ type: 'CLEAR' })}>
+        <ErrorBoundary onReset={() => { cancelScan(); dispatch({ type: 'CLEAR' }); }}>
         {tab.id === 'skillpact' ? (
           <SkillPactTab skills={r?.skillpact ?? []} selected={state.ui.selectedSkillId} onSelect={(id) => dispatch({ type: 'SELECT_SKILL', id })} />
         ) : (
