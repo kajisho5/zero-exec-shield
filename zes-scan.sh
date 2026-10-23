@@ -1570,50 +1570,152 @@ jsonc_to_json() {
       if (pc) printf "," }' "$1" 2>/dev/null
 }
 
-# Codex CLI の .codex/config.toml から MCP サーバーの command/args を 1 行ずつ出力する最小パーサ（依存なし）
-#   対応: [mcp_servers.<name>] テーブルの command = "…" / '…'、args = [ … ]（複数行可）、
-#         [mcp_servers] 直下のインラインテーブル（name = { command = "…", args = […] }、1 行）
-#   未対応の構文（複数行文字列・解釈できない command 行・command も url も無いサーバー）は
-#   "?<理由>" 行で知らせ、呼び出し側が errors[] に記録する（読めなかった設定を 0 件扱いしない）
+# Codex CLI の .codex/config.toml から MCP サーバーの command/args を 1 行ずつ出力する TOML パーサ（依存なし）
+#   1 段目: ファイル全体を字句解析し、全ての値を「種別 US キーパス(\034 区切り) US 値」で出力する。
+#     対応: テーブル見出し [a . "b" . 'c'] / [[配列テーブル]]、ドット区切りキー（a.b.c = …、前後の空白可）、
+#           基本文字列（\" \\ \n \uXXXX \UXXXXXXXX 等のエスケープを復号）、リテラル文字列、
+#           複数行文字列（""" / '''）、入れ子の配列（複数行・コメント・末尾カンマ可、文字列内の ] / # は無視）、
+#           インラインテーブル（入れ子可）、その他のスカラー（数値・真偽値・日時）
+#     値の中の制御文字（復号後の改行・タブ等）は空白に置き換える（1 行の command 行として照合するため）
+#   2 段目: mcp_servers.<name>.command / .args / .url を集め、サーバーごとに "command args…" を出力する。
+#     args は配列（要素ごと）と文字列（1 引数として扱う）の両方を受け付ける
+#   構文として解釈できない箇所（不正な TOML・未知のエスケープ等）や、command が文字列でない・command も url も
+#   無いサーバーは "?<理由>" 行で知らせ、呼び出し側が errors[] に記録する（読めなかった設定を 0 件扱いしない）
 codex_toml_mcp_commands() {
   text_lines "$1" | awk '
-    function strs(t,   out, v) {
+    function perr(why) { print "?parse_error:" why ":line" line; exit }
+    function ch(k) { return substr(S, i + k, 1) }
+    function skip_ws() { while (i <= n && (ch(0) == " " || ch(0) == "\t")) i++ }
+    function skip_wsnl(   c) {
+      while (i <= n) { c = ch(0)
+        if (c == " " || c == "\t") i++
+        else if (c == "\n") { line++; i++ }
+        else if (c == "#") { while (i <= n && ch(0) != "\n") i++ }
+        else break } }
+    function eol(   c) {
+      skip_ws(); if (ch(0) == "#") while (i <= n && ch(0) != "\n") i++
+      if (i > n) return
+      if (ch(0) != "\n") perr("trailing_characters")
+      line++; i++ }
+    function hexval(h,   k, v, d) {
+      v = 0
+      for (k = 1; k <= length(h); k++) { d = index("0123456789abcdef", tolower(substr(h, k, 1))); if (d == 0) return -1; v = v * 16 + d - 1 }
+      return v }
+    function utf8(cp) {
+      if (cp < 32 || cp == 127) return " "
+      if (cp < 128) return sprintf("%c", cp)
+      if (cp < 2048) return sprintf("%c%c", 192 + int(cp / 64), 128 + cp % 64)
+      if (cp < 65536) return sprintf("%c%c%c", 224 + int(cp / 4096), 128 + int(cp / 64) % 64, 128 + cp % 64)
+      return sprintf("%c%c%c%c", 240 + int(cp / 262144), 128 + int(cp / 4096) % 64, 128 + int(cp / 64) % 64, 128 + cp % 64) }
+    # バックスラッシュの直後（i はエスケープ文字）から 1 文字分を復号する
+    function esc(   c, h, cp, L) {
+      c = ch(0); i++
+      if (c == "\"" || c == "\\") return c
+      if (c == "n" || c == "t" || c == "r" || c == "b" || c == "f" || c == "e") return " "
+      if (c == "u" || c == "U" || c == "x") {
+        L = (c == "u") ? 4 : (c == "U") ? 8 : 2
+        h = substr(S, i, L); cp = hexval(h)
+        if (length(h) != L || cp < 0 || cp > 1114111) perr("bad_escape")
+        i += L; return utf8(cp) }
+      perr("bad_escape") }
+    function strch(c) { if (c == "\t") return " "; if (c < " " && c != "") perr("control_character"); return c }
+    function bstr(   out, c) {
+      i++; out = ""
+      while (1) { if (i > n) perr("unterminated_string"); c = ch(0)
+        if (c == "\"") { i++; return out }
+        if (c == "\n") perr("newline_in_string")
+        if (c == "\\") { i++; out = out esc(); continue }
+        out = out strch(c); i++ } }
+    function lstr(   out, c) {
+      i++; out = ""
+      while (1) { if (i > n) perr("unterminated_string"); c = ch(0)
+        if (c == "\047") { i++; return out }
+        if (c == "\n") perr("newline_in_string")
+        out = out strch(c); i++ } }
+    # 複数行文字列。q は区切り文字（" または \047）。閉じ区切りの直前には区切り文字を 2 個まで含められる
+    function mlstr(q,   out, c, k, j) {
+      i += 3; if (ch(0) == "\n") { line++; i++ }
       out = ""
-      while (match(t, /"([^"\\]|\\.)*"|\047[^\047]*\047/)) {
-        v = substr(t, RSTART + 1, RLENGTH - 2); out = out (out == "" ? "" : " ") v
-        t = substr(t, RSTART + RLENGTH) }
-      return out }
-    function flush() {
-      if (cur != "" && cmd != "") print cmd (args != "" ? " " args : "")
-      else if (cur != "" && !hasurl) print "?no_command:" cur
-      cur = ""; cmd = ""; args = ""; hasurl = 0; inargs = 0 }
-    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    inargs { t = strs(line); if (t != "") args = args (args == "" ? "" : " ") t; if (line ~ /\]/) inargs = 0; next }
-    line ~ /"""|\047\047\047/ { if (cur != "" || intable) print "?multiline_string"; next }
-    line ~ /^[[:space:]]*\[/ {
-      h = line; sub(/^[[:space:]]*\[+[[:space:]]*/, "", h); sub(/[[:space:]]*\]+[[:space:]]*(#.*)?$/, "", h)
-      if (h ~ /^mcp_servers\./) {
-        nm = substr(h, 13)
-        if (nm ~ /^"/) { nm = substr(nm, 2); q = index(nm, "\""); rest = substr(nm, q + 1); nm = substr(nm, 1, q - 1) }
-        else { rest = nm; sub(/^[^.]*/, "", rest); sub(/\..*$/, "", nm) }
-        if (rest != "") next   # [mcp_servers.<name>.env] 等のサブテーブルは同じサーバーの続き
-        flush(); cur = nm; intable = 0; next }
-      flush(); intable = (h == "mcp_servers"); next }
-    cur != "" && line ~ /^[[:space:]]*command[[:space:]]*=/ {
-      v = line; sub(/^[[:space:]]*command[[:space:]]*=[[:space:]]*/, "", v); c = strs(v)
-      if (c == "") print "?unparsed_command:" cur; else cmd = c
+      while (1) { if (i > n) perr("unterminated_string"); c = ch(0)
+        if (c == q && ch(1) == q && ch(2) == q) {
+          k = 0; while (ch(k) == q) k++
+          if (k > 5) perr("bad_multiline_string")
+          for (j = 3; j < k; j++) out = out q
+          i += k; return out }
+        if (c == "\\" && q == "\"") {
+          j = 1; while (ch(j) == " " || ch(j) == "\t") j++
+          if (ch(j) == "\n") { i += j; while (i <= n && (ch(0) == " " || ch(0) == "\t" || ch(0) == "\n")) { if (ch(0) == "\n") line++; i++ }; continue }
+          i++; out = out esc(); continue }
+        if (c == "\n") { line++; out = out " "; i++; continue }
+        out = out strch(c); i++ } }
+    # キー（ドット区切り・引用キー可）を KS[1..nk] に読む
+    function key(   nk, k, c) {
+      nk = 0
+      while (1) { skip_ws(); c = ch(0)
+        if (c == "\"") { if (ch(1) == "\"" && ch(2) == "\"") perr("bad_key"); k = bstr() }
+        else if (c == "\047") { if (ch(1) == "\047" && ch(2) == "\047") perr("bad_key"); k = lstr() }
+        else { k = ""; while (i <= n && ch(0) ~ /[A-Za-z0-9_-]/) { k = k ch(0); i++ }; if (k == "") perr("bad_key") }
+        KS[++nk] = k; skip_ws()
+        if (ch(0) == ".") { i++; continue }
+        return nk } }
+    function rec(t, p, v) { print t "\037" p "\037" v }
+    function value(p,   c, t, idx, nk, kp, k) {
+      c = ch(0)
+      if (c == "\"") { if (ch(1) == "\"" && ch(2) == "\"") t = mlstr("\""); else t = bstr(); rec("s", p, t); return }
+      if (c == "\047") { if (ch(1) == "\047" && ch(2) == "\047") t = mlstr("\047"); else t = lstr(); rec("s", p, t); return }
+      if (c == "[") {
+        i++; idx = 0; rec("a", p, "")
+        while (1) { skip_wsnl(); if (i > n) perr("unterminated_array")
+          if (ch(0) == "]") { i++; return }
+          value(p SUBSEP idx); idx++
+          skip_wsnl(); c = ch(0)
+          if (c == ",") { i++; continue }
+          if (c == "]") { i++; return }
+          perr("bad_array") } }
+      if (c == "{") {
+        i++; rec("t", p, ""); skip_wsnl()
+        if (ch(0) == "}") { i++; return }
+        while (1) { skip_wsnl(); nk = key(); kp = p; for (k = 1; k <= nk; k++) kp = kp SUBSEP KS[k]
+          skip_ws(); if (ch(0) != "=") perr("bad_inline_table"); i++; skip_ws()
+          value(kp); skip_wsnl(); c = ch(0)
+          if (c == ",") { i++; continue }
+          if (c == "}") { i++; return }
+          perr("bad_inline_table") } }
+      t = ""; while (i <= n && ch(0) ~ /[A-Za-z0-9_+.:-]/) { t = t ch(0); i++ }
+      if (t ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ && ch(0) == " " && ch(1) ~ /[0-9]/) { i++; while (i <= n && ch(0) ~ /[0-9:.Zz+-]/) i++ }
+      if (t == "") perr("bad_value")
+      rec("o", p, t) }
+    BEGIN { RS = "\001" }
+    { S = $0; n = length(S); i = 1; line = 1; tbl = ""
+      while (1) {
+        skip_wsnl(); if (i > n) break
+        if (ch(0) == "[") {
+          arr = (ch(1) == "["); i += arr ? 2 : 1
+          nk = key(); p = KS[1]; for (k = 2; k <= nk; k++) p = p SUBSEP KS[k]
+          skip_ws()
+          if (arr) { if (ch(0) != "]" || ch(1) != "]") perr("bad_table_header"); i += 2; p = p SUBSEP (AT[p]++) }
+          else { if (ch(0) != "]") perr("bad_table_header"); i++ }
+          tbl = p; rec("t", p, ""); eol(); continue }
+        nk = key(); p = tbl; for (k = 1; k <= nk; k++) p = (k == 1 && p == "") ? KS[1] : p SUBSEP KS[k]
+        skip_ws(); if (ch(0) != "=") perr("expected_equals"); i++; skip_ws()
+        value(p); eol() } }' | awk -F'\037' '
+    /^\?/ { print; next }
+    { np = split($2, P, "\034") }
+    P[1] != "mcp_servers" { next }
+    np == 1 { if ($1 != "t") print "?unexpected_value:mcp_servers"; next }
+    { nm = P[2]; if (!(nm in seen)) { seen[nm] = 1; order[++no] = nm } }
+    np == 2 { if ($1 != "t") print "?unexpected_value:" nm; next }
+    P[3] == "command" && np == 3 { if ($1 == "s") cmd[nm] = $3; else bad[nm] = "unparsed_command"; next }
+    P[3] == "args" {
+      if ($1 == "s" && (np == 3 || np == 4)) args[nm] = args[nm] (args[nm] == "" ? "" : " ") $3
+      else if (!(np == 3 && $1 == "a")) bad[nm] = "unparsed_args"
       next }
-    cur != "" && line ~ /^[[:space:]]*url[[:space:]]*=/ { hasurl = 1; next }
-    cur != "" && line ~ /^[[:space:]]*args[[:space:]]*=/ {
-      v = line; sub(/^[[:space:]]*args[[:space:]]*=[[:space:]]*/, "", v); args = strs(v)
-      if (v !~ /\]/) inargs = 1
-      next }
-    intable && line ~ /command[[:space:]]*=/ {
-      c = line; sub(/.*command[[:space:]]*=[[:space:]]*/, "", c); sub(/,.*$/, "", c); c = strs(c)
-      a = ""; if (match(line, /args[[:space:]]*=[[:space:]]*\[[^]]*\]/)) a = strs(substr(line, RSTART, RLENGTH))
-      if (c == "") print "?unparsed_inline"; else print c (a != "" ? " " a : "")
-      next }
-    END { flush() }'
+    P[3] == "url" && np == 3 { hasurl[nm] = 1 }
+    END {
+      for (k = 1; k <= no; k++) { nm = order[k]
+        if (cmd[nm] != "") print cmd[nm] (args[nm] != "" ? " " args[nm] : "")
+        if (nm in bad) print "?" bad[nm] ":" nm
+        else if (cmd[nm] == "" && !(nm in hasurl)) print "?no_command:" nm } }'
 }
 
 check_s17() {

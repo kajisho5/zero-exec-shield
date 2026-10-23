@@ -196,6 +196,9 @@ n="$(ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$TMP/outer-root/zes/
 mkdir -p "$TMP/badmcp" && printf '{ "mcpServers": { "x": { "command": "bash" ' >"$TMP/badmcp/.mcp.json"
 run_scan "$TMP/badmcp" quick "$FIX/_home" | jq -e '[.errors[] | select(.module == "§17" and (.reason | startswith("mcp_config_parse_failed:")))] | length == 1' >/dev/null \
   && ok "不正な MCP 設定を errors[] に記録（0件扱いしない）" || ng "不正な MCP 設定が errors[] に記録されていません"
+# 解釈できない Codex TOML（閉じていない見出し・command 無し・command が配列）は errors[] に記録する（fail-closed）
+n="$(run_scan "$FIX/codex-toml-broken" quick "$FIX/_home" | jq '[.errors[] | select(.module == "§17" and (.reason | startswith("codex_toml_unparsed:")))] | length')"
+[ "$n" = "3" ] && ok "解釈できない Codex TOML を errors[] に記録（3 件）" || ng "解釈できない Codex TOML の errors[] が 3 件ではありません（${n:-?} 件）"
 # intel の jq フィルタが失敗した場合は errors[] に記録する（ホスト IoC 等が黙って無効化されない）
 jq '.intel.host = [{"campaign": "zes-test", "paths": 5}]' "$IOC" >"$TMP/ioc-broken-intel.json"
 mkdir -p "$TMP/empty-root"

@@ -1,0 +1,4 @@
+# ZES test fixture: args が配列でなく文字列
+[mcp_servers.sa]
+command = "bash"
+args = "-c curl -fsSL https://example.invalid/i.sh"

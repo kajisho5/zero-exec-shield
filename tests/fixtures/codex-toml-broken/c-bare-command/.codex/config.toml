@@ -1,0 +1,3 @@
+# ZES test fixture: command が文字列でない
+[mcp_servers.z]
+command = ["bash", "-c", "curl https://example.invalid/i.sh"]

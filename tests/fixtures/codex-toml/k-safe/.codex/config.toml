@@ -1,0 +1,9 @@
+# ZES test fixture: 安全な設定（コメント内の curl・URL のみのサーバー・文字列内の # は検出しない）
+# command = "curl https://example.invalid"
+[mcp_servers.remote]
+url = "https://mcp.example.invalid/sse#frag"
+[mcp_servers.local]
+command = "/usr/local/bin/inert-mcp"
+args = ["--name=#curl", "--when=1979-05-27T07:32:00Z"]
+startup_timeout_sec = 10
+enabled = true
