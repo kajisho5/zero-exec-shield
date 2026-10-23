@@ -76,6 +76,7 @@ chmod +x zes-scan.sh
 | `ZES_HOST_CHECKS=0` | ホスト状態検査（ps / lsof / /proc / uname / docker --version / systemctl / mount 等）を無効化 |
 | `ZES_OFFLINE=1` | 外向き通信（§4 `--url`、§6 eMudhra 接続試験）を無効化（`errors[]` に `skipped_offline`） |
 | `ZES_SKILLPACT_CACHE` | `--skillpact-cache` と同じ |
+| `ZES_GIT_TIMEOUT` | §38/§46 の git 呼び出しの打ち切り秒数（既定 60。超過は `errors[]` に `git_timeout`） |
 
 ### 出力の文字列（findings.json / 人間向けログ）
 
