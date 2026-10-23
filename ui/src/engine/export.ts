@@ -1,16 +1,17 @@
-// findings.json（ZES schemas/findings.schema.json 1.1）の生成と読み込み（1.0 の文書も読み込める）。ネットワークは使わない。
-// 1.1 は 1.0 に任意の項目（scan_roots・kind・subject・locators・related・evidence）を足しただけで、id は変わらない。
+// findings.json（ZES schemas/findings.schema.json 1.2）の生成と読み込み（1.0 / 1.1 の文書も読み込める）。ネットワークは使わない。
+// 1.1 は 1.0 に任意の項目（scan_roots・kind・subject・locators・related・evidence）を足したもの。1.2 は code / params を足し、
+// detail を英語に、id を v2 にしたもの。
 import type { Finding, FindingEvidence, FindingLocator, FindingRelated, FindingSubject, ScanError, Severity, SkillPactFindingField } from './types';
 import { SEVERITIES } from './types';
 
 type DocFinding = {
   id: string; level: Severity; module: string; campaign: string | null; path: string | null;
-  detail: string; evidence_hash: string; kind?: string; subject?: FindingSubject; locators?: FindingLocator[];
+  detail: string; evidence_hash: string; code?: string; params?: Record<string, string>; kind?: string; subject?: FindingSubject; locators?: FindingLocator[];
   related?: FindingRelated[]; evidence?: FindingEvidence; skillpact?: SkillPactFindingField;
 };
 
 export interface FindingsDoc {
-  schema_version: '1.0' | '1.1';
+  schema_version: '1.0' | '1.1' | '1.2';
   /** CLI の --root の実パス。UI はパスが投入フォルダからの相対パスのため出力しない（ZET に検査範囲を渡さない） */
   scan_roots?: string[];
   incident_bundle: string;
@@ -41,7 +42,7 @@ export function toFindingsDoc(findings: Finding[], errors: ScanError[], bundle: 
   const seen = new Set<string>();
   const ids = new Set<string>();
   return {
-    schema_version: '1.1',
+    schema_version: '1.2',
     incident_bundle: bundle,
     scan_started_at: startedAt,
     scan_finished_at: finishedAt,
@@ -55,6 +56,7 @@ export function toFindingsDoc(findings: Finding[], errors: ScanError[], bundle: 
         detail: f.detail, evidence_hash: f.evidence_hash,
       };
       const abs = (p: string) => (p.startsWith('/') ? p : '/' + p);
+      if (f.code) { o.code = f.code; o.params = { ...(f.params ?? {}) }; }
       if (f.kind) o.kind = f.kind;
       if (f.subject) o.subject = { ...f.subject, fixed_versions: [...f.subject.fixed_versions] };
       if (f.locators?.length) o.locators = f.locators.map((l) => ({ ...l }));
@@ -98,6 +100,8 @@ function validSkillpact(v: unknown): v is SkillPactFindingField {
 
 const F_KEYS = ['id', 'level', 'module', 'campaign', 'path', 'detail', 'evidence_hash'];
 const F11_KEYS = ['kind', 'subject', 'locators', 'related', 'evidence'];
+const F12_KEYS = ['code', 'params'];
+type Version = '1.0' | '1.1' | '1.2';
 const LOC_FORMATS = ['json', 'jsonc', 'toml', 'yaml', 'ini', 'text', 'plist'];
 const EV_KINDS = ['file', 'large_file', 'tree', 'symlink', 'detail'];
 const absPath = (v: unknown) => isStr(v) && v.startsWith('/');
@@ -122,9 +126,14 @@ function validFinding11(v: Obj): boolean {
     && (!('evidence' in v) || (isObj(v['evidence']) && onlyKeys(v['evidence'], ['kind', 'hash']) && EV_KINDS.includes(v['evidence']['kind'] as string)
       && isStr(v['evidence']['hash']) && SHA256.test(v['evidence']['hash'])));
 }
-export function validFinding(v: unknown, version: '1.0' | '1.1' = '1.1'): v is FindingsDoc['findings'][number] {
-  const extra = version === '1.1' ? F11_KEYS : [];
-  if (!isObj(v) || !onlyKeys(v, [...F_KEYS, ...extra, 'skillpact'], F_KEYS) || !validFinding11(v)) return false;
+/** findings 1.2: code（^[a-z0-9_.]+$）と params（文字列の値、キーは ^[a-z_]+$） */
+function validFinding12(v: Obj): boolean {
+  return (!('code' in v) || (isStr(v['code']) && /^[a-z0-9_.]+$/.test(v['code'])))
+    && (!('params' in v) || (isObj(v['params']) && Object.entries(v['params']).every(([k, x]) => /^[a-z_]+$/.test(k) && isStr(x))));
+}
+export function validFinding(v: unknown, version: Version = '1.2'): v is FindingsDoc['findings'][number] {
+  const extra = version === '1.2' ? [...F11_KEYS, ...F12_KEYS] : version === '1.1' ? F11_KEYS : [];
+  if (!isObj(v) || !onlyKeys(v, [...F_KEYS, ...extra, 'skillpact'], F_KEYS) || !validFinding11(v) || !validFinding12(v)) return false;
   const ok = isStr(v['id']) && SHA256.test(v['id'])
     && SEVERITIES.includes(v['level'] as Severity)
     && isStr(v['module']) && MODULE.test(v['module'])
@@ -154,12 +163,12 @@ export function parseFindingsDoc(text: string): ImportedDoc {
     throw new ImportError('findings.json を JSON として解析できません');
   }
   const ver = isObj(doc) ? doc['schema_version'] : undefined;
-  if (!isObj(doc) || (ver !== '1.0' && ver !== '1.1') || !Array.isArray(doc['findings']) || !Array.isArray(doc['errors'])) {
-    throw new ImportError('ZES findings.json（schema_version 1.0 / 1.1）ではありません');
+  if (!isObj(doc) || (ver !== '1.0' && ver !== '1.1' && ver !== '1.2') || !Array.isArray(doc['findings']) || !Array.isArray(doc['errors'])) {
+    throw new ImportError('ZES findings.json（schema_version 1.0 / 1.1 / 1.2）ではありません');
   }
   const d = doc;
-  const version = ver as '1.0' | '1.1';
-  if (!onlyKeys(d, version === '1.1' ? [...TOP_KEYS, 'scan_roots'] : TOP_KEYS, TOP_REQUIRED)
+  const version = ver as Version;
+  if (!onlyKeys(d, version !== '1.0' ? [...TOP_KEYS, 'scan_roots'] : TOP_KEYS, TOP_REQUIRED)
     || ('scan_roots' in d && !(Array.isArray(d['scan_roots']) && d['scan_roots'].every(absPath))) || !isStr(d['incident_bundle']) || !BUNDLE.test(d['incident_bundle'])
     || !isStr(d['scan_started_at']) || !RFC3339.test(d['scan_started_at']) || !isStr(d['scan_finished_at']) || !RFC3339.test(d['scan_finished_at'])
     || !MODES.includes(d['scan_mode'] as string) || !STATUSES.includes(d['status'] as string)) {
@@ -170,6 +179,7 @@ export function parseFindingsDoc(text: string): ImportedDoc {
   const findings: Finding[] = rawF.filter((x): x is DocFinding => validFinding(x, version)).map((x) => {
     const f: Finding = { id: x.id, level: x.level, module: x.module, campaign: x.campaign, path: x.path, detail: x.detail, evidence_hash: x.evidence_hash, ruleId: 'cli-import', source: 'cli-import' };
     if (x.kind) f.kind = x.kind;
+    if (x.code) { f.code = x.code; f.params = { ...(x.params ?? {}) }; }
     if (x.subject) f.subject = { ecosystem: x.subject.ecosystem ?? '', package: x.subject.package ?? '', version: x.subject.version ?? null, safe_version: x.subject.safe_version ?? null, fixed_versions: [...(x.subject.fixed_versions ?? [])] };
     if (x.locators) f.locators = x.locators.map((l) => ({ ...l }));
     if (x.related) f.related = x.related.map((r) => ({ relation: r.relation, path: r.path }));

@@ -66,16 +66,17 @@ describe('findings.json の書き出しは常にスキーマに適合', () => {
     expect(out.findings.length).toBe(all.length);
   });
   it('検証器自体が違反を検出する', () => {
-    const v11 = { schema_version: '1.1' };
-    expect(validate(JSON.parse(doc([{ ...good, id: 'x' }], [], v11)))).not.toEqual([]);
-    expect(validate(JSON.parse(doc([good], [], v11)))).toEqual([]);
-    // 書き出すのは 1.1 だけ（スキーマの schema_version は "1.1" 固定）
+    const v12 = { schema_version: '1.2' };
+    expect(validate(JSON.parse(doc([{ ...good, id: 'x' }], [], v12)))).not.toEqual([]);
+    expect(validate(JSON.parse(doc([good], [], v12)))).toEqual([]);
+    // 書き出すのは 1.2 だけ（スキーマの schema_version は "1.2" 固定）
     expect(validate(JSON.parse(doc([good])))).not.toEqual([]);
+    expect(validate(JSON.parse(doc([good], [], { schema_version: '1.1' })))).not.toEqual([]);
   });
-  it('書き出しは schema_version 1.1 で、UI の finding に evidence と 1.1 の項目を付ける（scan_roots は出さない）', async () => {
+  it('書き出しは schema_version 1.2 で、UI の finding に evidence と 1.1 の項目を付ける（scan_roots は出さない）', async () => {
     const r = await analyzeFiles(['chaindrop', 'mcp', 'browser-ext'].flatMap((n) => loadFixture(n)));
     const out = toFindingsDoc(r.findings, r.errors, IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z');
-    expect(out.schema_version).toBe('1.1');
+    expect(out.schema_version).toBe('1.2');
     expect('scan_roots' in out).toBe(false);
     expect(out.findings.every((f) => f.evidence && ['file', 'detail'].includes(f.evidence.kind))).toBe(true);
     const mcp = out.findings.find((f) => f.module === '§17' && f.kind === 'mcp.dangerous_command');
@@ -97,6 +98,16 @@ describe('findings 1.1 / 1.0 の取り込み', () => {
     const out = toFindingsDoc(r.findings, [], IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z', r);
     expect(out.findings[0]).toMatchObject({ kind: f11.kind, locators: f11.locators, related: f11.related, evidence: f11.evidence });
     expect(validate(JSON.parse(JSON.stringify(out)))).toEqual([]);
+  });
+  it('1.2 の code / params を読み込み、書き出しで保つ（1.1 の文書では code を持つ finding を除外）', () => {
+    const f12 = { ...f11, code: 's17.dangerous_command', params: { server: 'evil' } };
+    const r = parseFindingsDoc(doc([f12, { ...f12, id: H('e'), params: { server: 1 } }, { ...f12, id: H('f'), code: 'Bad' }], [], { schema_version: '1.2' }));
+    expect(r.findings.map((f) => f.id)).toEqual([H('a')]);
+    expect(r.findings[0]).toMatchObject({ code: f12.code, params: f12.params });
+    const out = toFindingsDoc(r.findings, [], IOC.incident_bundle, '2026-10-22T00:00:00Z', '2026-10-22T00:00:01Z', r);
+    expect(out.findings[0]).toMatchObject({ code: f12.code, params: f12.params });
+    expect(validate(JSON.parse(JSON.stringify(out)))).toEqual([]);
+    expect(parseFindingsDoc(doc([f12], [], { schema_version: '1.1' })).dropped).toBe(1);
   });
   it('1.0 の文書は今までどおり読み込める（1.1 の項目を持つ finding は除外）', () => {
     const r = parseFindingsDoc(doc([good, { ...f11, id: H('d') }]));

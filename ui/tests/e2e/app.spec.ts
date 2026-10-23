@@ -118,7 +118,7 @@ test('findings.json の書き出し（ネットワーク不使用のダウンロ
   const [dl] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export').click()]);
   const path = await dl.path();
   const doc = JSON.parse(readFileSync(path, 'utf8'));
-  expect(doc.schema_version).toBe('1.1');
+  expect(doc.schema_version).toBe('1.2');
   expect(['ok', 'partial']).toContain(doc.status);
   expect(doc.findings.find((f: { level: string }) => f.level === 'HIGH').skillpact.divergence).toEqual(['read', 'network']);
 });

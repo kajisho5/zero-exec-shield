@@ -57,6 +57,9 @@ export interface Finding {
   detail: string;
   evidence_hash: string;
   kind?: string;
+  /** findings 1.2: message id (catalog key f.<code>) and its values. Absent on findings imported from 1.0 / 1.1 */
+  code?: string;
+  params?: Record<string, string>;
   subject?: FindingSubject;
   locators?: FindingLocator[];
   related?: FindingRelated[];
