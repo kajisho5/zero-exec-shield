@@ -83,6 +83,7 @@ chmod +x zes-scan.sh
 - ファイル名に不正な UTF-8 バイトがある場合、そのバイトを 1 バイトずつ `\xHH`（4 文字のテキスト）に置き換えた値を `path` に出力し、`errors[]` に `core` / `non_utf8_path:<置換後のパス>` を記録します（実際のファイル名とは異なることを示すため）。
 - `findings[].id` は、出力した（JSON をデコードした）`module|campaign|path|detail` の SHA-256 です（`campaign` / `path` が null のときは空文字列）。
 - 人間向けログでは制御文字を `\xHH`、C1 制御文字を `\u00HH` と表示し、端末エスケープシーケンスをそのまま出力しません。
+- 検査ルート内の FIFO・ソケット・デバイスファイルは開かず、`errors[]` に `special_file:<パス>` を記録します。
 
 ### 終了コード
 

@@ -536,6 +536,9 @@ build_inventory() {
     if [ -L "$p" ]; then printf '%s\n' "$p" >>"$LINKS_LIST"
     elif [ -f "$p" ]; then printf '%s\n' "$p" >>"$FILES_LIST"
     elif [ -d "$p" ]; then printf '%s\n' "$p" >>"$DIRS_LIST"
+    else
+      # FIFO・ソケット・デバイスは開かない（読むと停止しうる）。検査していないことを errors[] に残す（fail-closed）
+      record_error "core" "special_file:$p"
     fi
   done <"$TMP_DIR/all.z"
   sort -o "$FILES_LIST" "$FILES_LIST"; sort -o "$LINKS_LIST" "$LINKS_LIST"; sort -o "$DIRS_LIST" "$DIRS_LIST"

@@ -268,6 +268,13 @@ n="$(cd "$FIX" && ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="_home/" "$SCAN" --qu
 [ -z "$bad" ] && [ "${n:-0}" -gt 0 ] && ok "相対・末尾スラッシュ付き ZES_HOME を実パスに正規化" || ng "ZES_HOME が正規化されていません: ${bad:-findings=$n}"
 ZES_HOME="$TMP/nonexistent-home" "$SCAN" --quick --root "$TMP/empty-root" >/dev/null 2>&1; [ $? -eq 64 ] && ok "存在しない ZES_HOME を拒否" || ng "存在しない ZES_HOME を受理"
 
+# 検査ルート内の FIFO・ソケット等は開かずに errors[] に special_file として記録する（黙って捨てない）
+if command -v mkfifo >/dev/null 2>&1; then
+  mkdir -p "$TMP/special" && mkfifo "$TMP/special/pipe.fifo"
+  run_scan "$TMP/special" quick "$FIX/_home" | jq -e --arg p "special_file:$TMP/special/pipe.fifo" '[.errors[] | select(.module == "core" and .reason == $p)] | length == 1' >/dev/null 2>&1 \
+    && ok "検査ルート内の FIFO を errors[] に special_file として記録" || ng "検査ルート内の FIFO が errors[] に記録されていません"
+fi
+
 # 引数検証（fail-closed）
 "$SCAN" --root /nonexistent-zes-dir >/dev/null 2>&1; [ $? -eq 64 ] && ok "存在しない --root を拒否" || ng "存在しない --root を受理"
 "$SCAN" --quick --url 'file:///etc/passwd' >/dev/null 2>&1; [ $? -eq 64 ] && ok "http(s) 以外の --url を拒否" || ng "不正な --url を受理"
