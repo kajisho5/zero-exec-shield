@@ -1,0 +1,10 @@
+# ZES test fixture (r3): ref の大文字小文字違い（式の文脈名は大文字小文字を区別しない）
+on: pull_request_target
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ GitHub.Event.Pull_Request.Head.Sha }}
+      - run: echo ${{ SECRETS.TOKEN }}

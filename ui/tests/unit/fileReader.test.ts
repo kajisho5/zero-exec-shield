@@ -39,4 +39,11 @@ describe('readFiles の並行読み取り（U7）', () => {
     expect(await readFiles([], (n) => seen.push(n))).toEqual([]);
     expect(seen).toEqual([0]);
   });
+  it('NUL を含むファイルも文字列として読む（CLI の grep -a と同じ。NUL 1 つで検査を逃れられない）', async () => {
+    const body = new TextEncoder().encode('// \u0000\nfetch("https://npm-cache.com/p")');
+    const file = { name: 'p.js', size: body.length, lastModified: 0, arrayBuffer: async () => body.buffer } as unknown as File;
+    const [f] = await readFiles([{ file, relPath: 'd/p.js' }], () => {});
+    expect(f!.readState).toBe('read');
+    expect(f!.text).toContain('npm-cache.com');
+  });
 });

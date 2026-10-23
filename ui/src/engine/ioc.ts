@@ -80,6 +80,7 @@ export interface Php2ShellDistro {
 
 export interface IocDb {
   incident_bundle: string;
+  protected_hosts?: string[];
   php2shell_distro?: Php2ShellDistro;
   packages: IocPackage[];
   infrastructures?: Infrastructure[];

@@ -27,7 +27,7 @@ cd zero-exec-shield
 ./zes-scan.sh --quick --root /path/to/project --json > findings.json
 ```
 
-The human-readable log goes to stderr and `findings.json` to stdout. Other modes:
+The human-readable log goes to stderr and `findings.json` to stdout. If `PATH` may contain untrusted directories (for example `.` or a project's `node_modules/.bin`), start the script as `bash zes-scan.sh` or with an absolute Bash path: the `#!/usr/bin/env bash` line looks up `bash` in `PATH` before ZES can clean it (see [Safety model](#safety-model)). Other modes:
 
 ```bash
 ./zes-scan.sh --full --root /path/to/project --json          # all modules §1-§49
@@ -99,10 +99,11 @@ Rules and output of §49 may change.
 ## Safety model
 
 - **Zero execution.** ZES does not run files from the scanned tree and does not start their runtimes (`npm install`, `pip install`, `node`, `python` on target code). Package versions come from lockfiles and metadata, Go's version from `GOROOT/VERSION`, npm proxy settings from `.npmrc`.
-- **Fixed probes only.** With host checks on, ZES starts a fixed list of installed tools with version arguments only (for example `python3 -I -S -V`, `php -n -v`, `docker --version`, `git --version`). Probes run under `env -i` with an empty temporary `HOME`, and binaries inside the scan root or in `/tmp`, `/var/tmp`, `/dev/shm` are never started. git runs against a ZES-owned shadow `GIT_DIR`, so the scanned repository's `.git/config` is never read by git, and every call has a timeout.
+- **Clean `PATH`.** Before running any external command, ZES removes relative and empty `PATH` entries (`.`, `::`), and once the scan root is known, every entry whose real path is inside the scan root (for example `node_modules/.bin`). Each removed entry is recorded in `errors[]` as `path_entry_dropped:<entry>`. `jq` and `git` are resolved to absolute paths once and always started by that path. With `--root /` the inside-the-root rule is not applied (the host itself is the scan target).
+- **Fixed probes only.** With host checks on, ZES starts a fixed list of installed tools with version arguments only (for example `python3 -I -S -V`, `php -n -v`, `docker --version`, `git --version`). Probes run under `env -i` with an empty temporary `HOME`, and binaries inside the scan root or in `/tmp`, `/var/tmp`, `/dev/shm`, `/private/tmp`, `/private/var/folders` or `$TMPDIR` are never started. git runs against a ZES-owned shadow `GIT_DIR`, so the scanned repository's `.git/config` is never read by git, and every call has a timeout. Git configuration is checked as text instead: `config` and `config.worktree` of the root `.git`, of `gitdir:` files, of nested repositories, and of every `include.path` / `includeIf` target, plus their hooks.
 - **Verified by test.** [`tests/zero-exec.sh`](tests/zero-exec.sh) runs a full scan under `strace` and fails on any `execve` of a fixture file, any target runtime, or any probe outside the allowed arguments. Two fixtures are canaries that would create `/tmp/zes-canary-*` if executed.
 - **No file contents in output.** Findings carry a path, a rule message and a SHA-256 (`evidence_hash`). Some messages include a short extracted value such as a version, image tag or HTTP header. Secrets are never printed.
-- **Fail closed.** A module that could not be checked (missing `jq`, unparsable lockfile, timeout, offline) is recorded in `errors[]` and the scan `status` becomes `partial`. An empty `findings[]` with a non-empty `errors[]` does not mean "clean".
+- **Fail closed.** A module that could not be checked (missing `jq`, unparsable lockfile, timeout, offline) is recorded in `errors[]` and the scan `status` becomes `partial`. An empty `findings[]` with a non-empty `errors[]` does not mean "clean". Unreadable directories and files, paths that leave the scan root through a symlink, and files on pseudo filesystems (`/proc`, `/sys`, …, also when bind-mounted into the tree) are not read and are recorded. The one exception is `archive_not_inspected`, which records a [known limitation](#limitations) and does not change `status`.
 - **Network.** The CLI connects out only for `--url` and for the §6 eMudhra probe (HTTPS requests to the test hosts listed in `rules/ioc.json`). `ZES_OFFLINE=1` turns both off.
 - **Browser UI.** JavaScript, CSS and `rules/ioc.json` are inlined into one file. The Content Security Policy is `default-src 'none'; connect-src 'none'`, with scripts and styles allowed only by SHA-256 hashes computed at build time (no `unsafe-inline`). The build fails if [`ui/scripts/verify-no-network.mjs`](ui/scripts/verify-no-network.mjs) finds network APIs, external URLs or external loads in the output. File contents are used only for matching; the page shows paths, rules, fixed text and hashes, plus a few configuration values capped at 120 characters (MCP `command`/`args`, Actions `uses:`, extension permission names).
 
@@ -137,6 +138,23 @@ Rules and output of §49 may change.
 - `id` is deterministic: the same finding gets the same id on every scan, and each id appears once.
 - `campaign` is `null` for general checks. `path` is an absolute path or `null` (host findings without a file).
 - `errors[].reason` examples: `skipped_offline`, `network_timeout`, `jq_unavailable`, `module_failed`, `lockfile_parse_failed:<path>`, `git_timeout`, `special_file:<path>`, `non_utf8_path:<path>`, `incident_bundle_mismatch:<value>`.
+- Reasons added in 0.3.1:
+
+  | Reason | Meaning |
+  |---|---|
+  | `path_entry_dropped:<entry>` | A relative, empty or inside-the-root `PATH` entry was removed (`<empty>` for an empty entry) |
+  | `unreadable:<path>` | A directory or file could not be read (permissions) |
+  | `inventory_error:<message>`, `inventory_incomplete:find_exit_<n>` | `find` reported a problem that could not be tied to a path |
+  | `inventory_failed` | Nothing inside the scan root could be listed; `status` is `error` |
+  | `special_filesystem:<path>` | A file or directory on a pseudo filesystem (procfs, sysfs, devtmpfs, …) was not opened |
+  | `find_fstype_unsupported` | `find` has no `-fstype` (BusyBox), so pseudo filesystems inside the root could not be skipped |
+  | `path_leaves_root:<path>` | A path ZES builds inside the root (`.git/config`, hooks) resolves outside the root, so it was not read |
+  | `symlink_leaves_root:<path>` | A symlink with a configuration file name (`.mcp.json`, `.vscode/tasks.json`, workflows, `package.json`, …) points outside the root |
+  | `gitfile_unparsed:<path>`, `gitdir_unresolved:<path>`, `gitdir_outside_root:<path>`, `git_commondir_unresolved:<path>` | A `.git` file or worktree pointer could not be followed inside the root |
+  | `git_include_unresolved:<config>`, `git_include_too_deep:<config>` | An `include.path` / `includeIf` target is missing, outside the root and `ZES_HOME`, or nested more than 10 levels |
+  | `yaml_alias_unresolved:<path>` | A workflow uses a YAML alias (`*name`), which ZES does not resolve |
+  | `lockfile_unparsed:<path>` | A lockfile format ZES does not parse (`bun.lockb`) |
+  | `archive_not_inspected:<path>` | An archive (`.whl`, `.tgz`, `.tar.gz`, `.zip`, `.jar`, `.war`, `.pyz`, `.egg`, `.gem`, `.crate`, `.nupkg`, `.vsix`, `.crx`, `.xpi`) was not unpacked; does not change `status` |
 - All strings are valid UTF-8. Control characters are escaped as `\u00XX`. Invalid UTF-8 bytes in a file name are written as the text `\xHH` and the path is also recorded in `errors[]` as `non_utf8_path`. FIFOs, sockets and device files are not opened and are recorded as `special_file`.
 - Findings exported by the browser UI use paths relative to the dropped folder with a leading `/`, and record `ui:host_checks_not_performed` in `errors[]`. Their `status` is `partial`, or `error` when a loaded CLI findings.json had `status: error`.
 - Ids generated by the browser UI are derived differently from the CLI formula above: from `module|campaign|path|rule id`, where `path` is the relative path. They are stable only within the UI (the same folder dropped again gives the same ids) and do not match the CLI's ids for the same file. Unifying the two would change existing ids, so they are kept as they are. Ids of findings loaded from a CLI findings.json are kept unchanged.
@@ -148,7 +166,7 @@ The guarantees that downstream tools may rely on are listed in section 9 of [doc
 | Code | Meaning |
 |---|---|
 | `0` | Scan finished, `status` is `ok` or `partial` (also `--help`) |
-| `2` | `status` is `error` |
+| `2` | `status` is `error`: the scan root could not be listed (`inventory_failed`, for example a directory without read permission) or every module of the mode failed (`module_failed`) |
 | `64` | Invalid arguments or environment (unknown option, `--root` not a directory, Bash older than 4, unreadable `rules/ioc.json`) |
 
 ZES does not exit non-zero because of findings. To fail a CI job on CRITICAL findings:
@@ -165,10 +183,12 @@ To also fail on an incomplete scan, check `jq -e '.status == "ok"'`.
 - **Static heuristics.** Detection is pattern and version matching. Expect false positives and missed cases. A clean result is not proof that a machine or project is safe.
 - **IoC data ages.** `rules/ioc.json` is a snapshot (incident bundle `ZES-2026-OCT-EMERGENCY-V5.2`). It needs regular updates; values that could not be confirmed against primary sources are marked in [docs/ioc-verification.md](docs/ioc-verification.md).
 - **Distribution backports.** Kernel, tool and PHP versions are compared with upstream fixed versions. Distribution packages often carry backported fixes, so these results are capped at HIGH and need checking against the vendor advisory. PHP from dpkg is compared with vendor fixed versions; on RHEL-like systems the rpm database cannot be read statically, so ZES only prints a notice.
+- **Archives are not unpacked.** `.whl`, `.tgz`, `.zip`, `.jar` and similar files are scanned only as raw bytes; files inside them are not extracted or checked. Each archive is listed in `errors[]` as `archive_not_inspected`. Because many healthy repositories contain archives (for example `gradle-wrapper.jar`), this entry does not turn `status` into `partial`; check the list when archives are unexpected.
+- **YAML aliases, binary lockfiles, worktrees.** Workflow YAML anchors and tags are understood, but aliases (`*name`) are not resolved (`yaml_alias_unresolved`). `bun.lockb` is not parsed (`lockfile_unparsed`). A `.git` file or `include.path` that points outside the scan root is not followed (`gitdir_outside_root`, `git_include_unresolved`).
 - **`jq` is needed for full coverage.** Without it ZES falls back to grep for some checks; §48, §49, the collected-intel matches and some lockfile formats are then recorded as `jq_unavailable`.
 - **Host checks read the live system.** They use `ps`, `lsof`, `/proc` and the version probes above. Set `ZES_HOST_CHECKS=0` when scanning only a directory.
 - **`noatime`.** On filesystems mounted with `noatime`, the access-time checks of §13 (honeypot) and access traces do not work.
-- **Browser UI.** It cannot see host state. A symlink arrives in the browser as a 0-byte file, so the SymJack check differs from the CLI (HIGH instead of CRITICAL). In WebKit, folders whose top level holds only hidden entries (`.mcp.json`, `.github/`) cannot be read; Safari may drop hidden files. Use drag and drop or the CLI in that case.
+- **Browser UI.** It cannot see host state, `PATH` or git. A symlink arrives in the browser as a 0-byte file, so the SymJack check differs from the CLI (HIGH instead of CRITICAL), and configurations or SkillPact scripts reached only through a symlink are checked by the CLI only. In WebKit, folders whose top level holds only hidden entries (`.mcp.json`, `.github/`) cannot be read; Safari may drop hidden files. Use drag and drop or the CLI in that case.
 - **§49 is experimental and partial**, as described above.
 
 ## Related tools

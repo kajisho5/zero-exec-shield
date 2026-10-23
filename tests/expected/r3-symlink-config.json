@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "ev/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§7",
+      "path": "ev/.vscode/tasks.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

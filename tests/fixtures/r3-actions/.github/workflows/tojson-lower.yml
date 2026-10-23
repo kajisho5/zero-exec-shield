@@ -1,0 +1,7 @@
+# ZES test fixture (r3): tojson(secrets)（関数名の大文字小文字違い）
+on: push
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ tojson(secrets) }}" > s.txt

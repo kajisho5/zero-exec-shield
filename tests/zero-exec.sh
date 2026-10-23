@@ -117,6 +117,31 @@ else
   echo "SKIP: git が無いため .git/config 経由の実行チェックを省略"
 fi
 
+# PATH の偽装（R3-01）: 検査ルート内の node_modules/.bin に jq / git / coreutils の偽物を置き、PATH の先頭（"." と空のエントリと
+#   ルート内の絶対パス）に入れても、偽物を 1 つも起動しない（PATH は起動時に無害化し、jq / git は絶対パスで起動する）
+TR="$TMP/pathtrap"
+mkdir -p "$TR/node_modules/.bin"
+for b in jq git awk sed grep find sort head tail tr cat cut wc xargs stat readlink realpath od sha256sum shasum mktemp uname \
+         dirname basename env timeout paste uniq rm mkdir mv ln cp printf date id ps lsof tee comm join sleep kill bash; do
+  printf '#!/bin/sh\n: >"%s/path-shadow-canary"\nexit 1\n' "$TMP" >"$TR/node_modules/.bin/$b"
+  chmod +x "$TR/node_modules/.bin/$b"
+done
+if command -v git >/dev/null 2>&1; then
+  ( export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1; cd "$TR" && git init -q . && printf 'x\n' >README && git add README \
+      && git -c user.name=a -c user.email=a@example.invalid commit -q -m init ) >/dev/null 2>&1
+fi
+STRACE="$(command -v strace)"; BASH_BIN="$(command -v bash)"
+# シバン "#!/usr/bin/env bash" の env は無害化より前に PATH で bash を探すため、PATH を信頼できない場合は bash を絶対パスで起動する（README）
+( cd "$TR/node_modules/.bin" && PATH=".::$TR/node_modules/.bin:$PATH" ZES_HOST_CHECKS=1 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" \
+    "$STRACE" -f -qq -s 512 -e trace=execve -o "$TMP/trace-path.txt" "$BASH_BIN" "$REPO/zes-scan.sh" --full --root "$TR" --json >"$TMP/out-path.json" 2>"$TMP/scan-err-path.txt" )
+rc=$?
+[ "$rc" -eq 0 ] || ng "PATH 偽装時の zes-scan.sh の終了コードが $rc"
+[ -e "$TMP/path-shadow-canary" ] && ng "検査ルート内の偽の jq / git / coreutils が実行されました（PATH 経由）"
+grep -E 'execve\("' "$TMP/trace-path.txt" | grep -q -F "\"$TR/" && ng "検査ルート内のファイルを execve しました（PATH 経由）: $(grep -E 'execve\("' "$TMP/trace-path.txt" | grep -F "\"$TR/" | head -n1)"
+jq -e --arg p "path_entry_dropped:$TR/node_modules/.bin" '([.errors[] | select(.module == "core" and (.reason == $p or .reason == "path_entry_dropped:." or .reason == "path_entry_dropped:<empty>"))] | length == 3)' "$TMP/out-path.json" >/dev/null 2>&1 \
+  || ng "PATH から外したエントリ（./空/ルート内）が errors[] に path_entry_dropped として記録されていません"
+echo "PATH 偽装チェック: 完了"
+
 echo "起動された実行ファイル（種類）:"
 cut -f1 "$TMP/execs.tsv" | awk -F/ '{print $NF}' | sort | uniq -c | sort -rn | awk '{printf "  %6d %s\n", $1, $2}'
 if [ "$FAIL" -eq 0 ]; then

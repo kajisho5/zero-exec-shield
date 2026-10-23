@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "CRITICAL",
+      "module": "§4",
+      "path": "crlf/.tool-versions"
+    },
+    {
+      "campaign": "emudhra-ca-oct2026",
+      "level": "HIGH",
+      "module": "§6",
+      "path": "crlf/.tool-versions"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

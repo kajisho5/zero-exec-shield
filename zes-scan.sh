@@ -37,143 +37,44 @@ if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
 fi
 
 export LC_ALL=C
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+
+# PATH の無害化（1 段目）: 相対パス・空のエントリ（"." や "::"＝カレントディレクトリ）を外す。
+#   検査ルートの中で起動された場合、ルート内の偽 jq / git / coreutils を起動させないため（Zero-Execution）。
+#   検査ルートが確定した後（2 段目: zes_sanitize_path_root）に、実パスが検査ルート配下のエントリも外す。
+#   ここまでは外部コマンドを一切起動しない（dirname / uname 等も PATH 経由のため、無害化の後に呼ぶ）
+PATH_DROPPED=()
+zes_sanitize_path() {  # zes_sanitize_path ROOT_OR_EMPTY
+  local root="$1" rest="${PATH:-}:" e rp out=""
+  while [ -n "$rest" ]; do
+    e="${rest%%:*}"; rest="${rest#*:}"
+    case "$e" in
+      /*) ;;
+      *) PATH_DROPPED+=("${e:-<empty>}"); continue ;;
+    esac
+    if [ -n "$root" ] && [ "$root" != "/" ]; then
+      rp="$(cd -P -- "$e" 2>/dev/null && pwd -P)" || continue   # 存在しないディレクトリは何も見つからないので外すだけ
+      case "$rp/" in "$root"/*) PATH_DROPPED+=("$e"); continue ;; esac
+    fi
+    case ":$out:" in *":$e:"*) continue ;; esac
+    out="${out:+$out:}$e"
+  done
+  [ -n "$out" ] || out="/usr/bin:/bin:/usr/sbin:/sbin"
+  PATH="$out"
+  export PATH
+}
+zes_sanitize_path ""
+hash -r
+
+# スクリプトの場所（dirname を使わずパラメータ展開で求める）
+_zes_src="${BASH_SOURCE[0]}"
+case "$_zes_src" in */*) _zes_src="${_zes_src%/*}" ;; *) _zes_src="." ;; esac
+SCRIPT_DIR="$(cd -- "${_zes_src:-/}" && pwd -P)"
+unset _zes_src
 IOC_FILE="${ZES_IOC:-$SCRIPT_DIR/rules/ioc.json}"
 HOME_DIR="${ZES_HOME:-${HOME:-}}"
 HOST_CHECKS="${ZES_HOST_CHECKS:-1}"
 OFFLINE="${ZES_OFFLINE:-0}"
 SKILLPACT_CACHE="${ZES_SKILLPACT_CACHE:-}"
-OS_NAME="$(uname -s 2>/dev/null || echo unknown)"
-
-ROOT="."
-MODE=""
-JSON_OUT=0
-TARGET_URL=""
-
-usage() {
-  cat <<'EOF'
-Usage: zes-scan.sh [--quick|--standard|--full|--worm|--skillpact] [--root <dir>] [--url <URL>] [--json]
-                   [--skillpact-cache <dir>]
-
-  --root <dir>   検査ルート（既定 "."）
-  --full         §1〜49 全実行
-  --standard     §1〜35
-  --quick        §1〜19（既定）
-  --worm         §15/18/25/45 のみ
-  --skillpact    §49 のみ
-  --url <URL>    §4 の非侵襲URLチェック（Server / X-Powered-By ヘッダのみ取得。HEAD、405/501 時のみ GET、リダイレクト非追従）
-  --json         findings.json を標準出力へ（人間向けログは標準エラーへ）
-  --skillpact-cache <dir>  §49 差分異常検出用の前バージョン契約キャッシュ
-
-終了コード: 0=完了(status ok/partial) / 2=status error / 64=引数・環境エラー
-EOF
-}
-
-set_mode() {
-  if [ -n "$MODE" ] && [ "$MODE" != "$1" ]; then
-    echo "ZES: モード指定が重複しています（$MODE と $1）" >&2
-    exit 64
-  fi
-  MODE="$1"
-}
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --root) [ $# -ge 2 ] || { usage >&2; exit 64; }; ROOT="$2"; shift 2 ;;
-    --full) set_mode full; shift ;;
-    --standard) set_mode standard; shift ;;
-    --quick) set_mode quick; shift ;;
-    --worm) set_mode worm; shift ;;
-    --skillpact) set_mode skillpact; shift ;;
-    --url) [ $# -ge 2 ] || { usage >&2; exit 64; }; TARGET_URL="$2"; shift 2 ;;
-    --json) JSON_OUT=1; shift ;;
-    --skillpact-cache) [ $# -ge 2 ] || { usage >&2; exit 64; }; SKILLPACT_CACHE="$2"; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    *) echo "ZES: 不明な引数: $1" >&2; usage >&2; exit 64 ;;
-  esac
-done
-[ -n "$MODE" ] || MODE="quick"
-
-if [ ! -d "$ROOT" ]; then
-  echo "ZES: --root がディレクトリではありません: $ROOT" >&2
-  exit 64
-fi
-case "$ROOT" in -*) ROOT="./$ROOT" ;; esac  # "-" や "-dash" を cd のオプション/OLDPWD と解釈させない
-ROOT="$(cd -- "$ROOT" 2>/dev/null && pwd -P)"
-if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
-  echo "ZES: --root を解決できません" >&2
-  exit 64
-fi
-
-# ホーム（ZES_HOME / HOME）も ROOT と同様に実パスへ正規化する（相対パス・末尾スラッシュ・シンボリックリンクのまま
-# 出力すると findings[].path が絶対パスにならない / "//" を含む / 実体と異なるパスになるため）
-if [ -z "$HOME_DIR" ]; then
-  echo "ZES: ホームディレクトリが未設定です（ZES_HOME または HOME を指定してください）" >&2
-  exit 64
-fi
-if [ ! -d "$HOME_DIR" ]; then
-  echo "ZES: ZES_HOME/HOME がディレクトリではありません: $HOME_DIR" >&2
-  exit 64
-fi
-case "$HOME_DIR" in -*) HOME_DIR="./$HOME_DIR" ;; esac
-HOME_DIR="$(cd -- "$HOME_DIR" 2>/dev/null && pwd -P)"
-if [ -z "$HOME_DIR" ] || [ ! -d "$HOME_DIR" ]; then
-  echo "ZES: ZES_HOME/HOME を解決できません" >&2
-  exit 64
-fi
-
-if [ -n "$TARGET_URL" ]; then
-  case "$TARGET_URL" in
-    http://*|https://*) ;;
-    *) echo "ZES: --url は http:// または https:// のみ受け付けます" >&2; exit 64 ;;
-  esac
-  case "$TARGET_URL" in
-    *[[:space:]\'\"\`\$\;\|\&\<\>]*) echo "ZES: --url に使用できない文字が含まれています" >&2; exit 64 ;;
-  esac
-fi
-
-HAVE_JQ=0
-command -v jq >/dev/null 2>&1 && HAVE_JQ=1
-[ "${ZES_FORCE_NO_JQ:-0}" = "1" ] && HAVE_JQ=0
-
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zes.XXXXXX")" || { echo "ZES: 一時ディレクトリを作成できません" >&2; exit 64; }
-trap 'rm -rf "$TMP_DIR"' EXIT
-FINDINGS_FILE="$TMP_DIR/findings.ndjson"
-ERRORS_FILE="$TMP_DIR/errors.ndjson"
-: >"$FINDINGS_FILE"
-: >"$ERRORS_FILE"
-FATAL=0
-
-now_epoch() { if [ -n "${ZES_NOW:-}" ]; then echo "$ZES_NOW"; else date -u +%s; fi; }
-iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
-SCAN_STARTED_AT="$(iso_now)"
-
-# ---------------------------------------------------------------------------
-# 出力（§5.1 log_section / critical / high / safe）
-# ---------------------------------------------------------------------------
-if [ "$JSON_OUT" -eq 1 ]; then exec 3>&2; else exec 3>&1; fi
-if [ -t 3 ] && [ -z "${NO_COLOR:-}" ]; then
-  C_RED=$'\033[1;31m'; C_YEL=$'\033[1;33m'; C_MAG=$'\033[1;35m'; C_GRN=$'\033[1;32m'; C_CYN=$'\033[1;36m'; C_DIM=$'\033[2m'; C_OFF=$'\033[0m'
-else
-  C_RED=""; C_YEL=""; C_MAG=""; C_GRN=""; C_CYN=""; C_DIM=""; C_OFF=""
-fi
-
-CURRENT_MODULE=""
-log_section() {
-  CURRENT_MODULE="$1"
-  printf '\n%s== %s %s ==%s\n' "$C_CYN" "$1" "${2:-}" "$C_OFF" >&3
-}
-log_info() { zes_enc "$*"; printf '%s  %s%s\n' "$C_DIM" "$ENC_TERM" "$C_OFF" >&3; }
-
-sha256_str() {
-  if command -v sha256sum >/dev/null 2>&1; then printf '%s' "$1" | sha256sum | awk '{print $1}'
-  else printf '%s' "$1" | shasum -a 256 | awk '{print $1}'; fi
-}
-sha256_file() {
-  # 標準入力から読む（ファイル名に \ や改行があると sha256sum は行頭に "\" を付けてエスケープするため）
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum <"$1" 2>/dev/null | awk '{print $1}'
-  else shasum -a 256 <"$1" 2>/dev/null | awk '{print $1}'; fi
-}
 
 # 文字列の符号化（JSON / 人間向けログ / ID 計算で同じ正規形を使う）
 #   zes_enc STR は次の変数を設定する:
@@ -221,6 +122,141 @@ zes_enc() {
 }
 json_escape() { zes_enc "$1"; printf '%s' "$ENC_JSON"; }
 json_str_or_null() { if [ -n "$1" ]; then printf '"%s"' "$(json_escape "$1")"; else printf 'null'; fi; }
+
+ROOT="."
+MODE=""
+JSON_OUT=0
+TARGET_URL=""
+
+USAGE_TEXT='Usage: zes-scan.sh [--quick|--standard|--full|--worm|--skillpact] [--root <dir>] [--url <URL>] [--json]
+                   [--skillpact-cache <dir>]
+
+  --root <dir>   検査ルート（既定 "."）
+  --full         §1〜49 全実行
+  --standard     §1〜35
+  --quick        §1〜19（既定）
+  --worm         §15/18/25/45 のみ
+  --skillpact    §49 のみ
+  --url <URL>    §4 の非侵襲URLチェック（Server / X-Powered-By ヘッダのみ取得。HEAD、405/501 時のみ GET、リダイレクト非追従）
+  --json         findings.json を標準出力へ（人間向けログは標準エラーへ）
+  --skillpact-cache <dir>  §49 差分異常検出用の前バージョン契約キャッシュ
+
+終了コード: 0=完了(status ok/partial) / 2=status error（インベントリを作れない・全モジュール失敗） / 64=引数・環境エラー
+'
+usage() { printf '%s' "$USAGE_TEXT"; }   # cat を使わない（PATH の 2 段目の無害化より前に呼ばれうるため）
+
+# 引数・環境エラー（exit 64）。値は端末向けに符号化して表示する（制御文字・C1 制御文字による端末エスケープ注入の防止）
+arg_error() {  # arg_error MESSAGE [VALUE]
+  if [ $# -ge 2 ]; then zes_enc "$2"; printf 'ZES: %s%s\n' "$1" "$ENC_TERM" >&2
+  else printf 'ZES: %s\n' "$1" >&2; fi
+  exit 64
+}
+
+set_mode() {
+  if [ -n "$MODE" ] && [ "$MODE" != "$1" ]; then
+    arg_error "モード指定が重複しています（$MODE と $1）"
+  fi
+  MODE="$1"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --root) [ $# -ge 2 ] || { usage >&2; exit 64; }; ROOT="$2"; shift 2 ;;
+    --full) set_mode full; shift ;;
+    --standard) set_mode standard; shift ;;
+    --quick) set_mode quick; shift ;;
+    --worm) set_mode worm; shift ;;
+    --skillpact) set_mode skillpact; shift ;;
+    --url) [ $# -ge 2 ] || { usage >&2; exit 64; }; TARGET_URL="$2"; shift 2 ;;
+    --json) JSON_OUT=1; shift ;;
+    --skillpact-cache) [ $# -ge 2 ] || { usage >&2; exit 64; }; SKILLPACT_CACHE="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; arg_error "不明な引数: " "$1" ;;
+  esac
+done
+[ -n "$MODE" ] || MODE="quick"
+
+[ -d "$ROOT" ] || arg_error "--root がディレクトリではありません: " "$ROOT"
+case "$ROOT" in -*) ROOT="./$ROOT" ;; esac  # "-" や "-dash" を cd のオプション/OLDPWD と解釈させない
+ROOT="$(cd -- "$ROOT" 2>/dev/null && pwd -P)"
+{ [ -n "$ROOT" ] && [ -d "$ROOT" ]; } || arg_error "--root を解決できません"
+# RP … パス連結用の検査ルート（"/" のときは空。"$RP/x" が "//x" にならないように）
+RP="${ROOT%/}"
+
+# PATH の無害化（2 段目）: 実パスが検査ルート配下のエントリを外す（--root / のときはホスト自体が検査対象のため対象外）
+zes_sanitize_path "$ROOT"
+hash -r
+OS_NAME="$(uname -s 2>/dev/null || echo unknown)"
+
+# ホーム（ZES_HOME / HOME）も ROOT と同様に実パスへ正規化する（相対パス・末尾スラッシュ・シンボリックリンクのまま
+# 出力すると findings[].path が絶対パスにならない / "//" を含む / 実体と異なるパスになるため）
+[ -n "$HOME_DIR" ] || arg_error "ホームディレクトリが未設定です（ZES_HOME または HOME を指定してください）"
+[ -d "$HOME_DIR" ] || arg_error "ZES_HOME/HOME がディレクトリではありません: " "$HOME_DIR"
+case "$HOME_DIR" in -*) HOME_DIR="./$HOME_DIR" ;; esac
+HOME_DIR="$(cd -- "$HOME_DIR" 2>/dev/null && pwd -P)"
+{ [ -n "$HOME_DIR" ] && [ -d "$HOME_DIR" ]; } || arg_error "ZES_HOME/HOME を解決できません"
+
+if [ -n "$TARGET_URL" ]; then
+  case "$TARGET_URL" in
+    http://*|https://*) ;;
+    *) arg_error "--url は http:// または https:// のみ受け付けます" ;;
+  esac
+  case "$TARGET_URL" in
+    *[[:space:]\'\"\`\$\;\|\&\<\>]*) arg_error "--url に使用できない文字が含まれています" ;;
+  esac
+fi
+
+# jq / git は無害化した PATH で 1 度だけ絶対パスに解決し、以降は常にその絶対パスで起動する
+#   （関数 jq は "$JQ_BIN" を呼ぶ。git は safe_git の "$GIT_BIN" のみ）
+JQ_BIN="$(command -v jq 2>/dev/null)"; case "$JQ_BIN" in /*) ;; *) JQ_BIN="" ;; esac
+GIT_BIN="$(command -v git 2>/dev/null)"; case "$GIT_BIN" in /*) ;; *) GIT_BIN="" ;; esac
+jq() { "$JQ_BIN" "$@"; }
+HAVE_JQ=0
+[ -n "$JQ_BIN" ] && HAVE_JQ=1
+[ "${ZES_FORCE_NO_JQ:-0}" = "1" ] && HAVE_JQ=0
+
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zes.XXXXXX")" || { echo "ZES: 一時ディレクトリを作成できません" >&2; exit 64; }
+TMP_DIR="$(cd -- "$TMP_DIR" && pwd -P)" || exit 64
+TMPDIR_REAL=""; [ -n "${TMPDIR:-}" ] && TMPDIR_REAL="$(cd -- "$TMPDIR" 2>/dev/null && pwd -P)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+FINDINGS_FILE="$TMP_DIR/findings.ndjson"
+ERRORS_FILE="$TMP_DIR/errors.ndjson"
+: >"$FINDINGS_FILE"
+: >"$ERRORS_FILE"
+# FATAL … 親プロセスで判定する致命的な失敗（インベントリを作れない・全モジュールが失敗）。status=error / 終了コード 2
+FATAL=0
+
+now_epoch() { if [ -n "${ZES_NOW:-}" ]; then echo "$ZES_NOW"; else date -u +%s; fi; }
+iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+SCAN_STARTED_AT="$(iso_now)"
+
+# ---------------------------------------------------------------------------
+# 出力（§5.1 log_section / critical / high / safe）
+# ---------------------------------------------------------------------------
+if [ "$JSON_OUT" -eq 1 ]; then exec 3>&2; else exec 3>&1; fi
+if [ -t 3 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_RED=$'\033[1;31m'; C_YEL=$'\033[1;33m'; C_MAG=$'\033[1;35m'; C_GRN=$'\033[1;32m'; C_CYN=$'\033[1;36m'; C_DIM=$'\033[2m'; C_OFF=$'\033[0m'
+else
+  C_RED=""; C_YEL=""; C_MAG=""; C_GRN=""; C_CYN=""; C_DIM=""; C_OFF=""
+fi
+
+CURRENT_MODULE=""
+log_section() {
+  CURRENT_MODULE="$1"
+  printf '\n%s== %s %s ==%s\n' "$C_CYN" "$1" "${2:-}" "$C_OFF" >&3
+}
+log_info() { zes_enc "$*"; printf '%s  %s%s\n' "$C_DIM" "$ENC_TERM" "$C_OFF" >&3; }
+
+sha256_str() {
+  if command -v sha256sum >/dev/null 2>&1; then printf '%s' "$1" | sha256sum | awk '{print $1}'
+  else printf '%s' "$1" | shasum -a 256 | awk '{print $1}'; fi
+}
+sha256_file() {
+  # 標準入力から読む（ファイル名に \ や改行があると sha256sum は行頭に "\" を付けてエスケープするため）
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum <"$1" 2>/dev/null | awk '{print $1}'
+  else shasum -a 256 <"$1" 2>/dev/null | awk '{print $1}'; fi
+}
+
 
 # emit LEVEL CAMPAIGN PATH DETAIL [SKILLPACT_JSON]
 #   findings[].id は module|campaign|path|detail（JSON に出力する値そのもの＝zes_enc の正規形）から決定的に生成（§6 保証）
@@ -298,7 +334,7 @@ stat_birth() { if [ "$OS_NAME" = "Darwin" ]; then stat -f %B -- "$1" 2>/dev/null
 
 # version_cmp A B → -1 / 0 / 1（数値セグメント比較、非数値は辞書順）
 version_cmp() {
-  awk -v a="$1" -v b="$2" 'BEGIN{
+  ZES_V_A="$1" ZES_V_B="$2" awk 'BEGIN { a = ENVIRON["ZES_V_A"]; b = ENVIRON["ZES_V_B"] } BEGIN{
     gsub(/^[vV]/,"",a); gsub(/^[vV]/,"",b)
     na=split(a,x,/[.+_-]/); nb=split(b,y,/[.+_-]/); n=(na>nb?na:nb)
     for(i=1;i<=n;i++){
@@ -358,7 +394,11 @@ safe_probe() {
   local p rp
   p="$(command -v "$bin" 2>/dev/null)" || return 127
   rp="$(resolve_path "$p")" || return 127
-  case "$rp" in "$ROOT"/*|/tmp/*|/var/tmp/*|/dev/shm/*) return 126 ;; esac
+  # --root / はホスト自体が検査対象のため、検査ルート配下という条件は使わない（一時領域の条件は残す）
+  if [ "$ROOT" != "/" ]; then case "$rp" in "$ROOT"/*) return 126 ;; esac; fi
+  # 一時領域（macOS は /tmp → /private/tmp、$TMPDIR は /var/folders/… → /private/var/folders/…）
+  case "$rp" in /tmp/*|/var/tmp/*|/dev/shm/*|/private/tmp/*|/private/var/tmp/*|/private/var/folders/*|/var/folders/*) return 126 ;; esac
+  if [ -n "$TMPDIR_REAL" ] && [ "$TMPDIR_REAL" != "/" ]; then case "$rp" in "$TMPDIR_REAL"/*) return 126 ;; esac; fi
   case "$rp" in "$HOME_DIR"/*) [ "$HOST_CHECKS" = "1" ] || return 126 ;; esac
   # 環境は引き継がない（env -i）。検査対象 HOME の設定（~/.docker/config.json の context → ssh 実行、~/.kube/config の
   # exec プラグイン等）や DOCKER_HOST / KUBECONFIG 等を読ませないため、空の HOME と最小の変数だけを渡す
@@ -383,12 +423,31 @@ safe_probe() {
 GIT_TIMEOUT="${ZES_GIT_TIMEOUT:-60}"
 case "$GIT_TIMEOUT" in ''|*[!0-9]*) GIT_TIMEOUT=60 ;; esac
 
-# git_cfg_get SECTION SUBSECTION KEY … $ROOT/.git/config の値を git を起動せずに読む（最後の値。include は辿らない）
-#   通常ファイル以外（FIFO・デバイス）は読まない。[sec "sub"] と旧形式 [sec.sub] の両方に対応
+# ---------------------------------------------------------------------------
+# 検査ルート内のパスの安全な読み取り
+#   ルート内に組み立てたパス（$ROOT/.git/config 等）がシンボリックリンクでルート外（/proc/kmsg 等）を指す場合や、
+#   通常ファイルでない場合は読まない（読むと停止しうる / 検査対象外のファイルを読む）
+# ---------------------------------------------------------------------------
+# realpath_in_root P … P の実パスが検査ルート配下（ルート自体を含む）なら実パスを出力して真
+realpath_in_root() {
+  local r; r="$(resolve_path "$1")" || return 1
+  [ -n "$r" ] || return 1
+  case "$r" in "$ROOT"|"$RP"/*) printf '%s' "$r"; return 0 ;; esac
+  return 1
+}
+# in_root_regular P … P が（リンクを辿った結果）検査ルート内の通常ファイルなら真
+in_root_regular() { [ -f "$1" ] && realpath_in_root "$1" >/dev/null; }
+# read_capped FILE BYTES … 先頭 BYTES バイトを読む（timeout 付き。ブロックするファイルで停止しない）
+READ_TIMEOUT=10
+read_capped() { run_timeout "$READ_TIMEOUT" head -c "$2" -- "$1" 2>/dev/null; }
+
+# git_cfg_get SECTION SUBSECTION KEY … 検査ルートの Git 設定（$ROOT/.git の config）の値を git を起動せずに読む
+#   （最後の値。include は辿らない）。ルート外を指す・通常ファイル以外（FIFO・デバイス）は読まない。
+#   [sec "sub"] と旧形式 [sec.sub] の両方に対応
 git_cfg_get() {
-  local cfg="$ROOT/.git/config"
-  [ -f "$cfg" ] || return 1
-  head -c 1048576 -- "$cfg" 2>/dev/null | ZES_S="$1" ZES_SS="$2" ZES_K="$3" awk '
+  local cfg="${ROOT_GITCOMMON:-$RP/.git}/config"
+  in_root_regular "$cfg" || return 1
+  read_capped "$cfg" 1048576 | ZES_S="$1" ZES_SS="$2" ZES_K="$3" awk '
     BEGIN { ws = tolower(ENVIRON["ZES_S"]); wss = ENVIRON["ZES_SS"]; wk = tolower(ENVIRON["ZES_K"]); found = 0 }
     { line = $0; sub(/\r$/, "", line) }
     line ~ /^[[:space:]]*\[/ {
@@ -414,16 +473,120 @@ git_cfg_get() {
     END { if (found) print v; else exit 1 }'
 }
 
+# git_cfg_includes CONFIG … include.path / includeIf "<条件>".path の値を 1 行ずつ（条件は評価せず全て）。git は起動しない
+git_cfg_includes() {
+  read_capped "$1" 1048576 | awk '
+    { line = $0; sub(/\r$/, "", line) }
+    line ~ /^[[:space:]]*\[/ {
+      h = line; sub(/^[[:space:]]*\[[[:space:]]*/, "", h); sub(/\][^]]*$/, "", h)
+      sec = tolower(h); sub(/[[:space:]"].*$/, "", sec); sub(/\..*$/, "", sec); next }
+    sec == "include" || sec == "includeif" {
+      l = line; sub(/^[[:space:]]+/, "", l)
+      if (tolower(substr(l, 1, 4)) != "path") next
+      r = substr(l, 5); sub(/^[[:space:]]*/, "", r)
+      if (substr(r, 1, 1) != "=") next
+      r = substr(r, 2); v = ""; inq = 0
+      for (i = 1; i <= length(r); i++) { c = substr(r, i, 1)
+        if (c == "\\" && i < length(r)) { i++; v = v substr(r, i, 1); continue }
+        if (c == "\"") { inq = !inq; continue }
+        if (!inq && (c == "#" || c == ";")) break
+        v = v c }
+      sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); if (v != "") print v }'
+}
+
+# ---------------------------------------------------------------------------
+# Git ディレクトリの発見（検査ルート直下の .git と、入れ子の .git〔サブモジュール・同梱リポジトリ〕）
+#   .git ファイル（"gitdir: <path>"）と commondir（git worktree）を git を使わずに解決し、
+#   設定（config / config.worktree）と include.path / includeIf の参照先、フック置き場を一覧にする（§7 / §26 / §41 が静的に検査）。
+#   解決できない・検査ルート外を指す場合は errors[] に記録する（読めない設定を 0 件扱いしない）
+#   GIT_DIRS_FILE: .git のパス US gitdir US commondir / GIT_CFG_LIST: 静的に検査する Git 設定 / GIT_HOOKS_LIST: フック置き場
+# ---------------------------------------------------------------------------
+GIT_DIRS_FILE=""; GIT_CFG_LIST=""; GIT_HOOKS_LIST=""
+ROOT_GITDIR=""; ROOT_GITCOMMON=""
+git_read_pointer() {  # git_read_pointer FILE PREFIX … "PREFIX<path>"（PREFIX 空なら 1 行目そのもの）の <path>
+  local l; l="$(read_capped "$1" 4096 | head -n1 | tr -d '\r')"
+  if [ -n "$2" ]; then case "$l" in "$2"*) l="${l#"$2"}" ;; *) return 1 ;; esac; fi
+  l="${l#"${l%%[![:space:]]*}"}"; l="${l%"${l##*[![:space:]]}"}"
+  [ -n "$l" ] || return 1
+  case "$l" in /*) ;; *) l="${1%/*}/$l" ;; esac
+  printf '%s' "$l"
+}
+git_discover() {
+  GIT_DIRS_FILE="$TMP_DIR/gitdirs.tsv"; GIT_CFG_LIST="$TMP_DIR/gitcfg.lst"; GIT_HOOKS_LIST="$TMP_DIR/githooks.lst"
+  : >"$GIT_DIRS_FILE"; : >"$GIT_CFG_LIST"; : >"$GIT_HOOKS_LIST"
+  local p gd cd t
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    gd=""
+    if [ -L "$p" ]; then
+      gd="$(realpath_in_root "$p")" && [ -d "$gd" ] || { record_error "core" "gitdir_unresolved:$p"; continue; }
+    elif [ -d "$p" ]; then
+      gd="$p"
+    elif [ -f "$p" ]; then
+      t="$(git_read_pointer "$p" "gitdir:")" || { record_error "core" "gitfile_unparsed:$p"; continue; }
+      if ! gd="$(realpath_in_root "$t")" || [ ! -d "$gd" ]; then
+        if [ -d "$t" ]; then record_error "core" "gitdir_outside_root:$p"; else record_error "core" "gitdir_unresolved:$p"; fi
+        continue
+      fi
+    else
+      continue  # FIFO 等は build_inventory が special_file として記録済み
+    fi
+    cd="$gd"
+    if [ -e "$gd/commondir" ] || [ -L "$gd/commondir" ]; then
+      if in_root_regular "$gd/commondir" && t="$(git_read_pointer "$gd/commondir" "")" && cd="$(realpath_in_root "$t")" && [ -d "$cd" ]; then :
+      else record_error "core" "git_commondir_unresolved:$p"; cd="$gd"; fi
+    fi
+    printf '%s\037%s\037%s\n' "$p" "$gd" "$cd" >>"$GIT_DIRS_FILE"
+    if [ "$p" = "$RP/.git" ]; then ROOT_GITDIR="$gd"; ROOT_GITCOMMON="$cd"; fi
+    for t in "$cd/hooks"; do
+      [ -d "$t" ] || continue
+      realpath_in_root "$t" >/dev/null || { record_error "core" "path_leaves_root:$t"; continue; }
+      printf '%s\n' "$t" >>"$GIT_HOOKS_LIST"
+    done
+    for t in "$gd/config" "$gd/config.worktree" "$cd/config" "$cd/config.worktree"; do
+      { [ -e "$t" ] || [ -L "$t" ]; } || continue
+      if in_root_regular "$t"; then git_cfg_collect "$t" 0
+      else record_error "core" "path_leaves_root:$t"; fi
+    done
+  done < <({ { [ -e "$RP/.git" ] || [ -L "$RP/.git" ]; } && printf '%s\n' "$RP/.git"
+             awk '{ n = $0; sub(/.*\//, "", n); if (n == ".git") print }' "$DIRS_LIST" "$FILES_LIST" "$LINKS_LIST"; } | sort -u)
+  sort -u -o "$GIT_CFG_LIST" "$GIT_CFG_LIST"; sort -u -o "$GIT_HOOKS_LIST" "$GIT_HOOKS_LIST"
+}
+# git_cfg_collect CONFIG DEPTH … CONFIG を一覧に加え、include.path / includeIf の参照先を辿る（深さ 10 まで。git と同じ上限）
+git_cfg_collect() {
+  local cfg="$1" depth="$2" inc t r
+  grep -q -x -F -- "$cfg" "$GIT_CFG_LIST" 2>/dev/null && return 0
+  printf '%s\n' "$cfg" >>"$GIT_CFG_LIST"
+  [ "$depth" -lt 10 ] || { record_error "core" "git_include_too_deep:$cfg"; return 0; }
+  while IFS= read -r inc; do
+    case "$inc" in "~/"*) t="$HOME_DIR/${inc#\~/}" ;; /*) t="$inc" ;; *) t="${cfg%/*}/$inc" ;; esac
+    # 参照先は検査ルート内（または検査対象 HOME 内）の通常ファイルのみ読む。git には読ませない
+    r="$(resolve_path "$t")"
+    if [ -n "$r" ] && [ -f "$r" ] && { realpath_in_root "$r" >/dev/null || case "$r" in "$HOME_DIR"/*) true ;; *) false ;; esac; }; then
+      git_cfg_collect "$r" $((depth + 1))
+    else
+      record_error "core" "git_include_unresolved:$cfg"
+    fi
+  done < <(git_cfg_includes "$cfg")
+}
+
 # 検査対象 .git から ZES 管理の最小 GIT_DIR を作る（作成済みなら何もしない）
+#   HEAD は gitdir から、objects / refs / packed-refs / reftable / shallow は commondir（worktree なら共有側）から取る。
+#   いずれも検査ルート内の実体に限り（ルート外を指すリンクは使わない）、読み取りは timeout 付き
 git_shadow_prepare() {
-  local g="$ROOT/.git" d="$TMP_DIR/git-shadow" x rfv of rs
+  local g="$ROOT_GITDIR" c="$ROOT_GITCOMMON" d="$TMP_DIR/git-shadow" x rfv of rs
   [ -f "$d/config" ] && return 0
-  [ -d "$g" ] && [ -f "$g/HEAD" ] || return 1
+  [ -n "$g" ] && [ -d "$g" ] && in_root_regular "$g/HEAD" || return 1
   rm -rf -- "$d" && mkdir -p -- "$d" || return 1
-  head -c 4096 -- "$g/HEAD" >"$d/HEAD" 2>/dev/null || return 1
-  [ -f "$g/shallow" ] && { cp -- "$g/shallow" "$d/shallow" 2>/dev/null || return 1; }
+  read_capped "$g/HEAD" 4096 >"$d/HEAD" || return 1
+  if [ -e "$c/shallow" ] || [ -L "$c/shallow" ]; then
+    in_root_regular "$c/shallow" && read_capped "$c/shallow" 16777216 >"$d/shallow" || return 1
+  fi
   for x in objects refs packed-refs reftable; do
-    if [ -e "$g/$x" ] || [ -L "$g/$x" ]; then ln -s -- "$g/$x" "$d/$x" || return 1; fi
+    if [ -e "$c/$x" ] || [ -L "$c/$x" ]; then
+      realpath_in_root "$c/$x" >/dev/null || return 1
+      ln -s -- "$c/$x" "$d/$x" || return 1
+    fi
   done
   [ -e "$d/refs" ] || mkdir -p -- "$d/refs"
   rfv="$(git_cfg_get core '' repositoryformatversion)"; of="$(git_cfg_get extensions '' objectformat)"; rs="$(git_cfg_get extensions '' refstorage)"
@@ -439,33 +602,42 @@ git_shadow_prepare() {
 }
 
 # run_timeout SECONDS CMD... … coreutils timeout があれば使い、無ければ bash のウォッチドッグで打ち切る（124 を返す）
+#   ウォッチドッグの sleep は子プロセスとして待ち、ウォッチドッグを止めるときに sleep も止める（孤児の sleep を残さない）
 run_timeout() {
   local secs="$1"; shift
   if command -v timeout >/dev/null 2>&1; then timeout -k 5 "$secs" "$@"; return $?; fi
   "$@" 0<&0 &
   local pid=$! w rc mark="$TMP_DIR/timeout.$BASHPID.$RANDOM"
-  ( sleep "$secs"; : >"$mark"; kill -TERM "$pid" 2>/dev/null && { sleep 5; kill -KILL "$pid" 2>/dev/null; } ) >/dev/null 2>&1 &
+  (
+    sp=""
+    trap '[ -n "$sp" ] && kill "$sp" 2>/dev/null; exit 0' TERM
+    sleep "$secs" & sp=$!; wait "$sp"; sp=""
+    : >"$mark"
+    kill -TERM "$pid" 2>/dev/null || exit 0
+    sleep 5 & sp=$!; wait "$sp"; sp=""
+    kill -KILL "$pid" 2>/dev/null
+  ) >/dev/null 2>&1 &
   w=$!
   wait "$pid"; rc=$?
-  kill "$w" 2>/dev/null; wait "$w" 2>/dev/null
+  kill -TERM "$w" 2>/dev/null; wait "$w" 2>/dev/null
   if [ -e "$mark" ]; then rm -f -- "$mark"; return 124; fi
   return "$rc"
 }
 
 safe_git() {
-  command -v git >/dev/null 2>&1 || return 127
+  [ -n "$GIT_BIN" ] || return 127
   git_shadow_prepare || { record_error "${CURRENT_MODULE:-core}" "git_dir_unreadable"; return 1; }
   local rc
   GIT_DIR="$TMP_DIR/git-shadow" GIT_WORK_TREE="$ROOT" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_COUNT=0 \
   GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 GIT_PAGER=cat GIT_EXTERNAL_DIFF='' \
   GIT_SSH_COMMAND=/bin/false GIT_SSH=/bin/false GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false GIT_EDITOR=/bin/false \
   GIT_SEQUENCE_EDITOR=/bin/false GIT_PROXY_COMMAND=/bin/false GIT_OPTIONAL_LOCKS=0 \
-    run_timeout "$GIT_TIMEOUT" git -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.pager=cat -c log.showSignature=false \
+    run_timeout "$GIT_TIMEOUT" "$GIT_BIN" -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.pager=cat -c log.showSignature=false \
         -c gpg.program=/bin/false -c gpg.openpgp.program=/bin/false -c gpg.x509.program=/bin/false \
         -c gpg.ssh.program=/bin/false -c gpg.ssh.defaultKeyCommand=/bin/false \
         -c diff.external= -c core.sshCommand=/bin/false -c core.gitProxy=/bin/false \
         -c core.editor=/bin/false -c sequence.editor=/bin/false -c core.askPass=/bin/false -c credential.helper= \
-        -c core.alternateRefsCommand=/bin/false -c protocol.allow=never -C "$ROOT" --no-pager "$@" </dev/null 2>/dev/null
+        -c core.alternateRefsCommand=/bin/false -c protocol.allow=never -c core.quotePath=false -C "$ROOT" --no-pager "$@" </dev/null 2>/dev/null
   rc=$?
   [ "$rc" -eq 124 ] && record_error "${CURRENT_MODULE:-core}" "git_timeout"
   return "$rc"
@@ -527,28 +699,71 @@ read_packages_tsv() {
 FILES_LIST="$TMP_DIR/files.lst"
 LINKS_LIST="$TMP_DIR/links.lst"
 DIRS_LIST="$TMP_DIR/dirs.lst"
+# LINKED_FILES_LIST … FILES_LIST に「リンク名で」加えたシンボリックリンク（実体が検査ルート内の通常ファイル）
+LINKED_FILES_LIST="$TMP_DIR/linked-files.lst"
+# 読むと停止しうる・検査対象ではない擬似ファイルシステム（バインドマウントされた /proc/kmsg 等も含む）
+PSEUDO_FSTYPES="proc sysfs devtmpfs devpts devfs debugfs tracefs securityfs cgroup cgroup2 pstore bpf configfs fusectl mqueue hugetlbfs binfmt_misc efivarfs selinuxfs rpc_pipefs nsfs autofs"
+# リンク先が検査ルート外のときに errors[] に記録する設定ファイル名（リンク経由で検査を逃れさせない）
+SENSITIVE_LINK_RE='(/\.mcp\.json|/mcp\.json|/\.(cursor|vscode)/(mcp|tasks|settings)\.json|/\.claude/settings(\.local)?\.json|/\.gemini/settings\.json|/claude_desktop_config\.json|/\.codex/config\.toml|/\.github/workflows/[^/]+\.ya?ml|/action\.ya?ml|/package\.json|/\.npmrc|/\.yarnrc(\.yml)?|/\.gitconfig|/\.git/config|/\.envrc|/(CLAUDE|CLAUDE\.local|AGENTS|GEMINI)\.md|/\.cursorrules|/\.windsurfrules|/\.clinerules|/\.gitmodules|/\.pth|\.pth|/sitecustomize\.py|/usercustomize\.py|/setup\.py|/pyproject\.toml|/build\.rs|/skill\.contract\.json|/SKILL\.md)$'
 build_inventory() {
-  local -a prune=( -name .git -prune -o -name .hg -prune -o -name .svn -prune )
+  # VCS のメタデータは検査ルート直下のもの（$ROOT/.git 等）だけを除外する。入れ子の .git / .hg / .svn は
+  # 中のファイルも走査する（同名ディレクトリにコードを隠させない）。$ROOT/.git は git_discover が静的に検査する
+  local -a prune=( -path "$RP/.git" -prune -o -path "$RP/.hg" -prune -o -path "$RP/.svn" -prune -o -path "$TMP_DIR" -prune )
   case "$SCRIPT_DIR/" in
-    "$ROOT"/*) if [ "$SCRIPT_DIR" != "$ROOT" ] || [ -f "$ROOT/zes-scan.sh" ]; then prune+=( -o -path "$SCRIPT_DIR" -prune ); fi ;;
+    "$RP"/*) if [ "$SCRIPT_DIR" != "$ROOT" ] || [ -f "$RP/zes-scan.sh" ]; then prune+=( -o -path "$SCRIPT_DIR" -prune ); fi ;;
   esac
-  find "$ROOT" \( "${prune[@]}" \) -o -print0 2>/dev/null >"$TMP_DIR/all.z"
+  # 擬似ファイルシステムは開かずに errors[] に記録する（find が -fstype に対応している場合）
+  local -a pseudo=() t
+  if find "$ROOT" -maxdepth 0 -fstype proc >/dev/null 2>&1; then
+    for t in $PSEUDO_FSTYPES; do [ "${#pseudo[@]}" -gt 0 ] && pseudo+=( -o ); pseudo+=( -fstype "$t" ); done
+    prune+=( -o \( "${pseudo[@]}" \) -exec printf '\001%s\000' {} + -prune )
+  else
+    record_error "core" "find_fstype_unsupported"
+  fi
+  local rc
+  find "$ROOT" \( "${prune[@]}" \) -o -print0 >"$TMP_DIR/all.z" 2>"$TMP_DIR/find.err"; rc=$?
   if tr '\0' '\n' <"$TMP_DIR/all.z" | awk 'END{exit 0}' && [ "$(tr -cd '\0' <"$TMP_DIR/all.z" | wc -c)" -ne "$(tr '\0' '\n' <"$TMP_DIR/all.z" | wc -l)" ]; then
     record_error "core" "unscannable_path_newline"
   fi
-  : >"$FILES_LIST"; : >"$LINKS_LIST"; : >"$DIRS_LIST"
-  local p
+  : >"$FILES_LIST"; : >"$LINKS_LIST"; : >"$DIRS_LIST"; : >"$LINKED_FILES_LIST"
+  local p r n=0
   while IFS= read -r -d '' p; do
     case "$p" in *$'\n'*) continue ;; esac
-    if [ -L "$p" ]; then printf '%s\n' "$p" >>"$LINKS_LIST"
-    elif [ -f "$p" ]; then printf '%s\n' "$p" >>"$FILES_LIST"
-    elif [ -d "$p" ]; then printf '%s\n' "$p" >>"$DIRS_LIST"
+    case "$p" in $'\001'*) record_error "core" "special_filesystem:${p#$'\001'}"; continue ;; esac
+    [ "$p" = "$ROOT" ] || n=$((n + 1))
+    if [ -L "$p" ]; then
+      printf '%s\n' "$p" >>"$LINKS_LIST"
+      # リンク先が検査ルート内の通常ファイルなら、リンク名でも走査する（.mcp.json → cfg/servers.json 等）
+      if r="$(realpath_in_root "$p")" && [ -f "$r" ]; then
+        printf '%s\n' "$p" >>"$FILES_LIST"; printf '%s\n' "$p" >>"$LINKED_FILES_LIST"
+      elif printf '%s\n' "$p" | grep -q -E -- "$SENSITIVE_LINK_RE"; then
+        record_error "core" "symlink_leaves_root:$p"
+      fi
+    elif [ -f "$p" ]; then
+      printf '%s\n' "$p" >>"$FILES_LIST"
+      [ -r "$p" ] || record_error "core" "unreadable:$p"
+      # 中身を展開しないアーカイブは errors[] に archive_not_inspected として記録（status は変えない: README「制限事項」）
+      case "$p" in *.whl|*.tgz|*.tar.gz|*.zip|*.jar|*.war|*.pyz|*.egg|*.gem|*.crate|*.nupkg|*.vsix|*.crx|*.xpi) record_error "core" "archive_not_inspected:$p" ;; esac
+    elif [ -d "$p" ]; then
+      printf '%s\n' "$p" >>"$DIRS_LIST"
     else
       # FIFO・ソケット・デバイスは開かない（読むと停止しうる）。検査していないことを errors[] に残す（fail-closed）
       record_error "core" "special_file:$p"
     fi
   done <"$TMP_DIR/all.z"
-  sort -o "$FILES_LIST" "$FILES_LIST"; sort -o "$LINKS_LIST" "$LINKS_LIST"; sort -o "$DIRS_LIST" "$DIRS_LIST"
+  # find が読めなかったディレクトリ（権限なし等）を errors[] に記録する（黙って 0 件扱いしない）
+  local line q
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    q="$(printf '%s' "$line" | sed -n -E -e "s/^find: '(.*)': [^:]*\$/\\1/p" -e t -e "s/^find: (.*): [^:]*\$/\\1/p")"
+    if [ -n "$q" ]; then record_error "core" "unreadable:$q"; else record_error "core" "inventory_error:$(printf '%s' "$line" | cut -c1-200)"; fi
+  done <"$TMP_DIR/find.err"
+  if [ "$rc" -ne 0 ]; then
+    [ -s "$TMP_DIR/find.err" ] || record_error "core" "inventory_incomplete:find_exit_$rc"
+    # 検査ルート自体を読めない（中身を 1 件も列挙できない）場合は致命的（status=error）
+    [ "$n" -eq 0 ] && { FATAL=1; record_error "core" "inventory_failed"; }
+  fi
+  sort -o "$FILES_LIST" "$FILES_LIST"; sort -o "$LINKS_LIST" "$LINKS_LIST"; sort -o "$DIRS_LIST" "$DIRS_LIST"; sort -o "$LINKED_FILES_LIST" "$LINKED_FILES_LIST"
 }
 
 # files_named REGEX  … ベース名が ERE に一致するファイル
@@ -558,14 +773,14 @@ files_path() { grep -E -- "$1" "$FILES_LIST" 2>/dev/null || true; }
 # grep_l PATTERN [grep-opts...] < filelist … 内容が一致するファイルのパスのみを返す（内容は出力しない）
 grep_l() {
   local pat="$1"; shift
-  tr '\n' '\0' | xargs -0 grep -l -I -E "$@" -e "$pat" -- /dev/null 2>/dev/null || true
+  tr '\n' '\0' | xargs -0 grep -l -a -E "$@" -e "$pat" -- /dev/null 2>/dev/null || true
 }
 grep_lF() {
   local pat="$1"; shift
-  tr '\n' '\0' | xargs -0 grep -l -I -F "$@" -e "$pat" -- /dev/null 2>/dev/null || true
+  tr '\n' '\0' | xargs -0 grep -l -a -F "$@" -e "$pat" -- /dev/null 2>/dev/null || true
 }
 # 1ファイルに対する存在判定
-fgrep_q() { grep -q -I -E "$@" 2>/dev/null; }
+fgrep_q() { grep -q -a -E "$@" 2>/dev/null; }
 # TSV を空欄を保ったまま read するための変換。IFS=$'\t' はタブを空白類として扱い連続タブを 1 区切りに潰す
 # （空欄で後続の列がずれる）ため、空白類でない US（0x1f）に置き換えて IFS="$US" で読む
 US=$'\037'
@@ -625,7 +840,7 @@ build_deps() {
             | select(.value | type == "object" and has("version")) ] | .[] | [ "npm", .key, .value.version, $src ] )
         | @tsv' "$f" 2>/dev/null >>"$DEPS_TSV" || record_error "§15" "lockfile_parse_failed:$f"
     else
-      awk -v src="$f" '
+      ZES_V_SRC="$f" awk 'BEGIN { src = ENVIRON["ZES_V_SRC"] } 
         /"node_modules\/[^"]+": *\{/ { n=$0; sub(/.*node_modules\//,"",n); sub(/".*/,"",n); want=1
           if ($0 ~ /"version": *"/) { v=$0; sub(/.*"version": *"/,"",v); sub(/".*/,"",v); print "npm\t" n "\t" v "\t" src; want=0 }
           next }
@@ -637,7 +852,7 @@ build_deps() {
   #   Berry の resolution: "keyv@npm:6.0.0" があればそれを優先（ブロック末尾でまとめて出力）
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    text_lines "$f" | awk -v src="$f" '
+    text_lines "$f" | ZES_V_SRC="$f" awk 'BEGIN { src = ENVIRON["ZES_V_SRC"] } 
       function pname(spec,   at, t, n0) {   # "name@range" → name（range が npm:<target> なら target の名前）
         gsub(/"/, "", spec)
         at = (spec ~ /^@/) ? index(substr(spec, 2), "@") + 1 : index(spec, "@")
@@ -659,7 +874,7 @@ build_deps() {
   #   v6+: "/name@1.2.3:" / "name@1.2.3(peer@x):"、v5: "/name/1.2.3:" / "/@scope/name/1.2.3:" / "/name/1.2.3_peer@x:"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    text_lines "$f" | awk -v src="$f" '
+    text_lines "$f" | ZES_V_SRC="$f" awk 'BEGIN { src = ENVIRON["ZES_V_SRC"] } 
       /^  ['"'"'"]?\/(@[^\/ ]+\/)?[^\/@ ]+\/[0-9][^:]*['"'"'"]?:/ {
         s=$0; sub(/^  /,"",s); gsub(/['"'"'"]/,"",s); sub(/^\//,"",s); sub(/:.*$/,"",s)
         k = 0; while (match(substr(s, k + 1), /\//)) k += RSTART
@@ -688,7 +903,7 @@ build_deps() {
   # pypi: requirements*.txt / constraints*.txt
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    text_lines "$f" | awk -v src="$f" '
+    text_lines "$f" | ZES_V_SRC="$f" awk 'BEGIN { src = ENVIRON["ZES_V_SRC"] } 
       { line=$0; sub(/#.*/,"",line); gsub(/[ \t]/,"",line) }
       line ~ /^[A-Za-z0-9][A-Za-z0-9._-]*(\[[^]]*\])?===?[^;,]+/ {
         n=line; sub(/(\[[^]]*\])?===?.*/,"",n); v=line; sub(/^[^=]*===?/,"",v); sub(/[;,].*/,"",v)
@@ -697,7 +912,7 @@ build_deps() {
   # pypi: poetry.lock / uv.lock / pdm.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    text_lines "$f" | awk -v src="$f" '
+    text_lines "$f" | ZES_V_SRC="$f" awk 'BEGIN { src = ENVIRON["ZES_V_SRC"] } 
       /^\[\[package\]\]/ { n=""; next }
       /^name = "/ { n=$0; sub(/^name = "/,"",n); sub(/".*/,"",n); n=tolower(n); gsub(/[-_.]+/,"-",n); next }
       /^version = "/ && n!="" { v=$0; sub(/^version = "/,"",v); sub(/".*/,"",v); print "pypi\t" n "\t" v "\t" src; n="" }' >>"$DEPS_TSV"
@@ -735,7 +950,7 @@ build_deps() {
   # cargo: Cargo.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    text_lines "$f" | awk -v src="$f" '
+    text_lines "$f" | ZES_V_SRC="$f" awk 'BEGIN { src = ENVIRON["ZES_V_SRC"] } 
       /^\[\[package\]\]/ { n=""; next }
       /^name = "/ { n=$0; sub(/^name = "/,"",n); sub(/".*/,"",n); next }
       /^version = "/ && n!="" { v=$0; sub(/^version = "/,"",v); sub(/".*/,"",v); print "cargo\t" n "\t" v "\t" src; n="" }' >>"$DEPS_TSV"
@@ -743,13 +958,13 @@ build_deps() {
   # go: go.sum
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    text_lines "$f" | awk -v src="$f" 'NF >= 2 { v=$2; sub(/\/go\.mod$/,"",v); print "go\t" $1 "\t" v "\t" src }' >>"$DEPS_TSV"
+    text_lines "$f" | ZES_V_SRC="$f" awk 'BEGIN { src = ENVIRON["ZES_V_SRC"] } NF >= 2 { v=$2; sub(/\/go\.mod$/,"",v); print "go\t" $1 "\t" v "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^go\.sum$')
   # ruby: Gemfile.lock
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     # プラットフォーム付き（nokogiri (1.16.0-x86_64-linux)）はバージョン部分のみで比較する
-    text_lines "$f" | awk -v src="$f" '/^    [A-Za-z0-9_.-]+ \([0-9][^)]*\)$/ { n=$1; v=$2; gsub(/[()]/,"",v); sub(/-[A-Za-z].*$/,"",v); print "gem\t" n "\t" v "\t" src }' >>"$DEPS_TSV"
+    text_lines "$f" | ZES_V_SRC="$f" awk 'BEGIN { src = ENVIRON["ZES_V_SRC"] } /^    [A-Za-z0-9_.-]+ \([0-9][^)]*\)$/ { n=$1; v=$2; gsub(/[()]/,"",v); sub(/-[A-Za-z].*$/,"",v); print "gem\t" n "\t" v "\t" src }' >>"$DEPS_TSV"
   done < <(files_named '^Gemfile\.lock$')
   # packagist: composer.lock
   while IFS= read -r f; do
@@ -761,6 +976,30 @@ build_deps() {
       record_error "§15" "jq_unavailable:$f"
     fi
   done < <(files_named '^composer\.lock$')
+  # npm: bun.lock（JSONC。"packages": { "<名前>": ["<実名>@<版>", …] }。npm エイリアスは実名で照合）
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if [ "$HAVE_JQ" -eq 1 ]; then
+      jsonc_to_json "$f" | jq -r --arg src "$f" '(.packages // {}) | if type == "object" then .[] else empty end
+          | if type == "array" then .[0] else empty end | strings | capture("^(?<n>@?[^@]+)@(?<v>.+)$") | ["npm", .n, .v, $src] | @tsv' \
+        2>/dev/null >>"$DEPS_TSV" || record_error "§15" "lockfile_parse_failed:$f"
+    else
+      record_error "§15" "jq_unavailable:$f"
+    fi
+  done < <(files_named '^bun\.lock$')
+  # npm: deno.lock（v3: packages.npm、v4 以降: npm。キーは "<名前>@<版>"、"_" 以降は peer 接尾辞）
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if [ "$HAVE_JQ" -eq 1 ]; then
+      jq -r --arg src "$f" '[(.npm // {}), (.packages.npm? // {})] | map(select(type == "object") | keys[]) | .[]
+          | capture("^(?<n>@?[^@]+)@(?<v>[^_]+)") | ["npm", .n, .v, $src] | @tsv' "$f" 2>/dev/null >>"$DEPS_TSV" \
+        || record_error "§15" "lockfile_parse_failed:$f"
+    else
+      record_error "§15" "jq_unavailable:$f"
+    fi
+  done < <(files_named '^deno\.lock$')
+  # bun.lockb（バイナリ形式）は解析しない（照合していないことを errors[] に残す）
+  while IFS= read -r f; do [ -n "$f" ] && record_error "§15" "lockfile_unparsed:$f"; done < <(files_named '^bun\.lockb$')
   sort -u -o "$DEPS_TSV" "$DEPS_TSV"
 }
 
@@ -853,11 +1092,14 @@ intel_files() {
   elif [ -s "$TMP_DIR/intel_sha.tsv" ]; then
     cut -f3 "$TMP_DIR/intel_sha.tsv" | sort -u >"$TMP_DIR/intel_sha.lst"
     # sha256sum に一括で渡し、既知ハッシュと一致した行だけを残す（ファイル内容は出力しない）
-    tr '\n' '\0' <"$FILES_LIST" | xargs -0 sha256sum -- 2>/dev/null \
-      | awk 'NR==FNR {want[$1]=1; next}
-          # ファイル名に \ を含む行は GNU sha256sum が先頭に "\" を付け、名前の \ を \\ にエスケープする
-          { esc = 0; if (substr($0, 1, 1) == "\\") { esc = 1; $0 = substr($0, 2) } }
-          ($1 in want) { h=$1; sub(/^[0-9a-f]+  /,""); if (esc) { gsub(/\\\\/, "\001"); gsub(/\001/, "\\") } print h "\t" $0 }' "$TMP_DIR/intel_sha.lst" - \
+    #   -z（NUL 区切り・ファイル名のエスケープなし）を使う。名前の \ / 改行 / CR を sha256sum がエスケープすると
+    #   パスが変わるため。-z に対応しない sha256sum（busybox 等）は 1 ファイルずつ標準入力から計算する
+    if printf '' | sha256sum -z >/dev/null 2>&1; then
+      tr '\n' '\0' <"$FILES_LIST" | xargs -0 sha256sum -z -- 2>/dev/null | tr '\0' '\n'
+    else
+      while IFS= read -r f; do printf '%s  %s\n' "$(sha256_file "$f")" "$f"; done <"$FILES_LIST"
+    fi | awk 'NR==FNR {want[$1]=1; next}
+          ($1 in want) { h=$1; sub(/^[0-9a-f]+ [ *]/,""); print h "\t" $0 }' "$TMP_DIR/intel_sha.lst" - \
       | while IFS=$'\t' read -r h f; do
           IFS=$'\t' read -r camp sev _ < <(grep -F -- "$h" "$TMP_DIR/intel_sha.tsv" | head -n1)
           critical "$camp" "$f" "既知の悪性ファイル（SHA-256 一致）"
@@ -930,13 +1172,14 @@ intel_extensions() {
         done < <({ extension_manifests | sed -E 's#/manifest\.json$##'; files_path "/Extensions/${id}/" | sed -E "s#(/Extensions/${id})/.*#\1#"; } | grep -E "/Extensions/${id}(/[^/]+)?$" | sort -u)
         ;;
       vscode|openvsx|cursor|windsurf)
-        for d in "$HOME_DIR"/.vscode/extensions/"$id"-[0-9]* "$HOME_DIR"/.vscode-server/extensions/"$id"-[0-9]* "$HOME_DIR"/.cursor/extensions/"$id"-[0-9]* "$HOME_DIR"/.windsurf/extensions/"$id"-[0-9]* $(files_path "/extensions/${id}-[0-9][^/]*/package\.json$" | sed -E 's#/package\.json$##' | tr '\n' ' '); do
-          [ -d "$d" ] || continue
+        while IFS= read -r d; do
+          [ -n "$d" ] && [ -d "$d" ] || continue
           ver="${d##*/${id}-}"; ver="${ver%%-*}"
           hit=1
           if [ -n "$bads" ]; then hit=0; local b; for b in ${bads//,/ }; do version_matches_spec "$ver" "$b" && hit=1; done; fi
           [ "$hit" -eq 1 ] && lvl_emit "$sev" "$camp" "$d" "悪性・侵害が報告された IDE 拡張（${id} ${ver}）"
-        done
+        done < <(for d in "$HOME_DIR"/.vscode/extensions/"$id"-[0-9]* "$HOME_DIR"/.vscode-server/extensions/"$id"-[0-9]* "$HOME_DIR"/.cursor/extensions/"$id"-[0-9]* "$HOME_DIR"/.windsurf/extensions/"$id"-[0-9]*; do printf '%s\n' "$d"; done
+                 files_path "/extensions/${id}-[0-9][^/]*/package\.json$" | sed -E 's#/package\.json$##')
         ;;
     esac
   done < <(intel_jq '.intel.extensions[]? | .campaign as $c | .eco as $e | (.severity // "HIGH") as $s | ((.bad_versions // []) | join(",")) as $b | (.ids // [])[] | [$c, $e, $s, ., $b] | @tsv')
@@ -996,7 +1239,7 @@ intel_host_processes() {
   local camp name
   while IFS=$'\t' read -r camp name; do
     [ -n "$name" ] || continue
-    awk -v n="$name" '{c=$2; sub(/.*\//,"",c); if (c==n) print $1}' "$TMP_DIR/ps.txt" | while IFS= read -r pid; do
+    ZES_V_N="$name" awk 'BEGIN { n = ENVIRON["ZES_V_N"] } {c=$2; sub(/.*\//,"",c); if (c==n) print $1}' "$TMP_DIR/ps.txt" | while IFS= read -r pid; do
       critical "$camp" "/proc/$pid" "既知のマルウェアのプロセス名（${name}、pid ${pid}）"
     done
   done < <(intel_jq '.intel.host[]? | .campaign as $c | (.process_names // [])[] | [$c, .] | @tsv')
@@ -1095,7 +1338,9 @@ check_s1() {
   done < <(read_ioc '.markers')
   host_enabled || { log_info "ホスト検査は無効（ZES_HOST_CHECKS=0）"; return 0; }
   while IFS= read -r m; do
+    local IFS=$'\n'
     for f in $m; do [ -e "$f" ] && critical "" "$f" "侵害マーカーを検出（$m）"; done
+    unset IFS
   done < <(read_ioc '.markers')
   if command -v ps >/dev/null 2>&1; then
     ps axww -o pid= -o command= 2>/dev/null >"$TMP_DIR/ps.txt" || record_error "§1" "ps_failed"
@@ -1134,16 +1379,30 @@ check_s1() {
 }
 
 # §2 Python/Node フック
+# 標準の .pth の import 行（行全体で一致したものだけを許可）
+PTH_SAFE_RE='[[:space:]]*import[[:space:]]+_virtualenv[[:space:]]*'
+PTH_SAFE_RE+="|import os; var = 'SETUPTOOLS_USE_DISTUTILS'; enabled = os\.environ\.get\(var, '(local|stdlib)'\) == 'local'; enabled and __import__\('_distutils_hack'\)\.add_shim\(\); *"
+PTH_SAFE_RE+='|[[:space:]]*import[[:space:]]+(__editable___[A-Za-z0-9_]+_finder|_editable_impl_[A-Za-z0-9_]+)[[:space:]]*(;[[:space:]]*(__editable___[A-Za-z0-9_]+_finder|_editable_impl_[A-Za-z0-9_]+)\.install\([^()]*\)[[:space:]]*)?'
+# package.json のライフサイクルスクリプト（install 系と prepare 系。prepare は git 依存の取得時・npm install 時にも実行される）
+PKG_HOOK_RE='^(pre|post)?(install|prepare)$'
 check_s2() {
   log_section "§2" "Python/Nodeフック"
   local f
   while IFS= read -r f; do [ -n "$f" ] && critical "litellm-oct2026" "$f" "悪性フックファイル（${f##*/}）を検出"; done < <(files_named '^cook\.(pth|py)$')
   while IFS= read -r f; do [ -n "$f" ] && high "litellm-oct2026" "$f" "Python起動時自動実行フック（${f##*/}）"; done < <(files_named '^(sitecustomize|usercustomize)\.py$')
-  # .pth の import 行（起動時実行）に難読化・通信・実行が伴うもの
+  # .pth の import 行は Python 起動のたびに exec される。標準の形（virtualenv の _virtualenv、setuptools の
+  # distutils-precedence、PEP 660 editable の __editable___*_finder / _editable_impl_*）以外の import 行は MEDIUM、
+  # 難読化・通信・実行（exec/eval/compile/os.system/popen/getattr/__import__ 等）を伴うものは HIGH
+  local pthl
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if fgrep_q '^[[:space:]]*import[[:space:]]' "$f" && fgrep_q '(b64decode|exec\(|subprocess|urllib|socket|__import__)' "$f"; then
-      high "litellm-oct2026" "$f" ".pth ファイルに起動時実行コード（import + exec/通信）"
+    pthl="$(text_lines "$f" | grep -a -E '^[[:space:]]*import[[:space:]]' \
+      | grep -a -v -x -E "$PTH_SAFE_RE")"
+    [ -n "$pthl" ] || continue
+    if printf '%s\n' "$pthl" | grep -q -a -E '(^|[^A-Za-z0-9_])(exec|eval|compile|getattr|popen|system|__import__)[[:space:]]*\(|b64decode|subprocess|urllib|socket|fromhex|marshal|zlib|codecs|pickle|ctypes|requests'; then
+      high "litellm-oct2026" "$f" ".pth ファイルに起動時実行コード（import + exec/eval/system/通信）"
+    else
+      medium "litellm-oct2026" "$f" ".pth ファイルに起動時に実行される import 行（標準の virtualenv / editable 形式以外。内容を確認）"
     fi
   done < <(files_named '\.pth$')
   # PYTHONSTARTUP
@@ -1170,16 +1429,20 @@ check_s2() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     local scripts=""
+    local pq='(.scripts // {}) | if type == "object" then to_entries[] | select(.key | test($re)) | .value | tostring else empty end'
     if [ "$HAVE_JQ" -eq 1 ]; then
-      scripts="$(jq -r '(.scripts // {}) | to_entries[] | select(.key | test("^(pre|post)?install$")) | .value' "$f" 2>/dev/null)"
+      # 厳密な JSON として読めなければ（BOM・末尾カンマ等）JSONC として読み直し、それでも駄目なら grep で拾う
+      scripts="$(jq -r --arg re "$PKG_HOOK_RE" "$pq" "$f" 2>/dev/null)" \
+        || scripts="$(jsonc_to_json "$f" | jq -r --arg re "$PKG_HOOK_RE" "$pq" 2>/dev/null)" \
+        || scripts="$(grep -a -E '"(pre|post)?(install|prepare)"[[:space:]]*:' "$f" 2>/dev/null)"
     else
-      scripts="$(grep -E '"(pre|post)?install"[[:space:]]*:' "$f" 2>/dev/null)"
+      scripts="$(grep -a -E '"(pre|post)?(install|prepare)"[[:space:]]*:' "$f" 2>/dev/null)"
     fi
     [ -n "$scripts" ] || continue
     if printf '%s' "$scripts" | grep -q -E '(curl|wget|bash|sh -c|base64|eval|node -e|\.mjs|https?://)'; then
-      high "" "$f" "install ライフサイクルスクリプトに不審なコマンド"
+      high "" "$f" "install / prepare ライフサイクルスクリプトに不審なコマンド"
     elif [[ "$f" != */node_modules/* ]]; then
-      medium "" "$f" "install ライフサイクルスクリプトが定義されています（ignore-scripts 推奨）"
+      medium "" "$f" "install / prepare ライフサイクルスクリプトが定義されています（ignore-scripts 推奨）"
     fi
   done < <(files_named '^package\.json$')
   return 0
@@ -1238,14 +1501,14 @@ php_status() {
   case "$suf" in ''|[-+~]*) ;; *) echo unparsed; return 0 ;; esac
   br="$((10#$maj)).$((10#$min))"
   if read_ioc '.php2shell_distro.older_branches' | grep -q -x -F -- "$br"; then echo vulnerable; return 0; fi
-  fx="$(read_ioc '.php2shell_distro.upstream_fixed' | awk -F. -v b="$br" '$1 "." $2 == b { print $3; exit }')"
+  fx="$(read_ioc '.php2shell_distro.upstream_fixed' | ZES_V_B="$br" awk -F. 'BEGIN { b = ENVIRON["ZES_V_B"] } $1 "." $2 == b { print $3; exit }')"
   [ -n "$fx" ] || { echo unknown_branch; return 0; }
   if [ "$((10#$pat))" -lt "$fx" ]; then echo vulnerable; else echo fixed; fi
 }
 
 # deb_version_lt A B … Debian のバージョン順序（epoch:upstream-revision、~ は空より前）で A < B なら真
 deb_version_lt() {
-  awk -v a="$1" -v b="$2" '
+  ZES_V_A="$1" ZES_V_B="$2" awk 'BEGIN { a = ENVIRON["ZES_V_A"]; b = ENVIRON["ZES_V_B"] } 
     function ord(c) { if (c == "~") return -1; if (c ~ /[A-Za-z]/) return O[c]; return O[c] + 256 }
     function isd(c) { return c ~ /^[0-9]$/ }
     function vrc(x, y,   cx, cy, dx, dy) {
@@ -1277,8 +1540,10 @@ os_release_id() {
   local f
   for f in "$1/etc/os-release" "$1/usr/lib/os-release"; do
     [ -f "$f" ] || continue
-    awk -F= '$1 == "ID" || $1 == "VERSION_ID" { v = $2; gsub(/^["\047]|["\047]$/, "", v); r[$1] = v }
-      END { print r["ID"] "\t" r["VERSION_ID"] }' "$f" 2>/dev/null
+    # 検査ルート内のイメージ展開物はルート外（/proc 等）を指すリンクを読まない
+    [ -z "$1" ] || in_root_regular "$f" || continue
+    text_lines "$f" | awk -F= '$1 == "ID" || $1 == "VERSION_ID" { v = $2; gsub(/^["\047]|["\047]$/, "", v); r[$1] = v }
+      END { print r["ID"] "\t" r["VERSION_ID"] }' 2>/dev/null
     return 0
   done
   printf '\t\n'
@@ -1369,7 +1634,7 @@ check_s4() {
   done < <(detect_service_version '(^|[[:space:]/"=])php' | awk -F'\t' '{ v = $1; sub(/^[^0-9]*/, "", v); if (v != "") print v "\t" $2 }')  # latest 等の浮動タグは下の FROM 検査で扱う
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    ver="$(grep -E '^php[[:space:]]+[0-9]' "$f" | head -n1 | awk '{print $2}')"
+    ver="$(text_lines "$f" | grep -E '^php[[:space:]]+[0-9]' | head -n1 | awk '{print $2}')"
     [ -n "$ver" ] && php_judge "$ver" "$f" upstream
   done < <(files_named '^\.tool-versions$')
   while IFS= read -r f; do
@@ -1519,10 +1784,22 @@ emudhra_os_packages() {
   # dpkg（Debian / Ubuntu / Devuan）: /var/lib/dpkg/status。ROOT 内の同名ファイル（コンテナイメージ展開物）も対象
   while IFS= read -r f; do
     [ -f "$f" ] || continue
-    v="$(awk '/^Package: ca-certificates$/ {p=1; next} p && /^Version:/ {print $2; exit} /^$/ {p=0}' "$f")"
+    # 段落（パッケージ）単位で読み、Status がインストール済みのものだけを対象にする（削除済み・config-files は除く。§4 と同じ）
+    v="$(awk 'BEGIN { RS = "" } {
+        p = ""; ver = ""; st = ""
+        n = split($0, L, "\n")
+        for (i = 1; i <= n; i++) {
+          if (L[i] ~ /^Package: /) p = substr(L[i], 10)
+          else if (L[i] ~ /^Version: /) ver = substr(L[i], 10)
+          else if (L[i] ~ /^Status: /) st = substr(L[i], 9) }
+        if (p != "ca-certificates") next
+        if (st !~ /installed$/ || st ~ /not-installed|config-files/) next
+        print ver; exit }' "$f" 2>/dev/null)"
     [ -n "$v" ] || continue
     local min_ub; min_ub="$(read_ioc '.emudhra.os_ca_certificates.ubuntu_min_upstream')"
-    if [[ "$v" == *ubuntu* ]]; then
+    # ベンダーは同じイメージの os-release から判定する（Ubuntu の SRU 版 20260601~24.04.1 は "ubuntu" を含まない）
+    local osid=""; IFS=$'\t' read -r osid _ < <(os_release_id "${f%/var/lib/dpkg/status}")
+    if [[ "$v" == *ubuntu* ]] || [ "$osid" = "ubuntu" ]; then
       [ "${v:0:8}" -lt "${min_ub:-20260816}" ] 2>/dev/null && high "$camp" "$f" "ca-certificates ${v}（Ubuntu）は eMudhra 侵害 CA を含む（修正版 ${min_ub}ubuntu0.*）"
     elif ! debian_ca_fixed "$v"; then
       high "$camp" "$f" "ca-certificates ${v}（Debian 系）は eMudhra 侵害 CA を含む（修正版 20250419~deb12u2 / 20250419+deb13u1 / 20260816+nmu1）"
@@ -1561,8 +1838,9 @@ emudhra_runtimes() {
   done < <(files_named '^(\.nvmrc|\.node-version)$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    v="$(grep -E '^nodejs[[:space:]]+' "$f" | awk '{print $2}' | head -n1)"; [ -n "$v" ] && judge "Node.js" "$v" "$f" "${nfix[@]}"
-    v="$(grep -E '^deno[[:space:]]+' "$f" | awk '{print $2}' | head -n1)"; [ -n "$v" ] && judge "Deno" "$v" "$f" "${dfix[@]}"
+    # CRLF の .tool-versions でも版を読めるよう text_lines で正規化する
+    v="$(text_lines "$f" | grep -E '^nodejs[[:space:]]+' | awk '{print $2}' | head -n1)"; [ -n "$v" ] && judge "Node.js" "$v" "$f" "${nfix[@]}"
+    v="$(text_lines "$f" | grep -E '^deno[[:space:]]+' | awk '{print $2}' | head -n1)"; [ -n "$v" ] && judge "Deno" "$v" "$f" "${dfix[@]}"
   done < <(files_named '^\.tool-versions$')
   while IFS=$'\t' read -r v f; do judge "Node.js" "${v#v}" "$f" "${nfix[@]}"; done < <(detect_service_version '(^|[[:space:]/"=])node')
   while IFS=$'\t' read -r v f; do judge "Deno" "${v#v}" "$f" "${dfix[@]}"; done < <(detect_service_version 'denoland/deno')
@@ -1582,21 +1860,31 @@ emudhra_runtimes() {
   return 0
 }
 
+# AI エージェント/エディタの指示ファイル（§7 / §41）
+#   .cursorrules / CLAUDE.md / CLAUDE.local.md / AGENTS.md / GEMINI.md / copilot-instructions.md / .windsurfrules /
+#   .clinerules（ファイルまたはディレクトリ配下）/ .cursor/rules/* / .github/instructions/* / .claude/**/*.md
+ai_instruction_files() {
+  files_named '^(\.cursorrules|CLAUDE\.md|CLAUDE\.local\.md|AGENTS\.md|GEMINI\.md|copilot-instructions\.md|\.windsurfrules|\.clinerules)$'
+  files_path '/\.cursor/rules/[^/]+$|/\.clinerules/.+|/\.github/instructions/.+|/\.claude/(.+/)?[^/]+\.md$'
+}
+
 # §7 AI/エディタ設定（不可視文字・BiDi・ホモグリフ、Git hooks、runOn: folderOpen）
 check_s7() {
   log_section "§7" "AI/エディタ"
   local f
-  local inv=$'\xe2\x80[\x8b-\x8f\xaa-\xae]|\xe2\x81[\xa0-\xa4\xa6-\xa9]|\xf3\xa0[\x80-\x81][\x80-\xbf]'
+  # 不可視文字: U+200B–200F・U+202A–202E・U+2066–2069・タグ文字（U+E0000–E007F）・異体字セレクタ（U+FE00–FE0D、
+  # U+E0100–E01EF、U+FE00–FE0F の 2 連続以上。絵文字の表示用 U+FE0E/FE0F の単独は対象外）による文字列の埋め込み
+  local inv=$'\xe2\x80[\x8b-\x8f\xaa-\xae]|\xe2\x81[\xa0-\xa4\xa6-\xa9]|\xf3\xa0[\x80-\x81][\x80-\xbf]|\xef\xb8[\x80-\x8d]|\xf3\xa0[\x84-\x87][\x80-\xbf]|\xef\xb8[\x80-\x8f]\xef\xb8[\x80-\x8f]'
   local cyr=$'[A-Za-z][\xd0\xd1][\x80-\xbf]|[\xd0\xd1][\x80-\xbf][A-Za-z]|[A-Za-z]\xce[\x91-\xbf]|\xce[\x91-\xbf][A-Za-z]'
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -q -E -- "$inv" "$f" 2>/dev/null && high "" "$f" "AI指示ファイルに不可視文字/Unicode BiDi 制御文字（U+200B–200F, U+202A–202E, U+2066–2069, タグ文字）"
-    grep -q -E -- "$cyr" "$f" 2>/dev/null && medium "" "$f" "AI指示ファイルにラテン文字と混在するキリル/ギリシャ文字（ホモグリフ疑い）"
-  done < <(files_named '^(\.cursorrules|CLAUDE\.md|copilot-instructions\.md)$'; files_path '/\.cursor/rules/[^/]+$')
-  # Git hooks（.git/hooks の非 sample ファイル）
+    grep -q -a -E -- "$inv" "$f" 2>/dev/null && high "" "$f" "AI指示ファイルに不可視文字/Unicode BiDi 制御文字（U+200B–200F, U+202A–202E, U+2066–2069, タグ文字, 異体字セレクタ）"
+    grep -q -a -E -- "$cyr" "$f" 2>/dev/null && medium "" "$f" "AI指示ファイルにラテン文字と混在するキリル/ギリシャ文字（ホモグリフ疑い）"
+  done < <(ai_instruction_files)
+  # Git hooks（検査ルート直下・入れ子の .git〔gitdir: ファイル・worktree の共有側を含む〕の hooks の非 sample ファイル）
   local hookdir
-  for hookdir in "$ROOT/.git/hooks"; do
-    [ -d "$hookdir" ] || continue
+  while IFS= read -r hookdir; do
+    [ -n "$hookdir" ] && [ -d "$hookdir" ] || continue
     for f in "$hookdir"/*; do
       [ -f "$f" ] || continue
       case "$f" in *.sample) continue ;; esac
@@ -1606,7 +1894,7 @@ check_s7() {
         medium "" "$f" "有効な Git hook が存在します（内容を目視確認）"
       fi
     done
-  done
+  done <"$GIT_HOOKS_LIST"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     fgrep_q '"runOn"[[:space:]]*:[[:space:]]*"folderOpen"' "$f" && high "mcp-poisoning" "$f" "フォルダを開くだけで自動実行されるタスク（runOn: folderOpen）"
@@ -1714,7 +2002,7 @@ check_s11() {
 check_s12() {
   log_section "§12" "ワクチン3点"
   local hit
-  hit=0; for f in "$HOME_DIR/.npmrc" "$ROOT/.npmrc"; do [ -f "$f" ] && fgrep_q '^[[:space:]]*ignore-scripts[[:space:]]*=[[:space:]]*true' "$f" && hit=1; done
+  hit=0; for f in "$HOME_DIR/.npmrc" "$RP/.npmrc"; do [ -f "$f" ] && { [ "$f" = "$HOME_DIR/.npmrc" ] || in_root_regular "$f"; } && fgrep_q '^[[:space:]]*ignore-scripts[[:space:]]*=[[:space:]]*true' "$f" && hit=1; done
   host_enabled && [ "${npm_config_ignore_scripts:-${NPM_CONFIG_IGNORE_SCRIPTS:-}}" = "true" ] && hit=1
   [ "$hit" -eq 1 ] && safe "npm ignore-scripts=true" || medium "" "$HOME_DIR/.npmrc" "npm の ignore-scripts=true が未設定"
   hit=0; host_enabled && [ "${PYTHONNOUSERSITE:-}" = "1" ] && hit=1
@@ -1871,6 +2159,7 @@ mcp_config_files() {
 #   文字列の外側にある // 行コメント・/* */ ブロックコメント・閉じ括弧直前のカンマを除去する（文字列内はそのまま）
 jsonc_to_json() {
   awk 'BEGIN { RS = "\001" }
+    NR == 1 { sub(/^\357\273\277/, "") }   # UTF-8 BOM（VS Code の JSONC パーサは受け付ける）
     { n = length($0); ins = 0; esc = 0; pc = 0
       for (i = 1; i <= n; i++) {
         ch = substr($0, i, 1)
@@ -2040,6 +2329,20 @@ codex_toml_mcp_commands() {
         else if (cmd[nm] == "" && !(nm in hasurl)) print "?no_command:" nm } }'
 }
 
+# MCP / エージェント設定の command + args（空白区切りの 1 行）で HIGH とするもの（大文字小文字を区別しない）
+#   curl / wget / base64、シェル（sh・bash・zsh・dash・ksh・fish・ash）の -c（-xc・-lc 等の合成、--norc 等の前置オプション可）、
+#   node / nodejs / bun の -e・--eval・-p・--print、deno eval、python の -c（-Ic 等）、perl / ruby の -e・-E（-ne 等）、
+#   php -r、osascript / lua の -e、pwsh / powershell の -c・-Command・-e・-enc・-EncodedCommand、cmd /c・/k
+MCP_OPTS='([[:space:]]+-[^[:space:]]*)*[[:space:]]+'
+MCP_DANGER_RE="(^|[[:space:]\"/])(curl|wget)([[:space:]\"]|\$)|base64"
+MCP_DANGER_RE+="|(^|[[:space:]\"/])(ba|z|da|k|a|fi)?sh(\.exe)?${MCP_OPTS}-[a-z]*c[a-z]*([[:space:]]|\$)"
+MCP_DANGER_RE+="|(^|[[:space:]\"/])(node|nodejs|bun)(\.exe)?${MCP_OPTS}(-e|--eval|-p|--print)([[:space:]=]|\$)|(^|[[:space:]\"/])deno(\.exe)?[[:space:]]+eval([[:space:]]|\$)"
+MCP_DANGER_RE+="|(^|[[:space:]\"/])python[0-9.]*(\.exe)?${MCP_OPTS}-[a-z]*c([[:space:]]|\$)"
+MCP_DANGER_RE+="|(^|[[:space:]\"/])(perl|ruby)[0-9.]*(\.exe)?${MCP_OPTS}-[a-z]*e([[:space:]]|\$)"
+MCP_DANGER_RE+="|(^|[[:space:]\"/])php[0-9.]*(\.exe)?${MCP_OPTS}-r([[:space:]]|\$)|(^|[[:space:]\"/])(osascript|lua[0-9.]*)${MCP_OPTS}-e([[:space:]]|\$)"
+MCP_DANGER_RE+="|(^|[[:space:]\"/])(pwsh|powershell)(\.exe)?([[:space:]]+[^[:space:]]+)*[[:space:]]+[-/](c|command|e|ec|enc|encodedcommand)([[:space:]]|\$)"
+MCP_DANGER_RE+="|(^|[[:space:]\"/])cmd(\.exe)?[[:space:]]+/[ck]([[:space:]]|\$)"
+
 check_s17() {
   log_section "§17" "MCP静的ポイズニング"
   local f cmdline
@@ -2057,10 +2360,14 @@ check_s17() {
         || jsonc_to_json "$f" | jq -r "$mcpq" 2>/dev/null \
         || record_error "§17" "mcp_config_parse_failed:$f"
     else
-      grep -E -o '"(command|args)"[[:space:]]*:[[:space:]]*("[^"]*"|\[[^]]*\])' "$f" 2>/dev/null
+      # jq なし: "command" とそれに続く "args" を 1 行に連結する（別々の行のままでは "bash" と "-c" が結び付かない）
+      tr '\n' ' ' <"$f" 2>/dev/null | grep -E -o '"(command|args)"[[:space:]]*:[[:space:]]*("([^"\\]|\\.)*"|\[[^]]*\])' | awk '
+        { v = $0; sub(/^"[a-z]+"[[:space:]]*:[[:space:]]*/, "", v); gsub(/^\[|\]$/, "", v); gsub(/"[[:space:]]*,[[:space:]]*"/, " ", v); gsub(/^[[:space:]]*"|"[[:space:]]*$/, "", v)
+          if ($0 ~ /^"command"/) { if (cur != "") print cur; cur = v } else cur = cur " " v }
+        END { if (cur != "") print cur }'
     fi | while IFS= read -r cmdline; do
-      if printf '%s' "$cmdline" | grep -q -E '(^|[[:space:]"/])(curl|wget)([[:space:]"]|$)|bash -c|sh -c|powershell(\.exe)? .*-(e|enc|encodedcommand)[[:space:]]|node -e|python[0-9.]* -c|base64'; then
-        high "mcp-poisoning" "$f" "MCP/エージェント設定の command/args に危険なコマンド（curl/wget/bash -c/powershell -enc/node -e）"
+      if printf '%s' "$cmdline" | grep -q -i -E -- "$MCP_DANGER_RE"; then
+        high "mcp-poisoning" "$f" "MCP/エージェント設定の command/args に危険なコマンド（curl/wget/シェル -c/インタプリタの -e・--eval/powershell -Command 等）"
       elif printf '%s' "$cmdline" | grep -q -E '(^|[[:space:]"/])(npx|uvx|bunx|pnpm dlx)([[:space:]"]|$)'; then
         medium "mcp-poisoning" "$f" "MCP の command が npx/uvx（実行時に最新版を取得。バージョン固定を確認）"
       fi
@@ -2071,7 +2378,7 @@ check_s17() {
   while IFS= read -r l; do
     [ -n "$l" ] || continue
     t="$(readlink -- "$l" 2>/dev/null)"
-    base="${l#"$ROOT"/}"
+    base="${l#"$RP"/}"
     if printf '%s' "$t" | grep -q -E '(\.claude/|\.mcp\.json|\.cursor/|\.gemini/|\.codex/|\.vscode/settings\.json)'; then
       critical "mcp-poisoning" "$l" "SymJack: シンボリックリンクがエージェント設定（$t）を指しています"
     elif printf '%s' "$base" | grep -q -i -E '(^|/)(vid-|logo\.|readme\.)|^docs/' && [[ "$t" == ../* || "$t" == /* ]]; then
@@ -2115,9 +2422,10 @@ check_s18() {
   local f hit camp pat
   for pat in netioc netioc-legit; do
     [ -s "$TMP_DIR/$pat.pat" ] || continue
-    grep -v -E '/\.(zsh|bash)_history$' "$FILES_LIST" | tr '\n' '\0' | xargs -0 grep -l -I -F -f "$TMP_DIR/$pat.pat" -- /dev/null 2>/dev/null | grep -v '^/dev/null$' | while IFS= read -r f; do
-      hit="$(grep -o -F -f "$TMP_DIR/$pat.pat" -- "$f" 2>/dev/null | sort -u | head -n3 | tr '\n' ' ')"
-      camp="$(grep -F -- "$(printf '%s' "$hit" | awk '{print $1}')" "$TMP_DIR/netioc.tsv" | head -n1 | cut -f2)"
+    # ドメインは大文字小文字を区別しない（NPM-CACHE.COM 等で照合を逃れさせない）。表示する一致文字列は小文字に揃える
+    grep -v -E '/\.(zsh|bash)_history$' "$FILES_LIST" | tr '\n' '\0' | xargs -0 grep -l -a -i -F -f "$TMP_DIR/$pat.pat" -- /dev/null 2>/dev/null | grep -v '^/dev/null$' | while IFS= read -r f; do
+      hit="$(grep -o -a -i -F -f "$TMP_DIR/$pat.pat" -- "$f" 2>/dev/null | tr 'A-Z' 'a-z' | sort -u | head -n3 | tr '\n' ' ')"
+      camp="$(grep -i -F -- "$(printf '%s' "$hit" | awk '{print $1}')" "$TMP_DIR/netioc.tsv" | head -n1 | cut -f2)"
       if [ "$pat" = "netioc" ]; then
         critical "$camp" "$f" "ネットワーク IoC を含むファイル（${hit% }）"
       else
@@ -2128,7 +2436,7 @@ check_s18() {
   local hf
   for hf in "$HOME_DIR/.zsh_history" "$HOME_DIR/.bash_history"; do
     [ -f "$hf" ] && [ ! -L "$hf" ] || continue
-    grep -q -F -f "$TMP_DIR/netioc.pat" -- "$hf" 2>/dev/null && critical "" "$hf" "シェル履歴に C2 ドメイン/IP"
+    grep -q -a -i -F -f "$TMP_DIR/netioc.pat" -- "$hf" 2>/dev/null && critical "" "$hf" "シェル履歴に C2 ドメイン/IP"
     tail -n 5 -- "$hf" 2>/dev/null | grep -q -E '(curl|wget)[^|]*\|[[:space:]]*(ba|z)?sh' && high "" "$hf" "シェル履歴の直近5件に curl|sh 形式の実行"
   done
   return 0
@@ -2178,14 +2486,84 @@ check_s20() {
 
 # GitHub Actions ワークフロー一覧
 workflow_files() { files_path '/\.github/workflows/[^/]+\.ya?ml$'; }
-# ワークフロー本文の正規化（CRLF・BOM 除去、値が次行以降に続くキーを 1 行に畳む）
+# ワークフロー本文の正規化（CRLF・BOM 除去、YAML のノード属性・フロー列の展開、値が次行以降に続くキーを 1 行に畳む）
+#   1 段目（yaml_flatten）:
+#   - ノード属性（アンカー &x・タグ !!str / !tag）を値の先頭とシーケンス項目の先頭から除く（"uses: &co actions/checkout@v4"）
+#   - フロー列（"steps: [ {uses: a}, {uses: b, with: {ref: …}} ]"。複数行にまたがるものを含む）を
+#     1 要素 1 行のブロック列（"  - {uses: a}"）に展開する
+#   - エイリアス（"*x" / "<<: *x"）は参照先を解決しないため "#ZES-YAML-ALIAS" 行を出す（呼び出し側が errors[] に記録）
+#   - ブロックスカラー（run: | 等）の中身はそのまま通す
+#   2 段目:
 #   - ブロックスカラー（"key: >-" / "key: |" 等）: より深くインデントされた後続行を全て空白区切りで連結
 #   - 値が空のキーの後にプレーンスカラーが続く場合（"- uses:" の次行に値）: マッピング/シーケンスでない
 #     より深い後続行を連結（YAML のプレーンスカラーの複数行折り返し）
 #   uses: >-                              - uses:
 #     actions/checkout@v4   → uses: actions/checkout@v4      actions/checkout@v4 → - uses: actions/checkout@v4
-workflow_text() {
+yaml_flatten() {
   text_lines "$1" | awk '
+    function lead(x) { match(x, /^[ \t]*/); return RLENGTH }
+    function props(v) { while (match(v, /^(&[^ \t]+|![^ \t]*)([ \t]+|$)/)) v = substr(v, RLENGTH + 1); return v }
+    function isalias(v) { return v ~ /^\*[^ \t,\]}]+[ \t]*(#.*)?$/ }
+    # 引用符の外側の括弧の深さ（[ { と ] }）
+    function depth(x,   i, c, q, d) {
+      d = 0; q = ""
+      for (i = 1; i <= length(x); i++) { c = substr(x, i, 1)
+        if (q != "") { if (c == "\\" && q == "\"") { i++; continue } if (c == q) q = ""; continue }
+        if (c == "\"" || c == "\047") { q = c; continue }
+        if (c == "#" && (i == 1 || substr(x, i - 1, 1) ~ /[ \t]/)) break
+        if (c == "[" || c == "{") d++; else if (c == "]" || c == "}") d-- }
+      return d }
+    # 引用符の外側の行末コメント（空白 + #）を除く
+    function nocomment(x,   i, c, q) {
+      q = ""
+      for (i = 1; i <= length(x); i++) { c = substr(x, i, 1)
+        if (q != "") { if (c == "\\" && q == "\"") { i++; continue } if (c == q) q = ""; continue }
+        if (c == "\"" || c == "\047") { q = c; continue }
+        if (c == "#" && (i == 1 || substr(x, i - 1, 1) ~ /[ \t]/)) return substr(x, 1, i - 1) }
+      return x }
+    function item(el, ind) {
+      sub(/^[ \t]+/, "", el); sub(/[ \t]+$/, "", el); if (el == "") return
+      el = props(el); if (isalias(el)) print "#ZES-YAML-ALIAS"
+      print ind "- " el }
+    # "[ a, {b: c}, … ]" の最上位の要素を 1 行ずつ出す
+    function flow(body, ind,   i, c, q, d, el) {
+      sub(/^[ \t]*\[/, "", body); sub(/\][ \t]*(#.*)?$/, "", body)
+      d = 0; q = ""; el = ""
+      for (i = 1; i <= length(body); i++) { c = substr(body, i, 1)
+        if (q != "") { el = el c; if (c == "\\" && q == "\"") { i++; el = el substr(body, i, 1); continue } if (c == q) q = ""; continue }
+        if (c == "\"" || c == "\047") { q = c; el = el c; continue }
+        if (c == "[" || c == "{") d++; else if (c == "]" || c == "}") d--
+        if (c == "," && d == 0) { item(el, ind); el = ""; continue }
+        el = el c }
+      item(el, ind) }
+    function value(pre, v, keyind) {
+      v = props(v)
+      if (isalias(v) || pre ~ /<<:[ \t]*$/) print "#ZES-YAML-ALIAS"
+      if (v ~ /^[|>][-+0-9]*[ \t]*(#.*)?$/) { print pre v; inblk = 1; bind = keyind; return }
+      if (v ~ /^\[/) {
+        if (depth(v) > 0) { acc = nocomment(v); apre = pre; aind = keyind; return }
+        print pre; flow(v, sprintf("%" (keyind + 2) "s", "")); return }
+      print pre v }
+    {
+      line = $0
+      if (inblk) { if (line ~ /^[ \t]*$/ || lead(line) > bind) { print line; next } inblk = 0 }
+      if (acc != "") {
+        t = nocomment(line); sub(/^[ \t]+/, "", t); acc = acc " " t
+        if (depth(acc) <= 0) { print apre; flow(acc, sprintf("%" (aind + 2) "s", "")); acc = "" }
+        next }
+      pre = ""
+      if (match(line, /^[ \t]*-([ \t]+|$)/)) {
+        pre = substr(line, 1, RLENGTH); rest = substr(line, RLENGTH + 1); rest = props(rest)
+        if (isalias(rest)) { print "#ZES-YAML-ALIAS"; print pre rest; next }
+        line = pre rest }
+      ki = length(pre); if (ki == 0) ki = lead(line)
+      if (match(line, /^[ \t]*(-[ \t]+)?["\047]?[A-Za-z0-9_.$<-]+["\047]?:([ \t]+|$)/)) {
+        value(substr(line, 1, RLENGTH), substr(line, RLENGTH + 1), ki); next }
+      print line }
+    END { if (acc != "") { print apre; flow(acc, sprintf("%" (aind + 2) "s", "")) } }'
+}
+workflow_text() {
+  yaml_flatten "$1" | awk '
     pend != "" {
       if ($0 ~ /^[[:space:]]*$/ || (!blk && $0 ~ /^[[:space:]]*#/)) next
       match($0, /^[[:space:]]*/)
@@ -2211,7 +2589,9 @@ check_s21() {
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if fgrep_q '(^|[^A-Za-z0-9_])pull_request_target([^A-Za-z0-9_]|$)' "$f" && fgrep_q -i 'actions/checkout@' "$f" && fgrep_q '\$\{\{[[:space:]]*secrets\.' "$f"; then
+    # 式の文脈名は大文字小文字を区別しない（${{ SECRETS.X }} / ${{ toJSON(secrets) }} / secrets['X'] も secrets 参照）
+    yaml_flatten "$f" | grep -q -x -F '#ZES-YAML-ALIAS' && record_error "§21" "yaml_alias_unresolved:$f"
+    if fgrep_q '(^|[^A-Za-z0-9_])pull_request_target([^A-Za-z0-9_]|$)' "$f" && fgrep_q -i 'actions/checkout@' "$f" && fgrep_q -i '\$\{\{([^}]*[^A-Za-z0-9_.])?secrets([].[[:space:])]|$)' "$f"; then
       # actions/checkout ステップごとに ref の有無と参照先を判定
       local refs
       refs="$(awk '
@@ -2222,7 +2602,13 @@ check_s21() {
           r = substr(s, RSTART + RLENGTH); sub(/^[[:space:]]*/, "", r)
           if (r ~ /^["\047]/) { q = substr(r, 1, 1); r = substr(r, 2); k = index(r, q); if (k) r = substr(r, 1, k - 1) }
           else sub(/[,}].*$/, "", r)
-          ref = (r ~ /github\.(event\.pull_request\.head|head_ref)/) ? "prhead" : "otherref" }
+          # 正規化: 小文字化・空白除去・添字表記（github.event['"'"'pull_request'"'"']['"'"'head'"'"'] / ["…"]）をドット表記に
+          r = tolower(r); gsub(/[ \t]/, "", r); gsub(/\[["\047]/, ".", r); gsub(/["\047]\]/, "", r)
+          # ベース側の式（base.sha / base.ref / base_ref / github.sha / github.ref / default_branch）だけなら PR 由来ではない
+          t = r; gsub(/\$\{\{(github\.event\.pull_request\.base\.(sha|ref)|github\.base_ref|github\.sha|github\.ref|github\.event\.repository\.default_branch)\}\}/, "", t)
+          if (r ~ /github\.(event\.pull_request\.(head|merge_commit_sha|number)|head_ref|event\.number)|refs\/pull\//) ref = "prhead"
+          else if (index(t, "${{")) ref = "exprref"     # それ以外の式で決まる ref は PR 由来でないと確認できない（最低 HIGH）
+          else ref = "otherref" }
         tolower($0) ~ /^[[:space:]]*(-[[:space:]]+)?(\{([^}#]*,)?[[:space:]]*)?uses:[[:space:]]*["'"'"']?actions\/checkout@/ { flush(); inchk=1; match($0,/^[[:space:]]*/); ind=RLENGTH
           s = $0; sub(/.*actions\/checkout@/, "", s); getref(s); next }
         inchk {
@@ -2236,6 +2622,9 @@ check_s21() {
       fi
       if printf '%s\n' "$refs" | grep -q -x 'noref'; then
         high "ghostaction-oct2026" "$f" "pull_request_target + actions/checkout(refなし) + secrets 参照（ベースブランチの取得だが、後続ステップで PR 由来のコードを扱わないか確認）"
+      fi
+      if printf '%s\n' "$refs" | grep -q -x 'exprref'; then
+        high "ghostaction-oct2026" "$f" "pull_request_target + actions/checkout の ref が式（\${{ … }}）+ secrets 参照（PR 由来の ref でないことを静的に確認できません）"
       fi
     fi
     fgrep_q 'key:.*github\.event\.pull_request\.number' "$f" && high "ghostaction-oct2026" "$f" "actions/cache のキーに PR 番号（キャッシュポイズニング）"
@@ -2324,10 +2713,13 @@ extension_manifests() {
   local p e d
   while IFS= read -r p; do
     e="$(expand_home "$p")"
+    # 空白を含むパス（~/Library/Application Support/…）を分割せず、グロブ文字のみ展開する
+    local IFS=$'\n'
     for d in $e; do
       [ -d "$d" ] || continue
       find "$d" -maxdepth 3 -name manifest.json -type f 2>/dev/null
     done
+    unset IFS
   done < <(read_ioc '.browser_extensions.watch_paths.mac'; read_ioc '.browser_extensions.watch_paths.linux')
   return 0
 }
@@ -2391,7 +2783,7 @@ check_s26() {
       && critical "" "$f" "core.fsmonitor に外部コマンド（git 操作のたびに実行）"
     fgrep_q -i '^[[:space:]]*sshCommand[[:space:]]*=' "$f" && high "" "$f" "core.sshCommand が設定されています"
     fgrep_q -i '^[[:space:]]*hooksPath[[:space:]]*=' "$f" && medium "" "$f" "core.hooksPath が設定されています（フック置き場の付け替え）"
-  done < <(printf '%s\n' "$HOME_DIR/.gitconfig" "$HOME_DIR/.config/git/config" "$ROOT/.git/config"; files_named '^\.gitconfig$')
+  done < <(printf '%s\n' "$HOME_DIR/.gitconfig" "$HOME_DIR/.config/git/config"; cat "$GIT_CFG_LIST"; files_named '^\.gitconfig$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if fgrep_q '(curl|wget)[^|#]*\|[[:space:]]*(ba|z)?sh|eval[[:space:]]+"?\$\((curl|wget)' "$f"; then
@@ -2607,22 +2999,23 @@ check_s34() {
     [ -f "$f" ] && fgrep_q -i '^[[:space:]]*-?-?(proxy|https?_proxy|use_proxy)[[:space:]]*[=[:space:]]' "$f" && high "" "$f" "curl/wget のプロキシ設定（通信傍受の可能性）"
   done
   # npm config get proxy は npm（node ランタイム）を起動するため使用せず、.npmrc を静的に読む
-  for f in "$HOME_DIR/.npmrc" "$ROOT/.npmrc"; do
-    [ -f "$f" ] && fgrep_q -i '^[[:space:]]*(https-)?proxy[[:space:]]*=' "$f" && high "" "$f" "npm のプロキシ設定（レジストリ通信の傍受）"
+  for f in "$HOME_DIR/.npmrc" "$RP/.npmrc"; do
+    [ -f "$f" ] && { [ "$f" = "$HOME_DIR/.npmrc" ] || in_root_regular "$f"; } && fgrep_q -i '^[[:space:]]*(https-)?proxy[[:space:]]*=' "$f" && high "" "$f" "npm のプロキシ設定（レジストリ通信の傍受）"
   done
   local -a ph; mapfile -t ph < <(read_ioc '.protected_hosts')
   local hostsf
-  for hostsf in $(host_enabled && echo /etc/hosts) $(files_named '^hosts$' | tr '\n' ' '); do
-    [ -f "$hostsf" ] || continue
+  # 空白を含むパス（"my etc/hosts" 等）を分割しないよう 1 行ずつ読む
+  while IFS= read -r hostsf; do
+    [ -n "$hostsf" ] && [ -f "$hostsf" ] || continue
     local h
     for h in "${ph[@]}"; do
-      grep -v '^[[:space:]]*#' "$hostsf" | grep -q -E "[[:space:]]$(printf '%s' "$h" | sed 's/\./\\./g')([[:space:]]|$)" \
+      grep -v '^[[:space:]]*#' "$hostsf" | grep -q -i -E "[[:space:]]$(printf '%s' "$h" | sed 's/\./\\./g')([[:space:]]|$)" \
         && high "" "$hostsf" "hosts でレジストリ/GitHub（$h）を上書き"
     done
     network_iocs | cut -f1 | grep -v -E '^[0-9.]+$' | while IFS= read -r h; do
-      grep -v '^[[:space:]]*#' "$hostsf" | grep -q -F -- "$h" && critical "" "$hostsf" "hosts に C2 ドメイン（$h）"
+      grep -v '^[[:space:]]*#' "$hostsf" | grep -q -i -F -- "$h" && critical "" "$hostsf" "hosts に C2 ドメイン（$h）"
     done
-  done
+  done < <(host_enabled && echo /etc/hosts; files_named '^hosts$')
   for f in "$HOME_DIR/.ssh/config"; do
     [ -f "$f" ] && fgrep_q -i '^[[:space:]]*ProxyCommand[[:space:]].*(\bnc\b|ncat|netcat|socat)' "$f" && high "" "$f" "ssh ProxyCommand に nc/socat（通信中継）"
   done
@@ -2706,7 +3099,7 @@ check_s37() {
   if [ "$HAVE_JQ" -eq 1 ]; then
     local ce cp cf cid
     while IFS="$US" read -r cid ce cp cf; do
-      awk -F'\t' -v e="$ce" -v n="$cp" '$1==e && $2==n {print $3"\t"$4}' "$DEPS_TSV" | sort -u | tsv_us | while IFS="$US" read -r v f; do
+      ZES_V_E="$ce" ZES_V_N="$cp" awk -F'\t' 'BEGIN { e = ENVIRON["ZES_V_E"]; n = ENVIRON["ZES_V_N"] } $1==e && $2==n {print $3"\t"$4}' "$DEPS_TSV" | sort -u | tsv_us | while IFS="$US" read -r v f; do
         [ -n "$v" ] && version_lt "$v" "$cf" && high "mcp-poisoning" "$f" "${cp}@${v} は ${cid} の影響範囲（修正版 ${cf}）"
       done
     done < <(jq -r '.mcp_poisoning.mcp_cves[] | select(.package and .fixed) | [.id, .eco, .package, .fixed] | @tsv' "$IOC_FILE" | tsv_us)
@@ -2725,12 +3118,12 @@ check_s38() {
   log_section "§38" "CI/CD大量植え付け"
   local f n
   local th; th="$(read_ioc '.github_actions.secrets_ref_threshold')"; th="${th:-10}"
-  if [ -d "$ROOT/.git" ]; then
+  if [ -n "$ROOT_GITDIR" ]; then
     local since; since="$(( $(now_epoch) - 30*86400 ))"
-    local out
-    if out="$(safe_git log --no-textconv --no-ext-diff --diff-filter=A --since="@$since" --name-only --format='' -- .github/workflows)"; then
-      printf '%s\n' "$out" | sort -u | while IFS= read -r n; do
-        [ -n "$n" ] && medium "ghostaction-oct2026" "$ROOT/$n" "直近30日に新規追加されたワークフロー（作成者・目的を監査）"
+    # パスは -z（NUL 区切り）で受け取る（非 ASCII・引用符を含む名前を C 形式で引用させない）
+    if safe_git log --no-textconv --no-ext-diff --diff-filter=A --since="@$since" --name-only --format='' -z -- .github/workflows >"$TMP_DIR/s38-added.z"; then
+      tr '\0' '\n' <"$TMP_DIR/s38-added.z" | grep -v '^$' | sort -u | while IFS= read -r n; do
+        [ -n "$n" ] && medium "ghostaction-oct2026" "$RP/$n" "直近30日に新規追加されたワークフロー（作成者・目的を監査）"
       done
     else
       record_error "§38" "git_log_failed"
@@ -2738,9 +3131,9 @@ check_s38() {
   fi
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    n="$(grep -o -E 'secrets\.[A-Za-z0-9_]+' "$f" 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+    n="$(grep -o -a -i -E 'secrets\.[A-Za-z0-9_]+' "$f" 2>/dev/null | tr 'A-Z' 'a-z' | sort -u | wc -l | tr -d ' ')"
     [ "${n:-0}" -gt "$th" ] && high "ghostaction-oct2026" "$f" "ワークフローが ${n} 種類の secrets.* を参照（閾値 ${th} 超、一括収集の疑い）"
-    fgrep_q 'toJSON\([[:space:]]*secrets[[:space:]]*\)' "$f" && critical "ghostaction-oct2026" "$f" "toJSON(secrets) で全シークレットを展開"
+    fgrep_q -i 'tojson\([[:space:]]*secrets[[:space:]]*(\.[[:space:]]*\*[[:space:]]*)?\)' "$f" && critical "ghostaction-oct2026" "$f" "toJSON(secrets) で全シークレットを展開"
     fgrep_q '(^|[[:space:];|])(env|printenv)[[:space:]]*(\||>|$)' "$f" && high "ghostaction-oct2026" "$f" "ワークフローで環境変数を一括出力（env/printenv）"
   done < <(workflow_files)
   while IFS= read -r f; do
@@ -2869,10 +3262,12 @@ check_s41() {
   for d in "$HOME_DIR"/Library/Application\ Support/JetBrains/*/plugins/github-copilot-intellij "$HOME_DIR"/.local/share/JetBrains/*/github-copilot-intellij; do
     [ -d "$d" ] && medium "" "$d" "JetBrains 版 Copilot: CVE-2026-50510 の修正版適用を確認"
   done
-  [ -f "$ROOT/git.exe" ] && critical "" "$ROOT/git.exe" "リポジトリルートの git.exe（Windows で IDE/エージェントが自動実行する未パッチ zero-day）"
-  local has_instr=0 has_hook=0 has_agent_hook=0
-  files_named '^(\.cursorrules|CLAUDE\.md|copilot-instructions\.md)$' | grep -q . && has_instr=1
-  [ -d "$ROOT/.git/hooks" ] && find "$ROOT/.git/hooks" -type f ! -name '*.sample' 2>/dev/null | grep -q . && has_hook=1
+  [ -f "$RP/git.exe" ] && critical "" "$RP/git.exe" "リポジトリルートの git.exe（Windows で IDE/エージェントが自動実行する未パッチ zero-day）"
+  local has_instr=0 has_hook=0 has_agent_hook=0 t
+  ai_instruction_files | grep -q . && has_instr=1
+  while IFS= read -r t; do
+    [ -n "$t" ] && find "$t" -type f ! -name '*.sample' 2>/dev/null | grep -q . && has_hook=1
+  done <"$GIT_HOOKS_LIST"
   files_path '/\.(claude|cursor|gemini)/(settings(\.local)?|hooks)\.json$' | grep_l '"hooks"' | grep -q . && has_agent_hook=1
   if [ "$has_instr" -eq 1 ] && [ $(( has_hook + has_agent_hook )) -ge 1 ]; then
     high "" "$ROOT" "AI 指示ファイルと Git/エージェントフックが同居（間接プロンプトインジェクション→フック実行の連鎖）"
@@ -2904,7 +3299,8 @@ check_s42() {
       [ -f "$idd/$vdir/manifest.json" ] || continue
       cur="$(for p in "${dperm[@]}"; do grep -q -F "\"$p\"" "$idd/$vdir/manifest.json" && printf '%s\n' "$p"; done | sort)"
       if [ "$first" -eq 0 ]; then
-        added="$(comm -13 <(printf '%s\n' "$prev" | grep . | sort) <(printf '%s\n' "$cur" | grep . | sort) | tr '\n' ' ')"
+        # comm は使わない（busybox 等に無い）。前版に無く今版にある行
+        added="$(awk 'NR == FNR { if ($0 != "") seen[$0] = 1; next } $0 != "" && !($0 in seen)' <(printf '%s\n' "$prev") <(printf '%s\n' "$cur") | sort -u | tr '\n' ' ')"
         [ -n "${added// /}" ] && high "" "$idd/$vdir/manifest.json" "拡張の更新で危険パーミッションが追加（${added% }）。所有権移転型の悪性アップデート疑い"
       fi
       prev="$cur"; first=0
@@ -2998,9 +3394,9 @@ check_s45() {
   local -a envs; mapfile -t envs < <(read_ioc '.ci_env_vars')
   local th; th="$(read_ioc '.ci_env_harvest_threshold')"; th="${th:-20}"
   printf '%s\n' "${envs[@]}" >"$TMP_DIR/cienv.pat"
-  files_path '\.(m?js|cjs|ts|py|sh|go|rs)$' | tr '\n' '\0' | xargs -0 grep -l -I -F -f "$TMP_DIR/cienv.pat" -- /dev/null 2>/dev/null | while IFS= read -r f; do
+  files_path '\.(m?js|cjs|ts|py|sh|go|rs)$' | tr '\n' '\0' | xargs -0 grep -l -a -F -f "$TMP_DIR/cienv.pat" -- /dev/null 2>/dev/null | while IFS= read -r f; do
     [ -n "$f" ] || continue
-    n="$(grep -o -F -w -f "$TMP_DIR/cienv.pat" -- "$f" 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+    n="$(grep -o -a -F -w -f "$TMP_DIR/cienv.pat" -- "$f" 2>/dev/null | sort -u | wc -l | tr -d ' ')"
     [ "${n:-0}" -ge "$th" ] && high "post-shaihulud" "$f" "CI/クラウド認証情報の環境変数を ${n} 種類参照（一括収集の疑い）"
   done
   files_path '\.(m?js|cjs|ts|py|sh)$' | grep_l '(shai[-_ ]?hulud|miasma|sckit|iron-?worm|PRIVCOLLECT|letters9813)' -i | while IFS= read -r f; do
@@ -3012,7 +3408,7 @@ check_s45() {
 # §46 Git 来歴
 check_s46() {
   log_section "§46" "Git来歴"
-  [ -d "$ROOT/.git" ] || { log_info "Git リポジトリではありません"; return 0; }
+  [ -n "$ROOT_GITDIR" ] || { log_info "Git リポジトリではありません（または .git を解決できません。errors[] を参照）"; return 0; }
   local out n
   # %G? は署名を検証する（gpg.*.program を起動しうる）ため使わない。署名の有無は生のヘッダ（gpgsig）で判定
   out="$(safe_git log -n 200 --no-textconv --no-ext-diff --format='%at%x09%ae%x09%H')" || { record_error "§46" "git_log_failed"; return 0; }
@@ -3021,7 +3417,7 @@ check_s46() {
   raw="$(safe_git log -n 200 --no-textconv --no-ext-diff --pretty=raw)" || { record_error "§46" "git_log_failed"; return 0; }
   local now; now="$(now_epoch)"
   printf '%s\n' "$out" | awk -F'\t' -v now="$now" '$1 >= now-86400 {c[$2]++} END {for (a in c) if (c[a] > 50) print a "\t" c[a]}' | while IFS=$'\t' read -r _ n; do
-    medium "" "$ROOT/.git" "直近24時間に同一作者で ${n} コミット（短時間大量コミット）"
+    medium "" "$RP/.git" "直近24時間に同一作者で ${n} コミット（短時間大量コミット）"
   done
   local total unsigned
   total="$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
@@ -3032,23 +3428,23 @@ check_s46() {
       inhdr && /^$/ { inhdr=0; next }
       inhdr && /^gpgsig(-sha256)? / { print c }' | sort -u)"
   unsigned="$(printf '%s\n' "$out" | ZES_SL="$signed_list" awk -F'\t' 'BEGIN { n=split(ENVIRON["ZES_SL"], a, "\n"); for (i=1; i<=n; i++) s[a[i]]=1 } !($3 in s)' | wc -l | tr -d ' ')"
-  [ "$total" -gt 0 ] && info "" "$ROOT/.git" "直近 ${total} コミット中 ${unsigned} 件が署名なし"
+  [ "$total" -gt 0 ] && info "" "$RP/.git" "直近 ${total} コミット中 ${unsigned} 件が署名なし"
   safe_git for-each-ref --format='%(refname)' refs/notes | while IFS= read -r n; do
-    [ -n "$n" ] && medium "" "$ROOT/.git" "Git notes（${n}）が存在（来歴情報の書き換えに注意）"
+    [ -n "$n" ] && medium "" "$RP/.git" "Git notes（${n}）が存在（来歴情報の書き換えに注意）"
   done
   safe_git for-each-ref --format='%(refname)%09%(objecttype)%09%(*objecttype)' refs/tags | while IFS=$'\t' read -r n t pt; do
-    if [ "$t" = "tag" ] && [ -n "$pt" ] && [ "$pt" != "commit" ]; then high "" "$ROOT/.git" "タグ ${n} がコミット以外（${pt}）を指しています"
-    elif [ "$t" != "tag" ] && [ "$t" != "commit" ]; then high "" "$ROOT/.git" "タグ ${n} がコミット以外（${t}）を指しています"; fi
+    if [ "$t" = "tag" ] && [ -n "$pt" ] && [ "$pt" != "commit" ]; then high "" "$RP/.git" "タグ ${n} がコミット以外（${pt}）を指しています"
+    elif [ "$t" != "tag" ] && [ "$t" != "commit" ]; then high "" "$RP/.git" "タグ ${n} がコミット以外（${t}）を指しています"; fi
   done
-  if [ -f "$ROOT/.gitmodules" ]; then
+  if in_root_regular "$RP/.gitmodules"; then
     local origin_host
     origin_host="$(git_cfg_get remote origin url | sed -E 's#^[a-z+]+://([^@/]+@)?##; s#^[^@]+@##; s#[:/].*##')"
-    grep -E '^[[:space:]]*url[[:space:]]*=' "$ROOT/.gitmodules" | sed -E 's/.*=[[:space:]]*//' | while IFS= read -r n; do
+    grep -E '^[[:space:]]*url[[:space:]]*=' "$RP/.gitmodules" | sed -E 's/.*=[[:space:]]*//' | while IFS= read -r n; do
       case "$n" in
-        http://*|git://*) high "" "$ROOT/.gitmodules" "サブモジュールが平文プロトコル（$n）" ;;
+        http://*|git://*) high "" "$RP/.gitmodules" "サブモジュールが平文プロトコル（$n）" ;;
         ./*|../*) ;;
         *) local h; h="$(printf '%s' "$n" | sed -E 's#^[a-z+]+://([^@/]+@)?##; s#^[^@]+@##; s#[:/].*##')"
-           [ -n "$origin_host" ] && [ "$h" != "$origin_host" ] && medium "" "$ROOT/.gitmodules" "サブモジュールが外部ホスト（$h）を参照" ;;
+           [ -n "$origin_host" ] && [ "$h" != "$origin_host" ] && medium "" "$RP/.gitmodules" "サブモジュールが外部ホスト（$h）を参照" ;;
       esac
     done
   fi
@@ -3072,10 +3468,26 @@ check_s47() {
   files_named '^(\.env\.ci|\.envrc)$' | grep_l '(_TOKEN|_KEY|_SECRET|PASSWORD)[[:space:]]*=[[:space:]]*[^[:space:]$]' | while IFS= read -r f; do
     [ -n "$f" ] && high "" "$f" "CI/direnv 用ファイルに平文の認証情報"
   done
-  tr '\n' '\0' <"$FILES_LIST" | xargs -0 grep -l -I -E -e '(ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36})' -- /dev/null 2>/dev/null | while IFS= read -r f; do
+  tr '\n' '\0' <"$FILES_LIST" | xargs -0 grep -l -a -E -e '(ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{82}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36})' -- /dev/null 2>/dev/null | while IFS= read -r f; do
     [ -n "$f" ] && critical "" "$f" "GitHub トークン（ghp_/github_pat_ 等）がファイルに含まれます（内容は出力しません。即時失効）"
   done
   return 0
+}
+
+# iso8601_epoch "YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)" → epoch 秒（date -d に依存しない。busybox の date は ISO の Z を受け付けない）
+iso8601_epoch() {
+  local t="$1" y mo d h mi se off=0 sign hh mm
+  [[ "$t" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})([Tt\ ]([0-9]{2}):([0-9]{2})(:([0-9]{2}))?(\.[0-9]+)?)?([Zz]|([+-])([0-9]{2}):?([0-9]{2}))?$ ]] || return 1
+  y=$((10#${BASH_REMATCH[1]})); mo=$((10#${BASH_REMATCH[2]})); d=$((10#${BASH_REMATCH[3]}))
+  h=$((10#${BASH_REMATCH[5]:-0})); mi=$((10#${BASH_REMATCH[6]:-0})); se=$((10#${BASH_REMATCH[8]:-0}))
+  sign="${BASH_REMATCH[11]}"; hh="${BASH_REMATCH[12]:-0}"; mm="${BASH_REMATCH[13]:-0}"
+  [ "$sign" = "-" ] && off=$(( -(10#$hh * 3600 + 10#$mm * 60) ))
+  [ "$sign" = "+" ] && off=$(( 10#$hh * 3600 + 10#$mm * 60 ))
+  # 暦日 → 1970-01-01 からの日数（Howard Hinnant の days_from_civil）
+  local yy=$((mo <= 2 ? y - 1 : y)) era doe yoe doy
+  era=$(( (yy >= 0 ? yy : yy - 399) / 400 )); yoe=$(( yy - era * 400 ))
+  doy=$(( (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1 )); doe=$(( yoe * 365 + yoe / 4 - yoe / 100 + doy ))
+  printf '%s' $(( (era * 146097 + doe - 719468) * 86400 + h * 3600 + mi * 60 + se - off ))
 }
 
 # §48 SBOM 整合性
@@ -3096,11 +3508,14 @@ check_s48() {
       || { record_error "§48" "sbom_parse_failed:$f"; continue; }
     local created; created="$(jq -r '.metadata.timestamp // .creationInfo.created // empty' "$f" 2>/dev/null)"
     # 同ディレクトリのロックファイル由来の依存（npm/pypi）と突合
-    awk -F'\t' -v d="$dir/" 'index($4, d)==1 && ($1=="npm" || $1=="pypi") && $4 !~ /\/node_modules\/.*\/package\.json$/ {print $2"\t"$3}' "$DEPS_TSV" | sort -u >"$TMP_DIR/lock.tsv"
+    ZES_V_D="$dir/" awk -F'\t' 'BEGIN { d = ENVIRON["ZES_V_D"] } index($4, d)==1 && ($1=="npm" || $1=="pypi") && $4 !~ /\/node_modules\/.*\/package\.json$/ {print $2"\t"$3}' "$DEPS_TSV" | sort -u >"$TMP_DIR/lock.tsv"
     if [ -s "$TMP_DIR/lock.tsv" ]; then
       local missing mism
-      missing="$(cut -f1 "$TMP_DIR/lock.tsv" | sort -u | comm -23 - <(cut -f1 "$TMP_DIR/sbom.tsv" | sort -u) | wc -l | tr -d ' ')"
-      mism="$(join -t $'\t' <(sort -t $'\t' -k1,1 "$TMP_DIR/lock.tsv") <(sort -t $'\t' -k1,1 "$TMP_DIR/sbom.tsv") | awk -F'\t' '$2!=$3' | wc -l | tr -d ' ')"
+      # comm / join は使わない（busybox 等に無い）。awk で同じ集計をする
+      #   missing … ロックファイルにあり SBOM に無い名前の数 / mism … 同名の (ロック版, SBOM 版) の組で版が異なるものの数
+      missing="$(awk -F'\t' 'NR == FNR { s[$1] = 1; next } !($1 in s) && !($1 in seen) { seen[$1] = 1; n++ } END { print n + 0 }' "$TMP_DIR/sbom.tsv" "$TMP_DIR/lock.tsv")"
+      mism="$(awk -F'\t' 'NR == FNR { v[$1] = v[$1] SUBSEP $2; next }
+          ($1 in v) { k = split(substr(v[$1], 2), a, SUBSEP); for (i = 1; i <= k; i++) if (a[i] != $2) n++ } END { print n + 0 }' "$TMP_DIR/sbom.tsv" "$TMP_DIR/lock.tsv")"
       if [ "$missing" -gt 0 ] || [ "$mism" -gt 0 ]; then
         high "" "$f" "SBOM とロックファイルが不一致（SBOM 未記載 ${missing} 件 / バージョン相違 ${mism} 件）"
       else
@@ -3110,9 +3525,9 @@ check_s48() {
         local lf lm
         while IFS= read -r lf; do
           lm="$(stat_mtime "$lf")"
-          local ce; ce="$(date -u -d "$created" +%s 2>/dev/null || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$created" +%s 2>/dev/null)"
+          local ce; ce="$(iso8601_epoch "$created")"
           [ -n "$ce" ] && [ -n "$lm" ] && [ "$lm" -gt $(( ce + 60 )) ] && { medium "" "$f" "SBOM 生成日時（$created）がロックファイル更新より古い"; break; }
-        done < <(awk -F'\t' -v d="$dir/" 'index($4,d)==1 {print $4}' "$DEPS_TSV" | sort -u)
+        done < <(ZES_V_D="$dir/" awk -F'\t' 'BEGIN { d = ENVIRON["ZES_V_D"] } index($4,d)==1 {print $4}' "$DEPS_TSV" | sort -u)
       fi
     fi
   done
@@ -3324,7 +3739,7 @@ sp_under_contract() {
   local d="$1"
   while [ "$d" != "$ROOT" ] && [ "$d" != "/" ] && [ "$d" != "." ]; do
     d="$(dirname -- "$d")"
-    case "$d/" in "$ROOT"/*) ;; *) return 1 ;; esac
+    case "$d/" in "$RP"/*) ;; *) return 1 ;; esac
     [ -f "$d/skill.contract.json" ] && return 0
   done
   return 1
@@ -3333,7 +3748,7 @@ sp_under_contract() {
 # スキル直下のファイル（入れ子スキルの配下は除外）
 sp_skill_files() {
   local dir="$1"
-  awk -v d="$dir/" 'index($0, d)==1' "$FILES_LIST" | while IFS= read -r f; do
+  ZES_V_D="$dir/" awk 'BEGIN { d = ENVIRON["ZES_V_D"] } index($0, d)==1' "$FILES_LIST" | while IFS= read -r f; do
     local rel="${f#"$dir"/}" sub="$dir" part nested=0
     while [[ "$rel" == */* ]]; do
       part="${rel%%/*}"; sub="$sub/$part"; rel="${rel#*/}"
@@ -3344,10 +3759,14 @@ sp_skill_files() {
 }
 
 # 実態抽出用テキスト（コードスコープ）を一時ファイルに書き出す（出力はしない）
+#   MUST_LIST（任意）… 契約の entry.cli / tests.cases[].run / tests.setup が $SKILL_DIR/… で参照するファイル（スキル相対）。
+#   参照されたファイルは拡張子・シバンの有無に依らずスクリプト（実行されるコード）として抽出する。
+#   ルート内を指すシンボリックリンク（scripts/x.py → ../../lib/impl.py）はリンク先の内容を読む（build_inventory が FILES_LIST に加える）。
+#   拡張子から種別が分からないテキストファイル（NUL を含まないもの）もコードスコープに含める（実行の効果は付けない）
 sp_extract() {
-  local dir="$1" code="$2" tools="$3"
+  local dir="$1" code="$2" tools="$3" must="${4:-}"
   : >"$code"; : >"$tools"
-  local f base ext
+  local f base ext rel
   local -a sexts; mapfile -t sexts < <(read_ioc '.skillpact.script_extensions')
   local sre; sre="$(printf '%s|' "${sexts[@]}" | sed 's/|$//')"
   local fre; fre="$(read_ioc '.skillpact.shell_fence_langs' | paste -sd'|' -)"
@@ -3357,7 +3776,7 @@ sp_extract() {
     [ "$base" = "skill.contract.json" ] && continue
     grep -q -x -F -- "$f" "$TMP_DIR/sp_policies.lst" 2>/dev/null && continue
     if [[ "$base" =~ \.md$ ]]; then
-      ZES_FRE="$fre" awk -v code="$code" -v tools="$tools" '
+      ZES_FRE="$fre" ZES_V_CODE="$code" ZES_V_TOOLS="$tools" awk 'BEGIN { code = ENVIRON["ZES_V_CODE"]; tools = ENVIRON["ZES_V_TOOLS"] } 
         BEGIN { fre = "^(" ENVIRON["ZES_FRE"] ")$" }
         NR==1 && /^---[[:space:]]*$/ { fm=1; next }
         fm && /^---[[:space:]]*$/ { fm=0; next }
@@ -3366,10 +3785,13 @@ sp_extract() {
           if (!infence) { lang=$0; sub(/^[[:space:]]*(```|~~~)[[:space:]]*/,"",lang); sub(/[[:space:]{].*/,"",lang); lang=tolower(lang); if (lang ~ fre) print "#ZES-SHELL-FENCE" >> code }
           infence=!infence; next }
         infence { print $0 >> code; next }' "$f"
-    elif [[ "$ext" =~ ^($sre)$ ]] || head -c 2 -- "$f" 2>/dev/null | grep -q '^#!'; then
+    elif { [ -n "$must" ] && rel="${f#"$dir"/}" && grep -q -x -F -- "$rel" "$must" 2>/dev/null; } \
+         || [[ "$ext" =~ ^($sre)$ ]] || head -c 2 -- "$f" 2>/dev/null | grep -q '^#!'; then
       printf '#ZES-SCRIPT %s\n' "$base" >>"$code"
       cat -- "$f" >>"$code"; printf '\n' >>"$code"
     elif [[ "$base" =~ \.(json|ya?ml|toml|ini|cfg)$ ]]; then
+      cat -- "$f" >>"$code"; printf '\n' >>"$code"
+    elif [ "$(head -c 8192 -- "$f" 2>/dev/null | tr -d -c '\000' | wc -c | tr -d ' ')" = "0" ]; then
       cat -- "$f" >>"$code"; printf '\n' >>"$code"
     fi
   done < <(sp_skill_files "$dir")
@@ -3426,7 +3848,7 @@ sp_policies() {
   : >"$TMP_DIR/sp_policies.lst"
   local f prob bad sp
   grep -E '\.json$' "$FILES_LIST" | grep -v -E '/skill\.contract\.json$' | tr '\n' '\0' \
-    | xargs -0 grep -l -I -F '"policy_version"' -- /dev/null 2>/dev/null | grep -v '^/dev/null$' | while IFS= read -r f; do
+    | xargs -0 grep -l -a -F '"policy_version"' -- /dev/null 2>/dev/null | grep -v '^/dev/null$' | while IFS= read -r f; do
     jq -e 'type == "object" and has("policy_version") and has("defaults")' "$f" >/dev/null 2>&1 || continue
     printf '%s\n' "$f" >>"$TMP_DIR/sp_policies.lst"
     prob="$(sp_ijson_problem "$f")"
@@ -3472,8 +3894,12 @@ check_skillpact() {
     local cpath="$dir/skill.contract.json"
     { [ -f "$cpath" ] && [ ! -L "$cpath" ]; } || cpath=""
     if [ -z "$cpath" ] && sp_under_contract "$dir"; then continue; fi
-    local code="$TMP_DIR/sp_code" tools="$TMP_DIR/sp_tools"
-    sp_extract "$dir" "$code" "$tools"
+    local code="$TMP_DIR/sp_code" tools="$TMP_DIR/sp_tools" must="$TMP_DIR/sp_must"
+    : >"$must"
+    [ -n "$cpath" ] && jq -r 'try ([((.capabilities // [])[]? | (.entry.cli? // []) | if type == "array" then .[] else empty end),
+        ((.tests.cases // [])[]? | .run | if type == "array" then .[] else . end), ((.tests.setup // [])[]? | if type == "array" then .[] else . end)]
+        | .[] | strings | match("\\$SKILL_DIR/([^\\s\u0027\"]+)"; "g") | .captures[0].string) catch empty' "$cpath" >"$must" 2>/dev/null
+    sp_extract "$dir" "$code" "$tools" "$must"
     local obs; obs="$(sp_observed "$code" "$tools")"
     local obs_txt; obs_txt="$(printf '%s' "$obs" | jq -r --argjson R "$SP_RULES" '[$R.effects[] as $e | select(.[$e]) | $e] | join(",")')"
 
@@ -3494,8 +3920,8 @@ check_skillpact() {
     fi
     # スキル配下の全ファイル・シンボリックリンク（相対パス）と integrity.files に載ったファイルのハッシュ
     local files_json links_json hashes_json rel
-    files_json="$(awk -v d="$dir/" 'index($0, d)==1 { print substr($0, length(d) + 1) }' "$FILES_LIST" | jq -R . | jq -s -c .)"
-    links_json="$(awk -v d="$dir/" 'index($0, d)==1 { print substr($0, length(d) + 1) }' "$LINKS_LIST" | jq -R . | jq -s -c .)"
+    files_json="$(grep -v -x -F -f "$LINKED_FILES_LIST" "$FILES_LIST" | ZES_V_D="$dir/" awk 'BEGIN { d = ENVIRON["ZES_V_D"] } index($0, d)==1 { print substr($0, length(d) + 1) }' | jq -R . | jq -s -c .)"
+    links_json="$(ZES_V_D="$dir/" awk 'BEGIN { d = ENVIRON["ZES_V_D"] } index($0, d)==1 { print substr($0, length(d) + 1) }' "$LINKS_LIST" | jq -R . | jq -s -c .)"
     hashes_json="$(jq -r '(.integrity.files? // {}) | if type == "object" then keys[] else empty end' "$cpath" 2>/dev/null | while IFS= read -r rel; do
         case "/$rel/" in */../*|*/./*|*//*) continue ;; esac
         { [ -f "$dir/$rel" ] && [ ! -L "$dir/$rel" ]; } || continue
@@ -3604,17 +4030,28 @@ main() {
   if [ "$ib" != "$INCIDENT_BUNDLE" ]; then
     record_error "core" "incident_bundle_mismatch:${ib:-none}"
   fi
-  printf '%sZero-Exec Shield v%s（仕様 v%s）%s  bundle=%s  mode=%s  root=%s  os=%s  jq=%s\n' "$C_CYN" "$ZES_VERSION" "$ZES_SPEC_VERSION" "$C_OFF" "$INCIDENT_BUNDLE" "$MODE" "$ROOT" "$OS_NAME" "$HAVE_JQ" >&3
+  zes_enc "$ROOT"
+  printf '%sZero-Exec Shield v%s（仕様 v%s）%s  bundle=%s  mode=%s  root=%s  os=%s  jq=%s\n' "$C_CYN" "$ZES_VERSION" "$ZES_SPEC_VERSION" "$C_OFF" "$INCIDENT_BUNDLE" "$MODE" "$ENC_TERM" "$OS_NAME" "$HAVE_JQ" >&3
+  # 無害化で外した PATH エントリ（相対・空・検査ルート配下）。検査ルート内の偽 jq / git / coreutils は起動しない
+  local e
+  for e in "${PATH_DROPPED[@]}"; do record_error "core" "path_entry_dropped:$e"; done
   [ "$HAVE_JQ" -eq 1 ] || log_info "jq が見つかりません。grep フォールバックで実行します（§48/§49 は未確定扱い）"
+  [ "$ROOT" = "/" ] && log_info "--root /: ホスト全体を走査します（擬似ファイルシステムは開かずに errors[] に記録。PATH の検査ルート配下判定は行いません）"
+  CURRENT_MODULE="core"
   build_inventory
-  local n
+  git_discover
+  local n nmod=0 nfail=0
   for n in $(modules_for_mode "$MODE"); do
+    nmod=$((nmod + 1))
     # モジュールはサブシェルで実行し、異常終了（set -u 等）を module_failed として記録する（fail-closed）
-    ( "check_s$n" ) || record_error "§$n" "module_failed"
+    ( "check_s$n" ) || { record_error "§$n" "module_failed"; nfail=$((nfail + 1)); }
   done
+  # 全モジュールが異常終了した場合は検査結果として使えないため致命的（status=error / 終了コード 2）
+  [ "$nmod" -gt 0 ] && [ "$nfail" -eq "$nmod" ] && FATAL=1
   dedup_findings
   local status="ok"
-  [ -s "$ERRORS_FILE" ] && status="partial"
+  # archive_not_inspected は既知の制限（アーカイブを展開しない）を示す参考情報で、status を partial にしない
+  grep -v -F '"reason":"archive_not_inspected:' "$ERRORS_FILE" | grep -q . && status="partial"
   [ "$FATAL" -eq 1 ] && status="error"
   local c h m
   c="$(grep -c '"level":"CRITICAL"' "$FINDINGS_FILE")"; h="$(grep -c '"level":"HIGH"' "$FINDINGS_FILE")"; m="$(grep -c '"level":"MEDIUM"' "$FINDINGS_FILE")"

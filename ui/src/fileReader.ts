@@ -43,12 +43,6 @@ export async function fromDataTransfer(dt: DataTransfer): Promise<PickedFile[]> 
 
 const yieldToUi = () => new Promise<void>((r) => setTimeout(r, 0));
 
-function looksBinary(bytes: Uint8Array): boolean {
-  const n = Math.min(bytes.length, 8192);
-  for (let i = 0; i < n; i++) if (bytes[i] === 0) return true;
-  return false;
-}
-
 /** 同時に読むファイル数の上限。1 件ずつ await すると、file.arrayBuffer() と SHA-256 の待ちが直列になり大きなフォルダで遅い。
  *  多すぎるとメモリ（2 MiB × 同時数）とファイルハンドルを食うので 8 に抑える。 */
 export const READ_CONCURRENCY = 8;
@@ -59,7 +53,7 @@ async function readOne({ file, relPath }: PickedFile, dec: TextDecoder): Promise
   try {
     const buf = new Uint8Array(await file.arrayBuffer());
     const sha = await sha256Hex(buf);
-    if (looksBinary(buf)) return { ...base, text: null, sha256: sha, readState: 'skipped-binary' };
+    // NUL を含むファイルも文字列として判定する（CLI の grep -a と同じ。NUL を 1 つ入れるだけで検査を逃れられないように）
     return { ...base, text: dec.decode(buf), sha256: sha, readState: 'read' };
   } catch {
     return { ...base, text: null, sha256: null, readState: 'error' };

@@ -1,0 +1,4 @@
+Package: ca-certificates
+Status: deinstall ok config-files
+Version: 20230311
+

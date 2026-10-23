@@ -3,16 +3,110 @@ import { pathMatch, push, readable, type RuleCtx } from '../context';
 import type { UsesRef } from '../types';
 import { clip, dirname } from '../util';
 
+const lead = (x: string) => (/^[ \t]*/.exec(x)?.[0] ?? '').length;
+/** ノード属性（アンカー &x・タグ !!str / !tag）を先頭から除く（CLI yaml_flatten の props と同じ） */
+const yamlProps = (v: string) => { let x = v; for (let m = /^(&[^ \t]+|![^ \t]*)([ \t]+|$)/.exec(x); m; m = /^(&[^ \t]+|![^ \t]*)([ \t]+|$)/.exec(x)) x = x.slice(m[0].length); return x; };
+const yamlAlias = (v: string) => /^\*[^ \t,\]}]+[ \t]*(#.*)?$/.test(v);
+/** 引用符の外側の括弧の深さ（[ { と ] }） */
+function yamlDepth(x: string): number {
+  let d = 0; let q = '';
+  for (let i = 0; i < x.length; i++) {
+    const c = x[i]!;
+    if (q) { if (c === '\\' && q === '"') { i++; continue } if (c === q) q = ''; continue; }
+    if (c === '"' || c === "'") { q = c; continue; }
+    if (c === '#' && (i === 0 || /[ \t]/.test(x[i - 1]!))) break;
+    if (c === '[' || c === '{') d++; else if (c === ']' || c === '}') d--;
+  }
+  return d;
+}
+/** 引用符の外側の行末コメントを除く */
+function yamlNoComment(x: string): string {
+  let q = '';
+  for (let i = 0; i < x.length; i++) {
+    const c = x[i]!;
+    if (q) { if (c === '\\' && q === '"') { i++; continue } if (c === q) q = ''; continue; }
+    if (c === '"' || c === "'") { q = c; continue; }
+    if (c === '#' && (i === 0 || /[ \t]/.test(x[i - 1]!))) return x.slice(0, i);
+  }
+  return x;
+}
+
 /**
- * ワークフロー本文の正規化（CLI workflow_text と同じ）。CRLF・BOM を除き、値が次行以降に続くキーを 1 行に畳む。
+ * YAML の 1 段目の正規化（CLI yaml_flatten と同じ）。ノード属性（&anchor / !tag）を除き、フロー列（"steps: [ {uses: a}, … ]"。
+ * 複数行を含む）を 1 要素 1 行のブロック列に展開する。エイリアス（*x / <<: *x）は解決せず "#ZES-YAML-ALIAS" 行を出す。
+ * ブロックスカラー（run: | 等）の中身はそのまま通す。
+ */
+export function yamlFlatten(yaml: string): string[] {
+  const src = yaml.replace(/^\uFEFF/, '').split('\n').map((l) => l.replace(/\r$/, ''));
+  if (src.length && src[src.length - 1] === '') src.pop();
+  const out: string[] = [];
+  let inblk = false; let bind = 0; let acc = ''; let apre = ''; let aind = 0;
+  const item = (el0: string, ind: string) => {
+    let el = el0.replace(/^[ \t]+/, '').replace(/[ \t]+$/, '');
+    if (el === '') return;
+    el = yamlProps(el);
+    if (yamlAlias(el)) out.push('#ZES-YAML-ALIAS');
+    out.push(ind + '- ' + el);
+  };
+  const flow = (body0: string, ind: string) => {
+    const body = body0.replace(/^[ \t]*\[/, '').replace(/\][ \t]*(#.*)?$/, '');
+    let d = 0; let q = ''; let el = '';
+    for (let i = 0; i < body.length; i++) {
+      const c = body[i]!;
+      if (q) { el += c; if (c === '\\' && q === '"') { i++; el += body[i] ?? ''; continue } if (c === q) q = ''; continue; }
+      if (c === '"' || c === "'") { q = c; el += c; continue; }
+      if (c === '[' || c === '{') d++; else if (c === ']' || c === '}') d--;
+      if (c === ',' && d === 0) { item(el, ind); el = ''; continue; }
+      el += c;
+    }
+    item(el, ind);
+  };
+  const pad = (n: number) => ' '.repeat(n);
+  for (const raw of src) {
+    let line = raw;
+    if (inblk) { if (/^[ \t]*$/.test(line) || lead(line) > bind) { out.push(line); continue; } inblk = false; }
+    if (acc !== '') {
+      acc += ' ' + yamlNoComment(line).replace(/^[ \t]+/, '');
+      if (yamlDepth(acc) <= 0) { out.push(apre); flow(acc, pad(aind + 2)); acc = ''; }
+      continue;
+    }
+    let pre = '';
+    const dm = /^[ \t]*-([ \t]+|$)/.exec(line);
+    if (dm) {
+      pre = dm[0];
+      const rest = yamlProps(line.slice(pre.length));
+      if (yamlAlias(rest)) { out.push('#ZES-YAML-ALIAS'); out.push(pre + rest); continue; }
+      line = pre + rest;
+    }
+    const ki = pre.length || lead(line);
+    const km = /^[ \t]*(-[ \t]+)?["']?[A-Za-z0-9_.$<-]+["']?:([ \t]+|$)/.exec(line);
+    if (!km) { out.push(line); continue; }
+    const kpre = km[0];
+    const v = yamlProps(line.slice(kpre.length));
+    if (yamlAlias(v) || /<<:[ \t]*$/.test(kpre)) out.push('#ZES-YAML-ALIAS');
+    if (/^[|>][-+0-9]*[ \t]*(#.*)?$/.test(v)) { out.push(kpre + v); inblk = true; bind = ki; continue; }
+    if (v.startsWith('[')) {
+      if (yamlDepth(v) > 0) { acc = yamlNoComment(v); apre = kpre; aind = ki; continue; }
+      out.push(kpre); flow(v, pad(ki + 2)); continue;
+    }
+    out.push(kpre + v);
+  }
+  if (acc !== '') { out.push(apre); flow(acc, pad(aind + 2)); }
+  return out;
+}
+
+/** エイリアス（*x）を含むか（CLI は errors[] に yaml_alias_unresolved を記録する） */
+export const yamlHasAlias = (yaml: string) => yamlFlatten(yaml).includes('#ZES-YAML-ALIAS');
+
+/**
+ * ワークフロー本文の正規化（CLI workflow_text と同じ）。yamlFlatten の後、値が次行以降に続くキーを 1 行に畳む。
  *   - ブロックスカラー（"key: >-" / "key: |" 等）: より深くインデントされた後続行を全て空白区切りで連結
  *   - 値が空のキーの後にプレーンスカラーが続く場合（"- uses:" の次行に値）: マッピング/シーケンスでない
  *     より深い後続行を連結（YAML のプレーンスカラーの複数行折り返し）
  * run: | の中に書かれた "uses: …" はこの畳み込みで run: の値の一部になり、ステップとして数えない。
  */
 export function workflowText(yaml: string): string[] {
-  const src = yaml.replace(/^﻿/, '').split('\n').map((l) => l.replace(/\r$/, ''));
-  if (src.length && src[src.length - 1] === '') src.pop();
+  const src = yamlFlatten(yaml);
   const out: string[] = [];
   let pend = '';
   let pind = 0;
@@ -50,11 +144,11 @@ export function workflowText(yaml: string): string[] {
 }
 
 /** actions/checkout ステップごとの ref 種別（CLI §21 と同じ判定。入力は workflowText で正規化した行）。 */
-export function checkoutRefs(yaml: string): ('noref' | 'prhead' | 'otherref')[] {
-  const out: ('noref' | 'prhead' | 'otherref')[] = [];
+export function checkoutRefs(yaml: string): ('noref' | 'prhead' | 'otherref' | 'exprref')[] {
+  const out: ('noref' | 'prhead' | 'otherref' | 'exprref')[] = [];
   let inChk = false;
   let ind = 0;
-  let ref: 'prhead' | 'otherref' | '' = '';
+  let ref: 'prhead' | 'otherref' | 'exprref' | '' = '';
   const flush = () => { if (inChk) out.push(ref === '' ? 'noref' : ref); inChk = false; ref = ''; };
   // ref はブロックマッピング（行頭の ref:）とフローマッピング（{ ref: … } / , ref: …）の両方を見る
   const getRef = (s: string) => {
@@ -69,7 +163,12 @@ export function checkoutRefs(yaml: string): ('noref' | 'prhead' | 'otherref')[] 
     } else {
       r = r.replace(/[,}].*$/, '');
     }
-    ref = /github\.(event\.pull_request\.head|head_ref)/.test(r) ? 'prhead' : 'otherref';
+    // 正規化: 小文字化・空白除去・添字表記（github.event['pull_request']['head'] / ["…"]）をドット表記に
+    r = r.toLowerCase().replace(/[ \t]/g, '').replace(/\[["']/g, '.').replace(/["']\]/g, '');
+    if (/github\.(event\.pull_request\.(head|merge_commit_sha|number)|head_ref|event\.number)|refs\/pull\//.test(r)) ref = 'prhead';
+    // ベース側の式（base.sha / base.ref / base_ref / github.sha / github.ref / default_branch）だけなら PR 由来ではない
+    else if (r.replace(/\$\{\{(github\.event\.pull_request\.base\.(sha|ref)|github\.base_ref|github\.sha|github\.ref|github\.event\.repository\.default_branch)\}\}/g, '').includes('${{')) ref = 'exprref'; // それ以外の式は PR 由来でないと確認できない（最低 HIGH）
+    else ref = 'otherref';
   };
   for (const line of workflowText(yaml)) {
     const lead = (/^\s*/.exec(line)?.[0] ?? '').length;
@@ -106,13 +205,17 @@ export function actionsRules(ctx: RuleCtx): void {
     const y = f.text;
     const isWorkflow = /\.github\/workflows\//.test(f.relPath);
     const prTarget = /(^|[^A-Za-z0-9_])pull_request_target([^A-Za-z0-9_]|$)/.test(y);
-    if (isWorkflow && prTarget && /actions\/checkout@/i.test(y) && /\$\{\{\s*secrets\./.test(y)) {
+    // 式の文脈名は大文字小文字を区別しない（${{ SECRETS.X }} / ${{ toJSON(secrets) }} / secrets['X'] も secrets 参照）
+    if (isWorkflow && prTarget && /actions\/checkout@/i.test(y) && /\$\{\{([^}\n]*[^A-Za-z0-9_.\n])?secrets([\][.\s)]|$)/im.test(y)) {
       const refs = checkoutRefs(y);
       if (refs.includes('prhead')) {
         push(ctx, { level: 'CRITICAL', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + PR head の checkout + secrets 参照（pwn request）', ruleId: 's21-prtarget:prhead', evidenceSha: f.sha256 });
       }
       if (refs.includes('noref')) {
         push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + actions/checkout(refなし) + secrets 参照', ruleId: 's21-prtarget:noref', evidenceSha: f.sha256 });
+      }
+      if (refs.includes('exprref')) {
+        push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'pull_request_target + actions/checkout の ref が式（${{ … }}）+ secrets 参照（PR 由来の ref でないことを静的に確認できません）', ruleId: 's21-prtarget:exprref', evidenceSha: f.sha256 });
       }
     }
     if (/key:.*github\.event\.pull_request\.number/.test(y)) {
@@ -121,9 +224,10 @@ export function actionsRules(ctx: RuleCtx): void {
     if (/^\s*permissions:\s*write-all/m.test(y)) {
       push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'permissions: write-all', ruleId: 's21-writeall', evidenceSha: f.sha256 });
     }
-    const n = new Set([...y.matchAll(/secrets\.([A-Za-z0-9_]+)/g)].map((m) => m[1])).size;
+    if (isWorkflow && yamlHasAlias(y)) ctx.errors.push({ module: '§21', reason: `yaml_alias_unresolved:${f.relPath}` });
+    const n = new Set([...y.matchAll(/secrets\.([A-Za-z0-9_]+)/gi)].map((m) => m[1]!.toLowerCase())).size;
     if (n > 10) push(ctx, { level: 'HIGH', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, detail: `ワークフローが ${n} 種類の secrets.* を参照（一括収集の疑い）`, ruleId: 's38-secrets', evidenceSha: f.sha256 });
-    if (/toJSON\(\s*secrets\s*\)/.test(y)) push(ctx, { level: 'CRITICAL', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'toJSON(secrets) で全シークレットを展開', ruleId: 's38-tojson', evidenceSha: f.sha256 });
+    if (/tojson\(\s*secrets\s*(\.\s*\*\s*)?\)/i.test(y)) push(ctx, { level: 'CRITICAL', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, detail: 'toJSON(secrets) で全シークレットを展開', ruleId: 's38-tojson', evidenceSha: f.sha256 });
 
     const uses: UsesRef[] = [];
     // 正規化後の各行の uses:（フローマッピング・次行の値・ブロックスカラーを含む。run: の中の文字列は数えない）

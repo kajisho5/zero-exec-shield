@@ -1,0 +1,12 @@
+{
+  "findings": [
+    {
+      "campaign": "emudhra-ca-oct2026",
+      "level": "HIGH",
+      "module": "§6",
+      "path": "ubuntu/var/lib/dpkg/status"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

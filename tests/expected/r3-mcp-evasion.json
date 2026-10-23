@@ -1,0 +1,60 @@
+{
+  "findings": [
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "bom/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "cmd/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "deno/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "nodeeval/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "norc/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "perl/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "pwsh/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "ruby/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "level": "HIGH",
+      "module": "§17",
+      "path": "xc/.mcp.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

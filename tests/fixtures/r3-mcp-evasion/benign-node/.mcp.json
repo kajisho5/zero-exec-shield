@@ -1,0 +1,1 @@
+{"mcpServers": {"x": {"command": "node", "args": ["/opt/mcp/server.js", "--port", "3000"]}}}
