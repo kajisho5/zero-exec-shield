@@ -83,7 +83,7 @@ ZES は 49 のモジュール（§1〜§49）からなります。検出の重�
 | 認証情報（Blast Radius） | §14, §19, §47 | 認証情報ファイル（`~/.ssh`・`~/.aws`・`~/.npmrc` など）の存在を `stat` だけで列挙、履歴や CI 用ファイルの平文トークン |
 | AI エージェントのスキル（実験的） | §49 | スキルの [SkillPact](https://github.com/kajisho5/skillpact) 契約と、コードが実際にしていることを比べる |
 
-IoC の値は ZES v5.2 Master Specification からの転記です。一次情報との照合結果は [docs/ioc-verification.md](docs/ioc-verification.md) にあります。
+IoC の値は ZES v5.2 Master Specification からの転記です。一次情報との照合結果は [docs/ioc-verification.md](docs/ioc-verification.ja.md) にあります。
 
 ### §49 SkillPact 契約（実験的）
 
@@ -173,7 +173,7 @@ IoC の値は ZES v5.2 Master Specification からの転記です。一次情報
 - ブラウザ UI が書き出す findings.json のパスは、投入フォルダからの相対パスに `/` を前置したものです。`errors[]` に `ui:host_checks_not_performed` を記録します。1.1 の項目は CLI と同じものを付けますが、ブラウザが知りえない値は除きます（`scan_roots` は出さない、ディレクトリの `evidence` は `detail`〔ファイルの mode が分からない〕、シンボリックリンクは 0 バイトのファイルとして渡される）。UI は 1.0 と 1.1 のどちらの文書も読み込めます。`status` は `partial` で、取り込んだ CLI の findings.json が `status: error` だった場合は `error` です。
 - ブラウザ UI が生成する `id` は、上の CLI の式とは別の作り方です（`module|campaign|path|規則 ID` から生成し、`path` は相対パス）。UI の中でだけ安定し（同じフォルダを投入し直せば同じ `id`）、同じファイルの CLI の `id` とは一致しません。揃えると既存の `id` が変わるため、このままにしています。CLI の findings.json から取り込んだ finding の `id` はそのまま保ちます。
 
-後段のツールが依存してよい性質は、[docs/skill-contracts.md](docs/skill-contracts.md) の §9 にまとめています。
+後段のツールが依存してよい性質は、[docs/skill-contracts.md](docs/skill-contracts.ja.md) の §9 にまとめています。
 
 ## 終了コード
 
@@ -195,7 +195,7 @@ jq -e '[.findings[] | select(.level == "CRITICAL")] | length == 0' findings.json
 ## 制限事項
 
 - **静的なヒューリスティック。** 検出はパターンと版の照合です。誤検知も見逃しもあります。検出 0 件は、マシンやプロジェクトが安全である証明ではありません。
-- **IoC データは古くなる。** `rules/ioc.json` は時点のスナップショット（incident bundle `ZES-2026-OCT-EMERGENCY-V5.2`）で、定期的な更新が必要です。一次情報で確認できなかった値は [docs/ioc-verification.md](docs/ioc-verification.md) に注記しています。
+- **IoC データは古くなる。** `rules/ioc.json` は時点のスナップショット（incident bundle `ZES-2026-OCT-EMERGENCY-V5.2`）で、定期的な更新が必要です。一次情報で確認できなかった値は [docs/ioc-verification.md](docs/ioc-verification.ja.md) に注記しています。
 - **ディストリビューションのバックポート。** カーネル・ツール・PHP の版は upstream の修正版と比べます。ディストリビューションのパッケージはバックポートで修正済みのことが多いため、これらの結果は HIGH を上限とし、ベンダーのアドバイザリでの確認が必要です。dpkg の PHP はベンダーの修正版と比べます。RHEL 系は rpm DB を静的に読めないため、案内を出すだけです。
 - **アーカイブは展開しない。** `.whl`・`.tgz`・`.zip`・`.jar` などは生のバイト列として走査するだけで、中のファイルは取り出さず検査しません。各アーカイブを `errors[]` に `archive_not_inspected` として記録します。健全なリポジトリにもアーカイブはよくある（`gradle-wrapper.jar` 等）ため、この記録だけでは `status` を `partial` にしません。想定外のアーカイブがないか一覧を確認してください。
 - **YAML のエイリアス・バイナリのロックファイル・worktree。** ワークフローの YAML のアンカー・タグは解釈しますが、エイリアス（`*name`）は解決しません（`yaml_alias_unresolved`）。`bun.lockb` は解析しません（`lockfile_unparsed`）。検査ルートの外を指す `.git` ファイルや `include.path` は辿りません（`gitdir_outside_root` / `git_include_unresolved`）。
@@ -207,7 +207,7 @@ jq -e '[.findings[] | select(.level == "CRITICAL")] | length == 0' findings.json
 
 ## 関連ツール
 
-ZES は 3 つのツールのうち検知層です。層の間のインターフェースは [docs/skill-contracts.md](docs/skill-contracts.md) で定めています。
+ZES は 3 つのツールのうち検知層です。層の間のインターフェースは [docs/skill-contracts.md](docs/skill-contracts.ja.md) で定めています。
 
 | 層 | ツール | 入出力 |
 |---|---|---|
@@ -232,12 +232,12 @@ npm run test:e2e                     # Playwright（file:// で起動）
 - フィクスチャは無害なダミーです。期待値は `tests/expected/` にあります。
 - `ui/.npmrc` で `ignore-scripts=true` を指定し、依存は `package-lock.json` で版を固定しています。
 - `rules/ioc.json` を変更したら `index.html` を再ビルドしてください。コミット済みの `index.html` がビルド結果と異なると CI が失敗します。
-- UI の設計書: 現行の 0.3「検疫台」は [docs/design/ui-design-0.3.md](docs/design/ui-design-0.3.md)。実装前のドラフト（画面は 0.3.0 より前、§49 の部分は SkillPact 0.8 対応前の内容）は [docs/design/ui-design.md](docs/design/ui-design.md)
+- UI の設計書: 現行の 0.3「検疫台」は [docs/design/ui-design-0.3.md](docs/design/ui-design-0.3.ja.md)。実装前のドラフト（画面は 0.3.0 より前、§49 の部分は SkillPact 0.8 対応前の内容）は [docs/design/ui-design.md](docs/design/ui-design.ja.md)
 - 変更履歴: [CHANGELOG.md](CHANGELOG.md)
 
 ## ライセンスとクレジット
 
-ZES のライセンスは [Apache License 2.0](LICENSE) です。ZES 自体の脆弱性の報告は [SECURITY.md](SECURITY.md) を参照してください。
+ZES のライセンスは [Apache License 2.0](LICENSE) です。ZES 自体の脆弱性の報告は [SECURITY.md](SECURITY.ja.md) を参照してください。
 
 - **SkillPact。** §49 は SkillPact 0.8 の契約形式（https://github.com/kajisho5/skillpact）を読みます。SkillPact © SEVENTHWELL (shogo kajiyama)。仕様の文章は CC BY 4.0、スキーマとコードは Apache-2.0 です。ZES は形式を変えずにその一部を検査する実装で、SkillPact の適合性検査ツールではありません。ZES の結果は SkillPact のレベルではなく、SEVENTHWELL による承認でもありません。`tests/fixtures/skillpact-*` の一部は SkillPact の conformance ケースと例の複製です（[tests/fixtures/skillpact-README.md](tests/fixtures/skillpact-README.md)）。
 - **PHP2Shell のデータ。** `rules/ioc.json` の PHP2Shell 修正版と Debian / Ubuntu / RHEL のパッケージデータ（`php2shell_distro`）、および §4 の版判定は、[openai/php2shell-checker](https://github.com/openai/php2shell-checker)（Apache-2.0）と、そこに挙がっている各ベンダーの勧告に基づきます。
