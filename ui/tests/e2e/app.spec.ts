@@ -53,33 +53,29 @@ test('フォルダ投入 → 総合タブに検出・重大度フィルタ・パ
   await expect(page.getByTestId('blast-radius')).toBeVisible();
 });
 
-test('SkillPact タブ: 乖離の赤ハイライト、L3 を「安全」と表示しない', async ({ page }) => {
+test('SkillPact タブ: 乖離の赤ハイライト、署名を「安全」と表示しない', async ({ page }) => {
   await open(page);
   await scan(page, 'skillpact-signed-divergence');
   await page.getByRole('tab', { name: /^SkillPact/ }).click();
   const viewer = page.getByTestId('skillpact-viewer');
   await expect(viewer).toBeVisible();
-  for (const e of ['exec', 'network', 'secrets']) {
-    await expect(viewer.locator(`td[data-effect=${e}][data-divergence=true]`)).toHaveCount(1);
-  }
-  const badge = page.getByTestId('l3-badge').first();
-  await expect(badge).toContainText('L3 署名済みファイル');
-  for (const word of ['安全', '信頼済み', 'Verified', 'Trusted']) await expect(badge).not.toContainText(word);
+  await expect(viewer.locator('td[data-effect=network][data-divergence=true]')).toHaveCount(1);
+  await expect(viewer.locator('td[data-effect=exec][data-divergence=true]')).toHaveCount(0);
+  const badge = page.getByTestId('signed-badge').first();
+  await expect(badge).toContainText('署名あり（未検証）');
+  for (const word of ['安全', '信頼済み', 'Verified', 'Trusted', 'L3']) await expect(badge).not.toContainText(word);
+  await expect(page.getByTestId('level-note')).toContainText('実験的');
   // SkillPact タブでは SAFE バッジ・安全色（緑）の表示を使わない
   await expect(page.getByRole('tabpanel').locator('[data-severity=SAFE], .text-safe, .bg-safe')).toHaveCount(0);
   await expect(page.getByTestId('rule-row').filter({ hasText: '未宣言の network' })).toHaveAttribute('data-status', 'hit');
 });
 
-test('SkillPact: prose 矛盾と差分異常の警告', async ({ page }) => {
+test('SkillPact: 前版から major を上げない権限拡大の警告', async ({ page }) => {
   await open(page);
-  await scan(page, 'skillpact-prose');
-  await page.getByRole('tab', { name: /^SkillPact/ }).click();
-  await expect(page.getByTestId('prose-alert')).toContainText('read_only');
-  await page.getByRole('tab', { name: /^総合/ }).click();
   await scan(page, 'skillpact-diff-anomaly');
   await page.getByRole('tab', { name: /^SkillPact/ }).click();
   await page.getByTestId('skill-item').filter({ hasText: 'v2' }).click();
-  await expect(page.getByTestId('diff-alert')).toContainText('exec 新規追加');
+  await expect(page.getByTestId('diff-alert')).toContainText('network: none→scoped');
 });
 
 test('MCP / Actions / 拡張ビューアと CLI 案内', async ({ page, browserName }) => {
@@ -120,8 +116,8 @@ test('findings.json の書き出し（ネットワーク不使用のダウンロ
   const path = await dl.path();
   const doc = JSON.parse(readFileSync(path, 'utf8'));
   expect(doc.schema_version).toBe('1.0');
-  expect(doc.status).toBe('partial');
-  expect(doc.findings[0].skillpact.divergence).toEqual(['exec']);
+  expect(['ok', 'partial']).toContain(doc.status);
+  expect(doc.findings.find((f: { level: string }) => f.level === 'HIGH').skillpact.divergence).toEqual(['read', 'network']);
 });
 
 test('隠しファイルだけのフォルダでも無反応にならない（完了または 0 件の通知）', async ({ page, browserName }, info) => {

@@ -5,8 +5,9 @@ export type DisplaySeverity = Severity | 'SAFE';
 export const SEVERITIES: Severity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
 export const SEVERITY_RANK: Record<Severity, number> = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, INFO: 1 };
 
-export type Effect = 'exec' | 'network' | 'write' | 'read' | 'secrets' | 'spend';
-export const EFFECTS: Effect[] = ['exec', 'network', 'write', 'read', 'secrets', 'spend'];
+/** SkillPact 0.8 の 6 効果（spec §6）。順序も仕様どおり */
+export type Effect = 'read' | 'write' | 'network' | 'exec' | 'spend' | 'send';
+export const EFFECTS: Effect[] = ['read', 'write', 'network', 'exec', 'spend', 'send'];
 export type Decision = 'allow' | 'ask' | 'deny';
 export type Level = 'L1' | 'L2' | 'L3';
 
@@ -69,29 +70,34 @@ export interface WorkflowView { path: string; uses: UsesRef[]; prTarget: boolean
 
 export interface ExtensionView { path: string; name: string; dangerous: string[]; allUrls: boolean; unofficialUpdate: boolean }
 
-export interface ProseConflict { claim: string; sourcePath: string; contradictedBy: string[] }
-export interface DiffAnomaly { previousVersion: string; previousPath: string; reasons: string[]; score: number; threshold: number }
+export interface SkillPactDivergence { effect: Effect; why: 'none' | 'scope'; sensitive?: boolean; durable?: boolean; level: Severity }
+export interface DiffAnomaly { previousVersion: string; previousPath: string; widened: string[]; identity: 'same' | 'changed' | 'unsigned'; level: Severity }
 export type RuleStatus = 'hit' | 'clear' | 'n/a' | 'undetermined';
 export interface RuleResult { ruleNo: number; title: string; level: Severity; status: RuleStatus }
 
 export interface SkillPactAnalysis {
   skillId: string;
   name: string;
-  contract: { found: boolean; path: string | null; parseError: boolean; schemaVersion: string | null; supported: boolean };
-  author: string | null;
-  version: string | null;
+  contract: {
+    found: boolean;
+    path: string | null;
+    /** none: 契約なし / unparseable: I-JSON 不正 / unsupported: 未対応の contract_version / invalid: 部分検査で不合格 / ok */
+    status: 'none' | 'unparseable' | 'unsupported' | 'invalid' | 'ok';
+    problem: string | null;
+    contractVersion: string | null;
+    errors: string[];
+  };
+  skillName: string | null;
+  skillVersion: string | null;
+  /** ZES の部分検査に合格した場合のみ 'L1'。L2/L3 は ZES では判定しない */
   level: string | null;
+  /** integrity.signatures がある（ZES は署名を検証しない） */
   signed: boolean;
-  l2Tested: boolean;
-  declared: string[];
-  declaredTokens: string[];
+  signers: string[];
+  author: string | null;
+  declared: Effect[];
   observed: Effect[];
-  divergence: string[];
-  destructive: boolean;
-  persistence: boolean;
-  policy: { file: string | null; decision: string | null; violations: string[] };
-  irreversibleAllowed: string[];
-  proseConflicts: ProseConflict[];
+  divergence: SkillPactDivergence[];
   diffAnomaly: DiffAnomaly | null;
   results: RuleResult[];
   maxLevel: Severity | null;

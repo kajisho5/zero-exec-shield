@@ -4,6 +4,17 @@
 
 初回リリース。ZES v5.2 Master Specification に準拠しています。この下にある 5.2〜5.2.4 の項目は、仕様書に追従する開発中の記録です（リリースはしていません）。0.1.0 にはそのすべてを含みます。
 
+### 変更（§49 SkillPact、実験的）
+
+- §49 を実在する SkillPact 0.8 形式（https://github.com/kajisho5/skillpact）に合わせて作り直し: `skill.contract.json` の `permissions.{read,write,network,exec,spend,send}` を読み、コードの静的解析と比べる。効果名は仕様の 6 種類のみ（`secrets` → 機密範囲の `read`、`persist` → 作業領域外の `write`、`longrun` は廃止）
+- 契約のないスキルは比較対象外（影響の大きい効果が見える場合のみ参考 INFO）。契約付きスキル配下の `SKILL.md` は報告しない
+- 契約の部分検査（I-JSON、構造、整合性、`integrity.files` のハッシュと網羅性）。不正・未対応の版は MEDIUM（`skillpact-invalid`）、CRITICAL は出さない
+- 未宣言の exec / network / spend / send は HIGH、機密ファイルの read / 作業領域外の write は MEDIUM。署名は検証せず（`signed` は「署名欄あり・未検証」）、重大度に影響しない。`level` は ZES の部分検査に合格した場合のみ "L1"
+- 前版比較は仕様 §17（major を上げない権限拡大）と作者署名鍵の一致で判定
+- ポリシーは `policy_version` を持つ JSON を名前に関係なく検出して構造のみ検査（allow/ask/deny の評価は TODO）
+- 独自形式（`.skillpact/contract.json`、`schema_version`、`effects[]`、L2 記録、`.sig` ファイル、prose 照合、破壊的マーカー、`reversible`）を削除。`schemas/findings.schema.json` の `$defs.effect` を 6 効果に変更
+- テストのフィクスチャを SkillPact の conformance ケース・例の複製と、実形式の合成例に置き換え
+
 ### 追加
 
 - `index.html`（Web Scanner UI）: Vite + React 18 + TypeScript + Tailwind CSS をビルド時に単一ファイルへインライン化（外部通信ゼロ、CSP はスクリプト / スタイルの SHA-256 方式、`file://` で動作）。ソースは `ui/`

@@ -1,8 +1,0 @@
-{
-  "schema_version": "0.7",
-  "name": "shell-runner",
-  "version": "1.0.0",
-  "author": "example",
-  "level": "L1",
-  "effects": ["read", "exec:any"]
-}

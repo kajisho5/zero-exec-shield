@@ -1,0 +1,41 @@
+{
+  "policy_version": "0.8",
+  "defaults": {
+    "read": "allow",
+    "write": "deny",
+    "network": "deny",
+    "exec": "deny",
+    "spend": "deny",
+    "send": "deny"
+  },
+  "rules": [
+    {
+      "id": "ci-out",
+      "effect": "write",
+      "scope": [
+        "$WORKDIR/**",
+        "$OUTPUT",
+        "$INPUT_DIR/**",
+        "$TMPDIR/**"
+      ],
+      "decision": "allow"
+    },
+    {
+      "id": "ci-exec",
+      "effect": "exec",
+      "scope": [
+        "ffmpeg",
+        "ffprobe",
+        "python3",
+        "fc-match"
+      ],
+      "decision": "allow"
+    }
+  ],
+  "require_signature": true,
+  "trusted_keys": [],
+  "sandbox": {
+    "filesystem": "workdir",
+    "network": "off"
+  }
+}
