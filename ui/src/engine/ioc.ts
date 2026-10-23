@@ -1,5 +1,6 @@
 // rules/ioc.json をビルド時にバンドルへ取り込む（単一の真実の源。再ビルドで最新の IoC が反映される）。
 import raw from '../../../rules/ioc.json';
+import type { Effect } from './types';
 
 export interface IocPackage {
   campaign: string;
@@ -12,20 +13,24 @@ export interface IocPackage {
 }
 
 export interface SkillPactRules {
-  contract_filenames: string[];
-  schema_versions: string[];
-  effects: string[];
-  levels: string[];
-  policy_files: string[];
+  spec: { name: string; version: string; url: string; attribution: string; zes_support: string };
+  contract_filename: string;
+  contract_keys: string[];
+  capability_keys: string[];
+  contract_versions: string[];
+  effects: Effect[];
   decision_values: string[];
-  risk_flags: string[];
-  destructive_markers: string[];
-  persistence_markers: string[];
-  trust_model: { l3_means: string; l3_does_not_mean: string; diff_anomaly_detection?: { threshold?: number } };
-  prose_claims: { claim: string; patterns: string[]; forbids: string[] }[];
+  policy_versions: string[];
+  policy_keys: string[];
+  trust_model: { l3_means: string; l3_does_not_mean: string; zes_level: string };
   observed_effect_patterns: Record<string, string[]>;
-  l2_record_filenames: string[];
-  signature_filenames: string[];
+  sensitive_read_patterns: string[];
+  persistence_markers: string[];
+  sensitive_scope_regex: string;
+  broad_scopes: string[];
+  ephemeral_scope_prefixes: string[];
+  integrity: { default_exclude: string[]; protected: string[]; code_extensions: string[] };
+  shell_fence_langs: string[];
   script_extensions: string[];
 }
 

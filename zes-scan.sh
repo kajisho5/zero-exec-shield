@@ -2681,45 +2681,213 @@ check_s48() {
 }
 
 # =============================================================================
-# §49 SkillPact 統合 check_skillpact
-#   - 契約ファイルは jq で JSON としてパースするのみ。スキル本体・スクリプトは実行しない
-#   - L2 テスト記録はファイルの存在と SHA-256 のみ確認（再実行しない）
-#   - L3 署名は署名ファイルの存在のみ確認（cosign verify 等は実行しない）。信頼判定・重大度の軽減には使わない
-#
-#   契約スキーマ（SkillPact v0.8）の一次情報は確認できていないため、以下のフィールドを寛容に読む:
-#     schema_version, name, version, author|publisher, description, level,
-#     effects[]（"exec" / "exec:any" / "network:host" / {"effect":"network","scope":"host"}）,
-#     decision（allow|ask|deny）, operations[]{name, effects[], reversible, decision},
-#     l2{record, sha256} | tests.l2{record, sha256} | l2_record, signature{file} | signature_file
-#   ポリシー: default, rules[]{effect, decision}, never_auto_allow_any（配列 or true）
+# §49 SkillPact 契約（実験的） check_skillpact
+#   AI エージェントのスキルが「宣言した権限」と「コードが実際にしていること」が一致するかを静的に確かめる。
+#   宣言は SkillPact 0.8 形式の skill.contract.json（https://github.com/kajisho5/skillpact、
+#   仕様 © SEVENTHWELL (shogo kajiyama) CC BY 4.0 / スキーマ Apache-2.0）を読む。
+#   - 契約・ポリシーは jq で JSON として読むのみ。スキル本体・テストは実行しない
+#   - 署名は検証しない（signed=true は「署名欄あり・未検証」）。署名の有無で重大度を変えない
+#   - level は契約の自己申告を使わず、ZES の部分検査に合格した場合のみ "L1"。L2/L3 は ZES では判定しない
+#   - 契約のないスキルは対象外（参考 INFO のみ）。契約付きスキルの配下にある SKILL.md は報告しない
+#   - ポリシー（policy_version + defaults を持つ JSON）は構造検査のみ。allow/ask/deny の評価は未実装（README の TODO）
 # =============================================================================
 
-SP_EFFECTS_NORM='def norm: if type=="string" then . elif type=="object" then ((.effect // .type // .name // "") + (if (.scope // null) then ":" + (.scope|tostring) else "" end)) else tostring end;'
+SP_JQ_LIB='
+def sp_esc: gsub("(?<c>[\\\\.^$|()\\[\\]{}+*?])"; "\\\(.c)");
+def sp_glob_re:
+  split("/") as $parts | ($parts | length) as $n |
+  (reduce range(0; $n) as $i ({o: "", g: false};
+    $parts[$i] as $seg | (if $i == 0 or .g then "" else "/" end) as $sep |
+    if $seg == "**" then
+      (if $i == $n - 1 then (.o += (if $i > 0 then "(?:/.*)?" else ".*" end)) | .g = false
+       else (.o += $sep + "(?:[^/]+/)*") | .g = true end)
+    else (.g = false) | (.o += $sep + ($seg | gsub("\\*+"; "*") | explode | map([.] | implode | if . == "*" then "[^/]*" elif . == "?" then "[^/]" else sp_esc end) | join("")))
+    end) | "\\A" + .o + "\\z");
+def sp_gmatch($p): test($p | sp_glob_re);
+def sp_lab($q): test("\\A" + ($q | explode | map([.] | implode | if . == "*" then "[^.]*" elif . == "?" then "." else sp_esc end) | join("")) + "\\z");
+def sp_host_match($p0):
+  if $p0 == "@local" then . == "@local"
+  else (ascii_downcase | rtrimstr(".")) as $h | ($p0 | ascii_downcase | rtrimstr(".")) as $p |
+    if $p == "*" then true else
+    ($h | split(".")) as $hl | ($p | split(".")) as $pl |
+    if ($pl[0] == "*" or $pl[0] == "**") and ($pl | length) > 1 then
+      $pl[1:] as $rest | ($rest | length) as $need |
+      if ($hl | length) < $need + (if $pl[0] == "*" then 1 else 0 end) then false
+      else all(range(0; $need); . as $i | ($hl[($hl | length) - $need + $i] | sp_lab($rest[$i]))) end
+    else ($hl | length) == ($pl | length) and all(range(0; $hl | length); . as $i | ($hl[$i] | sp_lab($pl[$i]))) end end end;
+def sp_literal: split("/") | map(if . == "**" then "\u0002/\u0002" else gsub("\\*"; "\u0001*\u0001") end) | join("/");
+def sp_kind($e): if $e == "read" or $e == "write" then "path" elif $e == "network" then "host" else "generic" end;
+def sp_traversal: test("\\\\") or ((if startswith("/") then .[1:] else . end) | split("/") | any(.[]; . == "" or . == "." or . == ".."));
+def sp_covered($scope; $pats; $kind):
+  if ($scope | length) == 0 then false
+  elif $kind == "path" and ($scope | any(.[]; sp_traversal)) then false
+  else all($scope[]; . as $s | any($pats[]; . as $p | $s == $p or (if $kind == "host" then ($s | sp_host_match($p)) else ($s | sp_literal | sp_gmatch($p)) end))) end;
+def sp_ipath_bad:
+  (type != "string") or (. == "") or (utf8bytelength > 1024) or startswith("/") or test("^[A-Za-z]:") or test("\\\\") or (explode | any(.[]; . < 32))
+  or ((split("/") | length) > 32) or (split("/") | any(.[]; . == "" or . == "." or . == ".."));
+def sp_truthy: . != null and . != false and . != [] and . != "" and . != {} and . != 0;
+def sp_semv: (capture("^(?<a>[0-9]+)\\.(?<b>[0-9]+)\\.(?<c>[0-9]+)(?<pre>-[^+]*)?") // null) | if . == null then null else [(.a | tonumber), (.b | tonumber), (.c | tonumber), (if .pre then 0 else 1 end)] end;
+def sp_rank: if . == "any" then 2 elif . == "scoped" then 1 else 0 end;
+def sp_authors: [(.integrity.signatures // [])[]? | select(type == "object" and ((.role // "author") == "author"))
+  | if .type == "sigstore" then (if .instance == "staging" then "sigstore-staging:" else "sigstore:" end) + "\(.issuer)|\(.identity)" else .key end
+  | select(type == "string")] | unique;
+def sp_lvl($e): (.permissions[$e].level? // "none") | if type == "string" then . else "none" end;
+'
 
-# 前バージョン比較用: ROOT 内とキャッシュ内の全契約を author<TAB>name<TAB>version<TAB>path で列挙
-sp_contract_index() {
-  local f
-  {
-    local cf
-    while IFS= read -r cf; do
-      files_path "/$(printf '%s' "$cf" | sed 's/\./\\./g')\$"
-    done < <(read_ioc '.skillpact.contract_filenames')
-    if [ -n "$SKILLPACT_CACHE" ] && [ -d "$SKILLPACT_CACHE" ]; then
-      find "$SKILLPACT_CACHE" -type f -name '*.json' 2>/dev/null
-    fi
-  } | sort -u | while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    jq -r --arg p "$f" 'select(type=="object") | [(.author // .publisher // ""), (.name // ""), (.version // ""), $p] | @tsv' "$f" 2>/dev/null
-  done
+# 契約の構造・整合性検査（ZES の部分検査）と宣言の正規化
+SP_ANALYZE='
+. as $c | ($R.effects) as $EFF |
+($c.contract_version) as $cv |
+(if ($cv | type) == "string" and ($R.contract_versions | index($cv)) != null then "ok" else "unsupported" end) as $vs |
+(($cv | type) == "string" and ($cv | test("^[0-9]+\\.[0-9]+$")) and (($cv | split(".") | map(tonumber)) >= [0, 8])) as $v08 |
+([
+  ((keys - $R.contract_keys) | if length > 0 then "SCHEMA" else empty end),
+  ((["contract_version", "skill", "permissions", "capabilities"] - keys) | if length > 0 then "SCHEMA" else empty end),
+  (if has("kind") and ((.kind | IN("tool", "instructions")) | not) then "SCHEMA" else empty end),
+  (if has("$schema") and ((.["$schema"] | type) != "string") then "SCHEMA" else empty end),
+  (try (if has("x") and ((.x | type) != "object" or (.x | keys | any(.[]; test("^[a-z0-9][a-z0-9-]*$") | not))) then "SCHEMA" else empty end) catch "SCHEMA"),
+  (try (.skill | if type != "object" then "SCHEMA"
+     elif (keys - ["name", "version", "license", "homepage", "source", "authors", "native_contract"] | length) > 0 then "SCHEMA"
+     elif ((.name | type == "string" and test("^[a-z0-9]+(-[a-z0-9]+)*$") and length <= 64) and (.version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?$"))) | not then "SCHEMA"
+     else empty end) catch "SCHEMA"),
+  (try (.permissions | if type != "object" or ((keys | sort) != ($EFF | sort)) then "SCHEMA"
+     else (.[] | if type != "object" or ((keys - ["level", "scope", "why", "confirm"]) | length) > 0 or ((.level | IN("none", "scoped", "any")) | not)
+       or (has("scope") and ((.scope | type) != "array" or any(.scope[]; type != "string")))
+       or (has("confirm") and ((.confirm | IN("never", "each", "session")) | not)) then "SCHEMA" else empty end) end) catch "SCHEMA"),
+  (try (.capabilities | if type != "array" then "SCHEMA" else (.[] |
+     if type != "object" or ((keys - $R.capability_keys) | length) > 0 then "SCHEMA"
+     elif ((.id | type == "string") and (.summary | type == "string") and ((.effects | type) == "array")) | not then "SCHEMA"
+     elif (.effects | all(.[]; IN($EFF[])) and ((unique | length) == length)) | not then "SCHEMA"
+     elif ((.conditional_effects // []) | type != "array" or any(.[]; type != "object" or ((.effect | IN($EFF[])) | not))) then "SCHEMA"
+     elif ((.effect_scopes // {}) | type != "object" or any(keys[]; IN($EFF[]) | not) or any(.[]; type != "array" or any(.[]; type != "string"))) then "SCHEMA"
+     else empty end) end) catch "SCHEMA"),
+  (try (if has("integrity") then (.integrity | if type != "object" or ((keys - ["algorithm", "canonicalization", "exclude", "files", "signatures"]) | length) > 0 then "SCHEMA"
+     elif has("algorithm") and .algorithm != "sha256" then "SCHEMA"
+     elif ((.files // {}) | type != "object" or any(.[]; type != "string" or (test("^[0-9a-f]{64}$") | not))) then "SCHEMA"
+     elif ((.exclude // []) | type != "array" or any(.[]; type != "string" or length == 0)) then "SCHEMA"
+     elif ((.signatures // []) | type != "array" or any(.[]; type != "object" or ((.type | IN("ed25519", "sigstore")) | not) or (has("role") and ((.role | IN("author", "reviewer", "scanner")) | not)))) then "SCHEMA"
+     else empty end) else empty end) catch "SCHEMA"),
+  (try (if has("tests") then (.tests | if type != "object" or ((keys - ["setup", "cases"]) | length) > 0 then "SCHEMA"
+     elif ((.cases // []) | type != "array" or any(.[]; type != "object" or (has("id") and has("run") and has("expect") | not))) then "SCHEMA"
+     else empty end) else empty end) catch "SCHEMA")
+] | unique) as $schema |
+(if $vs != "ok" or ($schema | length) > 0 then [] else (try [
+  (.capabilities | map(.id) | group_by(.) | map(select(length > 1)) | if length > 0 then "DUP_CAPABILITY" else empty end),
+  (.capabilities[] | (.effects[], ((.conditional_effects // [])[] | .effect)) as $e | select(($c | sp_lvl($e)) == "none") | "UNDECLARED_EFFECT"),
+  ($EFF[] as $e | .permissions[$e] | select(.level == "scoped" and ((.scope // []) | length) == 0) | "SCOPE_EMPTY"),
+  (("read", "write") as $e | (.permissions[$e].scope // [])[] | select(sp_traversal) | "SCOPE_TRAVERSAL"),
+  (.capabilities[] | (.effect_scopes // {}) | to_entries[] | select(.key | IN("read", "write")) | .value[] | select(sp_traversal) | "SCOPE_TRAVERSAL"),
+  (.capabilities[] | (.effect_scopes // {}) | to_entries[] | .key as $e | select(($c | sp_lvl($e)) == "scoped")
+     | select(sp_covered(.value; ($c.permissions[$e].scope // []); sp_kind($e)) | not) | "SCOPE_WIDENED"),
+  (([(.requirements.binaries // [])[]?.name, (.requirements.runtimes // [])[]?.name]) as $rn | (.capabilities[] | (.requires // [])[] | select(IN($rn[]) | not) | "UNKNOWN_REQUIREMENT")),
+  (([(.requirements.binaries // [])[]? | (.features_check // {}) | keys[]]) as $fk | (.capabilities[] | (.requires_features // [])[] | select(type == "string") | select((split(":")[0] | IN($fk[])) | not) | "UNKNOWN_FEATURE_KIND")),
+  (.capabilities[] | (.entry.cli? // []) | if type == "array" then .[] else empty end | select(type == "string" and startswith("$SKILL_DIR/")) | ltrimstr("$SKILL_DIR/") as $r
+     | select((($files + $links) | any(.[]; . == $r or startswith($r + "/"))) | not) | "ENTRY_MISSING"),
+  (if $fm != "" and $fm != .skill.name then "NAME_MISMATCH" else empty end),
+  ((.capabilities | map(.id)) as $ids | (.tests.cases // [])[] |
+     (select(.capability != null and ((.capability | IN($ids[])) | not)) | "TEST_UNKNOWN_CAPABILITY"),
+     (select($v08 and .network == true and ($c | sp_lvl("network")) == "none") | "TEST_UNDECLARED_NETWORK")),
+  (if $v08 and (((.x.init.uncertain? // null) | sp_truthy) or ((.x.import.uncertain? // null) | sp_truthy) or ([del(.x) | .. | strings | select(contains("TODO("))] | length > 0)) then "UNCONFIRMED_DRAFT" else empty end),
+  (if has("integrity") then (.integrity as $I | ($I.files // {}) as $F |
+     (if $v08 and ($F | has("SKILL.md") | not) then "INTEGRITY_EMPTY" else empty end),
+     ($F | keys[] as $rel |
+        if ($rel | sp_ipath_bad) then "INTEGRITY_PATH"
+        elif ($links | any(.[]; . == $rel or ($rel | startswith(. + "/")))) then "INTEGRITY_PATH"
+        elif ($hashes | has($rel) | not) then "INTEGRITY_MISSING"
+        elif $hashes[$rel] != $F[$rel] then "INTEGRITY_MISMATCH" else empty end),
+     (($R.integrity.default_exclude + ($I.exclude // [])) as $ex |
+      ($R.integrity.protected + ($R.integrity.code_extensions | map("**/*." + .))) as $prot |
+      ([(.capabilities[] | (.entry.cli? // []) | if type == "array" then .[] else empty end), ((.tests.cases // [])[] | .run | if type == "array" then .[] else . end), ((.tests.setup // [])[] | if type == "array" then .[] else . end)]
+        | map(select(type == "string") | match("\\$SKILL_DIR/([^\\s\u0027\"]+)"; "g") | .captures[0].string)) as $must |
+      (($files[] | select(. != "skill.contract.json") | . as $rel | select($F | has($rel) | not)
+        | select(any($prot[]; . as $p | $rel | sp_gmatch($p)) or ($rel | IN($must[])) or (any($ex[]; . as $p | $rel | sp_gmatch($p)) | not))
+        | if $v08 then "INTEGRITY_UNLISTED" else empty end),
+       ($links[] | . as $rel | select(any($prot[]; . as $p | $rel | sp_gmatch($p)) or (any($ex[]; . as $p | $rel | sp_gmatch($p)) | not))
+        | if $v08 then "INTEGRITY_PATH" else empty end))),
+     ([($I.signatures // [])[] | if .type == "sigstore" then "sigstore:\(.issuer)|\(.identity)|\(.instance)" else .key end] | group_by(.) | if any(.[]; length > 1) then "DUP_SIGNATURE" else empty end))
+   else empty end)
+] catch ["SCHEMA"]) end | unique) as $cross |
+(($schema + $cross) | unique) as $errors |
+(try (($vs == "ok") and ((.permissions | type) == "object") and all($EFF[]; . as $e | ($c.permissions[$e] | type) == "object" and (($c.permissions[$e].level // "") | IN("none", "scoped", "any")))) catch false) as $permsok |
+(if $permsok then [$EFF[] as $e | select(($c | sp_lvl($e)) != "none") | $e] else [] end) as $declared |
+(try ([(.permissions.read.scope // [])[], ((.capabilities // [])[] | (.conditional_effects // [])[] | select(.effect == "read") | (.scope // [])[])]) catch []) as $rscopes |
+(try ([(.permissions.write.scope // [])[], ((.capabilities // [])[] | (.conditional_effects // [])[] | select(.effect == "write") | (.scope // [])[])]) catch []) as $wscopes |
+(($c | sp_lvl("read")) == "any" or ($rscopes | any(.[]; type == "string" and (IN($R.broad_scopes[]) or test($R.sensitive_scope_regex; "i"))))) as $secret_read |
+(($c | sp_lvl("write")) == "any" or ($wscopes | any(.[]; type == "string" and (. as $s | any($R.ephemeral_scope_prefixes[]; . as $p | $s | startswith($p)) | not)))) as $durable_write |
+(if $permsok then [
+  (("exec", "network", "spend", "send") as $e | select($obs[$e] and ($c | sp_lvl($e)) == "none") | {effect: $e, why: "none"}),
+  (if $obs.read and ($secret_read | not) then {effect: "read", why: (if ($c | sp_lvl("read")) == "none" then "none" else "scope" end), sensitive: true} else empty end),
+  (if $obs.durable and ($durable_write | not) then {effect: "write", why: (if ($c | sp_lvl("write")) == "none" then "none" else "scope" end), durable: true}
+   elif $obs.write and ($c | sp_lvl("write")) == "none" then {effect: "write", why: "none"} else empty end)
+] else [] end) as $div |
+(try sp_authors catch []) as $authors |
+{ vstatus: $vs, cv: (if ($cv | type) == "string" then $cv elif $cv == null then null else ($cv | tojson) end),
+  name: (try (.skill.name | strings) catch null), sver: (try (.skill.version | strings) catch null),
+  errors: $errors, permsok: $permsok, declared: $declared,
+  signed: (try (((.integrity.signatures // []) | type) == "array" and ((.integrity.signatures // []) | length) > 0) catch false),
+  authors: $authors, author: ($authors[0] // null),
+  signers: (try ([(.integrity.signatures // [])[] | select((.role // "author") == "author") | .signer | strings] | unique) catch []),
+  level: (if $vs == "ok" and ($errors | length) == 0 then "L1" else null end),
+  divergence: $div }
+'
+
+# 前版との比較（spec §17: 権限の拡大は major を上げるべき）
+SP_DIFF='
+. as $cur | if ($cur.ver | sp_semv) == null then null else
+[$idx[] | select(.name == $cur.name and .path != $cur.path and (.ver | type) == "string" and (.ver | sp_semv) != null and (.ver | sp_semv) < ($cur.ver | sp_semv))]
+| (max_by(.ver | sp_semv)) as $p |
+if $p == null then null else
+  [ $R.effects[] as $e | ($cur.perms[$e] // {level: "none"}) as $a | ($p.perms[$e] // {level: "none"}) as $b |
+    if (($a.level // "none") | sp_rank) > (($b.level // "none") | sp_rank) then {effect: $e, text: "\($e): \($b.level // "none")→\($a.level)"}
+    elif $a.level == "scoped" and $b.level == "scoped" then
+      [($a.scope // [])[] as $s | select(sp_covered([$s]; ($b.scope // []); sp_kind($e)) | not) | $s] as $new |
+      if ($new | length) > 0 then {effect: $e, text: "\($e): +\($new | join(","))"} else empty end
+    else empty end ] as $w |
+  ($cur.ver | sp_semv) as $cv | ($p.ver | sp_semv) as $pv |
+  ($cv[0] > $pv[0] or ($cv[0] == 0 and $pv[0] == 0 and $cv[1] > $pv[1])) as $major |
+  (if ($cur.authors | length) > 0 and ($p.authors | length) > 0 then (if ([$cur.authors[] | IN($p.authors[])] | any) then "same" else "changed" end) else "unsigned" end) as $ident |
+  if ($w | length) > 0 and ($major | not) then {prev_path: $p.path, prev_ver: $p.ver, widened: $w, ident: $ident} else null end
+end end
+'
+
+# I-JSON（spec §4.1）の問題を 1 つ出力する（問題が無ければ何も出力しない）
+sp_ijson_problem() {
+  local f="$1" a b
+  if ! jq empty "$f" >/dev/null 2>&1; then echo "not valid JSON (or lone surrogate)"; return 0; fi
+  jq -e 'type == "object"' "$f" >/dev/null 2>&1 || { echo "top-level value is not an object"; return 0; }
+  a="$(jq -c --stream 'select(length == 2)' "$f" 2>/dev/null | wc -l | tr -d ' ')"
+  b="$(jq -c 'tostream | select(length == 2)' "$f" 2>/dev/null | wc -l | tr -d ' ')"
+  [ "$a" = "$b" ] || { echo "duplicate member name"; return 0; }
+  jq -e '([paths | length] | max // 0) > 63' "$f" >/dev/null 2>&1 && { echo "nesting deeper than 64"; return 0; }
+  jq -n -e --stream 'any(inputs; length == 2 and (.[1] | type) == "number" and ((.[1] | isinfinite) or (.[1] | isnan) or ((.[1] | if . < 0 then -. else . end) > 9007199254740991)))' "$f" >/dev/null 2>&1 \
+    && { echo "number outside ±(2^53-1)"; return 0; }
+  jq -e '[.. | strings, (objects | keys[])] | any(.[]; contains("\ufffd"))' "$f" >/dev/null 2>&1 && { echo "invalid UTF-8 or lone surrogate"; return 0; }
+  return 0
 }
 
-# スキルディレクトリ（SKILL.md または契約ファイルを含むディレクトリ）
+# SKILL.md frontmatter の name
+sp_fm_name() {
+  awk 'NR == 1 { sub(/^\357\273\277/, "") } { sub(/\r$/, "") }
+    NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; fm = 1; next }
+    fm && /^---[[:space:]]*$/ { exit }
+    fm && /^name:/ { v = $0; sub(/^name:[[:space:]]*/, "", v); sub(/[[:space:]]+$/, "", v)
+      if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2); print v; exit }' "$1" 2>/dev/null
+}
+
+# スキルディレクトリ（SKILL.md または skill.contract.json を含むディレクトリ）
 sp_skill_dirs() {
-  {
-    files_named '^SKILL\.md$' | while IFS= read -r f; do dirname -- "$f"; done
-    files_named '^skill\.contract\.json$' | while IFS= read -r f; do dirname -- "$f"; done
-    files_path '/\.skillpact/contract\.json$' | while IFS= read -r f; do dirname -- "$(dirname -- "$f")"; done
-  } | sort -u
+  { files_named '^SKILL\.md$'; files_named '^skill\.contract\.json$'; } | while IFS= read -r f; do dirname -- "$f"; done | sort -u
+}
+
+# 祖先ディレクトリ（ROOT 内）に契約があるか（契約付きスキルの一部として扱い、個別に報告しない）
+sp_under_contract() {
+  local d="$1"
+  while [ "$d" != "$ROOT" ] && [ "$d" != "/" ] && [ "$d" != "." ]; do
+    d="$(dirname -- "$d")"
+    case "$d/" in "$ROOT"/*) ;; *) return 1 ;; esac
+    [ -f "$d/skill.contract.json" ] && return 0
+  done
+  return 1
 }
 
 # スキル直下のファイル（入れ子スキルの配下は除外）
@@ -2729,37 +2897,35 @@ sp_skill_files() {
     local rel="${f#"$dir"/}" sub="$dir" part nested=0
     while [[ "$rel" == */* ]]; do
       part="${rel%%/*}"; sub="$sub/$part"; rel="${rel#*/}"
-      if [ -f "$sub/SKILL.md" ] || [ -f "$sub/skill.contract.json" ] || [ -f "$sub/.skillpact/contract.json" ]; then
-        [ "$sub" != "$dir/.skillpact" ] && { nested=1; break; }
-      fi
+      if [ -f "$sub/SKILL.md" ] || [ -f "$sub/skill.contract.json" ]; then nested=1; break; fi
     done
     [ "$nested" -eq 0 ] && printf '%s\n' "$f"
   done
 }
 
-# 実態抽出用テキスト（コードスコープ）と prose を分離して一時ファイルに書き出す（出力はしない）
+# 実態抽出用テキスト（コードスコープ）を一時ファイルに書き出す（出力はしない）
 sp_extract() {
-  local dir="$1" code="$2" prose="$3" tools="$4"
-  : >"$code"; : >"$prose"; : >"$tools"
+  local dir="$1" code="$2" tools="$3"
+  : >"$code"; : >"$tools"
   local f base ext
   local -a sexts; mapfile -t sexts < <(read_ioc '.skillpact.script_extensions')
   local sre; sre="$(printf '%s|' "${sexts[@]}" | sed 's/|$//')"
+  local fre; fre="$(read_ioc '.skillpact.shell_fence_langs' | paste -sd'|' -)"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     base="${f##*/}"; ext="${base##*.}"
-    case "$f" in
-      */.skillpact/*|*/skill.contract.json|*/policy-v0.8.json|*.sig|*.bundle|*/l2-test-record.json) continue ;;
-    esac
+    [ "$base" = "skill.contract.json" ] && continue
+    grep -q -x -F -- "$f" "$TMP_DIR/sp_policies.lst" 2>/dev/null && continue
     if [[ "$base" =~ \.md$ ]]; then
-      awk -v code="$code" -v prose="$prose" -v tools="$tools" '
+      ZES_FRE="$fre" awk -v code="$code" -v tools="$tools" '
+        BEGIN { fre = "^(" ENVIRON["ZES_FRE"] ")$" }
         NR==1 && /^---[[:space:]]*$/ { fm=1; next }
         fm && /^---[[:space:]]*$/ { fm=0; next }
         fm { if ($0 ~ /^allowed-tools:/) print $0 >> tools; print $0 >> code; next }
         /^[[:space:]]*(```|~~~)/ {
-          if (!infence) { lang=$0; sub(/^[[:space:]]*(```|~~~)[[:space:]]*/,"",lang); sub(/[[:space:]{].*/,"",lang); print "#ZES-FENCE " tolower(lang) >> code }
+          if (!infence) { lang=$0; sub(/^[[:space:]]*(```|~~~)[[:space:]]*/,"",lang); sub(/[[:space:]{].*/,"",lang); lang=tolower(lang); if (lang ~ fre) print "#ZES-SHELL-FENCE" >> code }
           infence=!infence; next }
-        infence { print $0 >> code; next }
-        { print $0 >> prose }' "$f"
+        infence { print $0 >> code; next }' "$f"
     elif [[ "$ext" =~ ^($sre)$ ]] || head -c 2 -- "$f" 2>/dev/null | grep -q '^#!'; then
       printf '#ZES-SCRIPT %s\n' "$base" >>"$code"
       cat -- "$f" >>"$code"; printf '\n' >>"$code"
@@ -2769,238 +2935,192 @@ sp_extract() {
   done < <(sp_skill_files "$dir")
 }
 
+# 静的解析で見えた効果（SkillPact の 6 効果に対応づける。secrets → read（機密ファイル）、persist → write（作業領域外））
+sp_observed() {
+  local code="$1" tools="$2" e pats m re
+  local exec=false network=false write=false spend=false send=false read=false durable=false
+  for e in exec network write spend send; do
+    pats="$(jq -r --arg e "$e" '.skillpact.observed_effect_patterns[$e] // [] | join("|")' "$IOC_FILE")"
+    if [ "$e" = write ]; then
+      sed -E 's#[0-9&]?>>?[[:space:]]*/dev/null##g' "$code" 2>/dev/null | grep -q -E -- "$pats" && write=true
+    elif [ -n "$pats" ] && grep -q -E -- "$pats" "$code" 2>/dev/null; then printf -v "$e" true; fi
+  done
+  grep -q -E '^#ZES-(SCRIPT |SHELL-FENCE)' "$code" && exec=true
+  grep -q -E '(^|[^A-Za-z])Bash([^A-Za-z]|$)' "$tools" && exec=true
+  grep -q -E '(WebFetch|WebSearch)' "$tools" && network=true
+  grep -q -E '(^|[^A-Za-z])(Write|Edit|MultiEdit|NotebookEdit)([^A-Za-z]|$)' "$tools" && write=true
+  pats="$(jq -r '.skillpact.sensitive_read_patterns | join("|")' "$IOC_FILE")"
+  grep -q -E -- "$pats" "$code" 2>/dev/null && read=true
+  while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    if [ "$m" = "registry run" ]; then re='registry[[:space:]]+run|CurrentVersion\\Run|reg[[:space:]]+add[^\n]*\\Run'
+    else re="$(printf '%s' "$m" | sed 's/[.[\*^$]/\\&/g; s/ /[[:space:]]+/g')"; fi
+    grep -q -i -E -- "$re" "$code" 2>/dev/null && { durable=true; write=true; }
+  done < <(read_ioc '.skillpact.persistence_markers')
+  jq -n -c --argjson x "$exec" --argjson n "$network" --argjson w "$write" --argjson s "$spend" --argjson m "$send" --argjson r "$read" --argjson d "$durable" \
+    '{exec:$x, network:$n, write:$w, spend:$s, send:$m, read:$r, durable:$d}'
+}
+
+# 前版比較用: ROOT 内の skill.contract.json とキャッシュ内の契約を JSONL で列挙
+sp_contract_index() {
+  {
+    files_named '^skill\.contract\.json$'
+    if [ -n "$SKILLPACT_CACHE" ] && [ -d "$SKILLPACT_CACHE" ]; then find "$SKILLPACT_CACHE" -type f -name '*.json' 2>/dev/null; fi
+  } | sort -u | while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    jq -c --arg p "$f" "$SP_JQ_LIB"' select(type == "object" and (.skill.name | type) == "string" and (.skill.version | type) == "string" and (.permissions | type) == "object")
+      | {path: $p, name: .skill.name, ver: .skill.version, perms: .permissions, authors: (try sp_authors catch [])}' "$f" 2>/dev/null
+  done
+}
+
+sp_field() {  # sp_field ANALYSIS_JSON OBSERVED_JSON CONTRACT_PATH DIFF_ANOMALY
+  jq -n -c --argjson a "$1" --argjson o "$2" --arg cp "$3" --argjson da "$4" --argjson R "$SP_RULES" '
+    {contract_path: (if $cp == "" then null else $cp end), contract_version: ($a.cv // null), level: ($a.level // null),
+     signed: ($a.signed // false), author: ($a.author // null), declared_effects: ($a.declared // []),
+     observed_effects: [$R.effects[] as $e | select($o[$e]) | $e], policy_decision: null, l2_tested: false,
+     divergence: [($a.divergence // [])[].effect] | unique | sort_by(. as $e | $R.effects | index($e)), diff_anomaly: $da}'
+}
+
+# SkillPact ポリシー（policy_version と defaults を持つ JSON）の構造検査
+sp_policies() {
+  : >"$TMP_DIR/sp_policies.lst"
+  local f prob bad sp
+  grep -E '\.json$' "$FILES_LIST" | grep -v -E '/skill\.contract\.json$' | tr '\n' '\0' \
+    | xargs -0 grep -l -I -F '"policy_version"' -- /dev/null 2>/dev/null | grep -v '^/dev/null$' | while IFS= read -r f; do
+    jq -e 'type == "object" and has("policy_version") and has("defaults")' "$f" >/dev/null 2>&1 || continue
+    printf '%s\n' "$f" >>"$TMP_DIR/sp_policies.lst"
+    prob="$(sp_ijson_problem "$f")"
+    if [ -z "$prob" ]; then
+      bad="$(jq -r --argjson R "$SP_RULES" '[
+        ((keys - $R.policy_keys) | if length > 0 then "unknown key " + join(",") else empty end),
+        (if (.policy_version | IN($R.policy_versions[])) | not then "policy_version" else empty end),
+        (.defaults | if type != "object" or ((keys | sort) != ($R.effects | sort)) or any(.[]; IN($R.decision_values[]) | not) then "defaults" else empty end),
+        ((.rules // []) | if type != "array" then "rules" else (.[] | if type != "object" or ((keys - ["id", "effect", "scope", "decision"]) | length) > 0 or ((.effect | IN($R.effects[])) | not) or ((.decision | IN($R.decision_values[])) | not) or (has("scope") and ((.scope | type) != "array" or any(.scope[]; type != "string"))) then "rules" else empty end) end),
+        ("never_auto_allow_any", "trusted_keys") as $k | (if has($k) and ((.[$k] | type) != "array" or any(.[$k][]; type != "string")) then $k else empty end),
+        ("require_signature", "ask_on_destructive", "allowlist_overrides_ask") as $k | (if has($k) and ((.[$k] | type) != "boolean") then $k else empty end),
+        (if has("min_contract_version") and ((.min_contract_version | type) != "string" or (.min_contract_version | test("^[0-9]+\\.[0-9]+$") | not)) then "min_contract_version" else empty end),
+        (if has("compositions") and ((.compositions | type) != "object" or ((.compositions | keys) - ["exfiltration", "persistence", "spend_untrusted"] | length) > 0 or any(.compositions[]; IN($R.decision_values[]) | not)) then "compositions" else empty end)
+      ] | unique | join(", ")' "$f" 2>/dev/null)" || bad="SCHEMA"
+    else bad="JSON: $prob"; fi
+    sp="$(jq -n -c '{contract_path:null, contract_version:null, level:null, signed:false, author:null, declared_effects:[], observed_effects:[], policy_decision:null, l2_tested:false, divergence:[], diff_anomaly:false}')"
+    if [ -n "$bad" ]; then
+      medium "skillpact-invalid" "$f" "SkillPact ポリシーを検証できません（${bad}）。ZES はポリシーの allow/ask/deny 判定を行いません" "$sp"
+    else
+      log_info "SkillPact ポリシーを検出（構造は妥当。allow/ask/deny の評価は ZES では未実装）: $f"
+    fi
+  done
+}
+
+sp_effect_label() {
+  case "$1" in
+    exec) printf 'exec（他のプログラムの実行）' ;; network) printf 'network（外部ホストとの通信）' ;;
+    spend) printf 'spend（課金・決済）' ;; send) printf 'send（メール・投稿・メッセージの送信）' ;;
+    read) printf 'read（機密ファイル: ~/.ssh・.env・認証情報など）' ;; write) printf 'write（ファイルの書き込み）' ;;
+  esac
+}
+
 check_skillpact() {
-  log_section "§49" "SkillPact統合"
+  log_section "§49" "SkillPact 契約（実験的）"
   if [ "$HAVE_JQ" -ne 1 ]; then record_error "§49" "jq_unavailable"; return 0; fi
-  local -a cfn pfn l2fn sigfn; mapfile -t cfn < <(read_ioc '.skillpact.contract_filenames')
-  mapfile -t pfn < <(read_ioc '.skillpact.policy_files'); mapfile -t l2fn < <(read_ioc '.skillpact.l2_record_filenames')
-  mapfile -t sigfn < <(read_ioc '.skillpact.signature_filenames')
-  local threshold; threshold="$(jq -r '.skillpact.trust_model.diff_anomaly_detection.threshold // 0.3' "$IOC_FILE")"
-  local schema_ok; schema_ok="$(jq -c '.skillpact.schema_versions' "$IOC_FILE")"
-  local risk_flags; risk_flags="$(jq -c '.skillpact.risk_flags' "$IOC_FILE")"
-  sp_contract_index >"$TMP_DIR/sp_index.tsv"
-  local dir n_skills=0
+  SP_RULES="$(jq -c '.skillpact' "$IOC_FILE")"
+  sp_policies
+  sp_contract_index >"$TMP_DIR/sp_index.jsonl"
+  local dir n_skills=0 n_contracts=0
   while IFS= read -r dir; do
     [ -n "$dir" ] || continue
     n_skills=$((n_skills + 1))
-    local cpath="" c
-    for c in "${cfn[@]}"; do [ -f "$dir/$c" ] && [ ! -L "$dir/$c" ] && { cpath="$dir/$c"; break; }; done
-    local code="$TMP_DIR/sp_code" prose="$TMP_DIR/sp_prose" tools="$TMP_DIR/sp_tools"
-    sp_extract "$dir" "$code" "$prose" "$tools"
-
-    # --- 実態エフェクト（静的解析。§2/§7/§15/§17 と同じ「パスのみ・内容非出力」方針） ---
-    local -a observed=(read)
-    local eff
-    for eff in exec network write secrets spend; do
-      local pats; pats="$(jq -r --arg e "$eff" '.skillpact.observed_effect_patterns[$e] // [] | join("|")' "$IOC_FILE")"
-      if [ -n "$pats" ] && grep -q -E -- "$pats" "$code" 2>/dev/null; then observed+=("$eff"); continue; fi
-      case "$eff" in
-        exec) grep -q '^#ZES-SCRIPT ' "$code" && { observed+=(exec); continue; }
-              grep -q -E '^#ZES-FENCE (bash|sh|shell|zsh|fish|console|shell-session|powershell|ps1|pwsh|cmd|bat|python|python3|py|js|javascript|node|mjs|ts|typescript|ruby|rb|perl|php)$' "$code" && { observed+=(exec); continue; }
-              grep -q -E '(^|[^A-Za-z])Bash([^A-Za-z]|$)' "$tools" && observed+=(exec) ;;
-        network) grep -q -E '(WebFetch|WebSearch)' "$tools" && observed+=(network) ;;
-        write) grep -q -E '(^|[^A-Za-z])(Write|Edit|MultiEdit|NotebookEdit)([^A-Za-z]|$)' "$tools" && observed+=(write) ;;
-      esac
-    done
-    local destructive=0 persistence=0 m
-    while IFS= read -r m; do
-      [ -n "$m" ] || continue
-      local re
-      if [[ "$m" == *' | '* ]]; then re="$(printf '%s' "${m%% | *}" | sed 's/[.[\*^$]/\\&/g')[^|\n]*\|[[:space:]]*$(printf '%s' "${m##* | }" | sed 's/[.[\*^$]/\\&/g')"
-      else re="$(printf '%s' "$m" | sed 's/[.[\*^$]/\\&/g; s/ /[[:space:]]+/g')"; fi
-      grep -q -i -E -- "$re" "$code" 2>/dev/null && destructive=1
-    done < <(read_ioc '.skillpact.destructive_markers')
-    while IFS= read -r m; do
-      [ -n "$m" ] || continue
-      local re
-      if [ "$m" = "registry run" ]; then re='registry[[:space:]]+run|CurrentVersion\\Run|reg[[:space:]]+add[^\n]*\\Run'
-      else re="$(printf '%s' "$m" | sed 's/[.[\*^$]/\\&/g; s/ /[[:space:]]+/g')"; fi
-      grep -q -i -E -- "$re" "$code" 2>/dev/null && persistence=1
-    done < <(read_ioc '.skillpact.persistence_markers')
-    [ "$persistence" -eq 1 ] && observed+=(write)
-    [ "$destructive" -eq 1 ] && observed+=(exec write)
-    local observed_json; observed_json="$(printf '%s\n' "${observed[@]}" | sort -u | jq -R . | jq -s -c 'sort_by(. as $e | ["exec","network","write","read","secrets","spend"] | index($e))')"
+    local cpath="$dir/skill.contract.json"
+    { [ -f "$cpath" ] && [ ! -L "$cpath" ]; } || cpath=""
+    if [ -z "$cpath" ] && sp_under_contract "$dir"; then continue; fi
+    local code="$TMP_DIR/sp_code" tools="$TMP_DIR/sp_tools"
+    sp_extract "$dir" "$code" "$tools"
+    local obs; obs="$(sp_observed "$code" "$tools")"
+    local obs_txt; obs_txt="$(printf '%s' "$obs" | jq -r --argjson R "$SP_RULES" '[$R.effects[] as $e | select(.[$e]) | $e] | join(",")')"
 
     if [ -z "$cpath" ]; then
-      local sp
-      sp="$(jq -n -c --argjson obs "$observed_json" '{contract_path:null, contract_version:null, level:null, signed:false, author:null,
-             declared_effects:[], observed_effects:$obs, policy_decision:null, l2_tested:false,
-             divergence:($obs - ["read"]), diff_anomaly:false}')"
-      high "skillpact-undeclared" "$dir" "SkillPact 契約ファイルが存在しません（実態: $(printf '%s' "$observed_json" | jq -r 'join(",")')）" "$sp"
+      # 契約なし: SkillPact を使わないスキルは対象外。影響の大きい効果が見える場合のみ参考 INFO
+      if [ -f "$dir/SKILL.md" ] && printf '%s' "$obs" | jq -e '.exec or .network or .spend or .send' >/dev/null; then
+        info "skillpact-undeclared" "$dir" "このスキルには SkillPact 契約（skill.contract.json）がないため、宣言との比較は行いません（参考: コードに見える効果 ${obs_txt}）" \
+          "$(sp_field '{}' "$obs" "" false)"
+      fi
       continue
     fi
-    if ! jq -e 'type=="object"' "$cpath" >/dev/null 2>&1; then
-      local sp
-      sp="$(jq -n -c --arg cp "$cpath" --argjson obs "$observed_json" '{contract_path:$cp, contract_version:null, level:null, signed:false, author:null,
-             declared_effects:[], observed_effects:$obs, policy_decision:null, l2_tested:false, divergence:($obs - ["read"]), diff_anomaly:false}')"
-      high "skillpact-undeclared" "$cpath" "SkillPact 契約ファイルが JSON オブジェクトとして解析できません（未宣言として扱う）" "$sp"
+    n_contracts=$((n_contracts + 1))
+    local prob; prob="$(sp_ijson_problem "$cpath")"
+    if [ -n "$prob" ]; then
+      medium "skillpact-invalid" "$cpath" "SkillPact 契約を検証できません（CONTRACT_JSON: ${prob}）。宣言を読めないため乖離判定は行いません" "$(sp_field '{}' "$obs" "$cpath" false)"
+      record_error "§49" "contract_unparseable:$cpath"
+      continue
+    fi
+    # スキル配下の全ファイル・シンボリックリンク（相対パス）と integrity.files に載ったファイルのハッシュ
+    local files_json links_json hashes_json rel
+    files_json="$(awk -v d="$dir/" 'index($0, d)==1 { print substr($0, length(d) + 1) }' "$FILES_LIST" | jq -R . | jq -s -c .)"
+    links_json="$(awk -v d="$dir/" 'index($0, d)==1 { print substr($0, length(d) + 1) }' "$LINKS_LIST" | jq -R . | jq -s -c .)"
+    hashes_json="$(jq -r '(.integrity.files? // {}) | if type == "object" then keys[] else empty end' "$cpath" 2>/dev/null | while IFS= read -r rel; do
+        case "/$rel/" in */../*|*/./*|*//*) continue ;; esac
+        { [ -f "$dir/$rel" ] && [ ! -L "$dir/$rel" ]; } || continue
+        printf '%s\t%s\n' "$rel" "$(sha256_file "$dir/$rel")"
+      done | jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): .[1]}) | add // {}')"
+    local fm=""; [ -f "$dir/SKILL.md" ] && fm="$(sp_fm_name "$dir/SKILL.md")"
+    local a
+    a="$(jq -c --argjson R "$SP_RULES" --argjson files "$files_json" --argjson links "$links_json" --argjson hashes "$hashes_json" \
+          --arg fm "$fm" --argjson obs "$obs" "$SP_JQ_LIB $SP_ANALYZE" "$cpath" 2>/dev/null)"
+    if [ -z "$a" ]; then
+      medium "skillpact-invalid" "$cpath" "SkillPact 契約を検証できません（解析に失敗）。乖離判定は行いません" "$(sp_field '{}' "$obs" "$cpath" false)"
+      record_error "§49" "contract_analysis_failed:$cpath"
       continue
     fi
 
-    # --- 契約の読み取り（JSON パースのみ） ---
-    local cver level author cname cversion decl_tokens decl_bases cdecision
-    cver="$(jq -r '.schema_version // empty | tostring' "$cpath")"
-    level="$(jq -r '.level // empty | tostring' "$cpath")"
-    author="$(jq -r '(.author // .publisher // empty) | if type=="object" then (.name // .id // tojson) else tostring end' "$cpath")"
-    cname="$(jq -r '.name // empty | tostring' "$cpath")"
-    cversion="$(jq -r '.version // empty | tostring' "$cpath")"
-    decl_tokens="$(jq -c "$SP_EFFECTS_NORM"' [(.effects // [])[] | norm] + [(.operations // [])[] | (.effects // [])[] | norm] | map(select(length>0)) | unique' "$cpath")"
-    decl_bases="$(printf '%s' "$decl_tokens" | jq -c 'map(split(":")[0]) | unique | sort_by(. as $e | ["exec","network","write","read","secrets","spend","persist","longrun"] | index($e) // 99)')"
-    cdecision="$(jq -r '.decision // .policy_decision // empty | tostring' "$cpath")"
+    # 前版との差分（spec §17）
+    local diff="null"
+    if printf '%s' "$a" | jq -e '.vstatus == "ok" and .permsok and (.name | type) == "string" and (.sver | type) == "string"' >/dev/null; then
+      diff="$(jq -c -n --argjson R "$SP_RULES" --slurpfile idx "$TMP_DIR/sp_index.jsonl" --arg p "$cpath" --argjson a "$a" \
+        "$SP_JQ_LIB"' {path: $p, name: $a.name, ver: $a.sver, perms: input.permissions, authors: $a.authors} | '"$SP_DIFF" "$cpath" 2>/dev/null)"
+      [ -n "$diff" ] || diff="null"
+    fi
+    local da=false; [ "$diff" != "null" ] && da=true
+    local sp; sp="$(sp_field "$a" "$obs" "$cpath" "$da")"
+    local sig_note=""
+    printf '%s' "$a" | jq -e '.signed' >/dev/null && sig_note="（契約に署名がありますが ZES は署名を検証しません。署名の有無で重大度は変えません）"
 
-    # --- ポリシー評価 ---
-    local ppath="" p
-    for p in "${pfn[@]}"; do
-      if [ -f "$dir/$p" ]; then ppath="$dir/$p"; break; fi
-      if [ -f "$ROOT/$p" ]; then ppath="$ROOT/$p"; break; fi
-    done
-    local pdecision="$cdecision" policy_violation=""
-    if [ -n "$ppath" ]; then
-      if jq -e 'type=="object"' "$ppath" >/dev/null 2>&1; then
-        local evald
-        evald="$(jq -r --argjson toks "$decl_tokens" '
-          def rank: if .=="deny" then 3 elif .=="ask" then 2 elif .=="allow" then 1 else 0 end;
-          . as $p |
-          [ $toks[] as $t | ( [ ($p.rules // [])[] | select(.effect == $t or .effect == ($t|split(":")[0]) or .effect == (($t|split(":")[0]) + ":any")) | .decision ] | first ) // ($p.default // "ask") ]
-          | if length==0 then ($p.default // "ask") else (max_by(rank)) end' "$ppath" 2>/dev/null)"
-        [ -n "$pdecision" ] || pdecision="$evald"
-        policy_violation="$(jq -r --argjson toks "$decl_tokens" --argjson rf "$risk_flags" '
-          . as $p |
-          (if ($p.never_auto_allow_any | type) == "array" then $p.never_auto_allow_any else $rf end) as $never |
-          def covers($flag; $tok): ($tok == $flag) or (($flag|endswith(":any")) and (($tok|split(":")[0]) == ($flag|split(":")[0])));
-          [ ($p.rules // [])[] | select(.decision == "allow") | .effect as $e | $never[] | select(. == $e or covers(.; $e)) ] as $explicit |
-          [ $toks[] as $t | $never[] as $f | select(covers($f; $t)) |
-            ( [ ($p.rules // [])[] | select(.effect == $t or .effect == ($t|split(":")[0]) or .effect == (($t|split(":")[0]) + ":any")) | .decision ] | first ) // ($p.default // "ask")
-            | select(. == "allow") | $f ] as $implicit |
-          ($explicit + $implicit) | unique | join(",")' "$ppath" 2>/dev/null)"
+    local vs cv errs
+    vs="$(printf '%s' "$a" | jq -r '.vstatus')"; cv="$(printf '%s' "$a" | jq -r '.cv // "未指定"')"
+    if [ "$vs" != "ok" ]; then
+      medium "skillpact-invalid" "$cpath" "SkillPact 契約の contract_version「${cv}」には対応していません（ZES の対応: 0.1〜0.8）。宣言を解釈できないため乖離判定は行いません" "$sp"
+      continue
+    fi
+    errs="$(printf '%s' "$a" | jq -r '.errors | join(",")')"
+    [ -n "$errs" ] && medium "skillpact-invalid" "$cpath" "SkillPact 契約を検証できません（ZES の部分検査: ${errs}）。L1 とは見なしません" "$sp"
+
+    local eff why sens durable lv txt
+    while IFS=$'\t' read -r eff why sens durable; do
+      [ -n "$eff" ] || continue
+      case "$eff" in exec|network|spend|send) lv=HIGH ;; *) lv=MEDIUM ;; esac
+      if [ "$durable" = "true" ]; then
+        txt="コードに作業領域外への永続的な書き込み（crontab・.bashrc・authorized_keys など）が見えますが、契約の write は"
+        [ "$why" = "none" ] && txt="${txt}宣言されていません（permissions.write: none）" || txt="${txt} \$WORKDIR / \$OUTPUT / \$TMPDIR 内に限られています"
+      elif [ "$sens" = "true" ]; then
+        txt="コードが $(sp_effect_label read)を読む可能性がありますが、契約の read は"
+        [ "$why" = "none" ] && txt="${txt}宣言されていません（permissions.read: none）" || txt="${txt}その範囲を含みません"
       else
-        record_error "§49" "policy_parse_failed:$ppath"
+        txt="コードに $(sp_effect_label "$eff")が見えますが、契約は ${eff} を宣言していません（permissions.${eff}: none）"
       fi
-    fi
-    if [ -n "$pdecision" ] && ! jq -e --arg d "$pdecision" '.skillpact.decision_values | index($d)' "$IOC_FILE" >/dev/null 2>&1; then
-      medium "skillpact-divergence" "$cpath" "ポリシー決定の値が decision_values（allow/ask/deny）外: $pdecision"
-    fi
-    # 契約自体が allow を宣言し、リスクフラグを含む場合もポリシー違反として扱う
-    local contract_violation=""
-    if [ -z "$policy_violation" ] && [ "$cdecision" = "allow" ]; then
-      contract_violation="$(jq -r --argjson toks "$decl_tokens" '. as $rf | [ $toks[] as $t | $rf[] | select(. == $t or ((endswith(":any")) and (($t|split(":")[0]) == (split(":")[0])) and (($t|split(":")[1] // "any") == "any"))) ] | unique | join(",")' <<<"$risk_flags")"
-    fi
+      emit "$lv" "skillpact-divergence" "$dir" "${txt}${sig_note}" "$sp"
+    done < <(printf '%s' "$a" | jq -r '.divergence[] | [.effect, .why, (.sensitive // false), (.durable // false)] | @tsv')
 
-    # --- L2 テスト記録（存在と SHA-256 のみ） ---
-    local l2_tested=false l2rec l2hash l2bad=""
-    l2rec="$(jq -r '(.l2.record // .tests.l2.record // .l2_record // empty) | tostring' "$cpath")"
-    l2hash="$(jq -r '(.l2.sha256 // .tests.l2.sha256 // .l2_sha256 // empty) | tostring | ltrimstr("sha256:")' "$cpath")"
-    local cand=""
-    if [ -n "$l2rec" ]; then
-      case "$l2rec" in /*|*..*) l2bad="記録パスがスキル外を指しています" ;; *) [ -f "$dir/$l2rec" ] && cand="$dir/$l2rec" ;; esac
-    else
-      for p in "${l2fn[@]}"; do [ -f "$dir/$p" ] && { cand="$dir/$p"; break; }; done
+    if [ "$da" = true ]; then
+      local dl dtxt
+      dl="$(printf '%s' "$diff" | jq -r 'if any(.widened[]; .effect | IN("exec", "network", "spend", "send")) then "HIGH" else "MEDIUM" end')"
+      dtxt="$(printf '%s' "$diff" | jq -r '"前版 \(.prev_ver)（\(.prev_path)）から権限が拡大していますが（\([.widened[].text] | join(" / "))）、skill.version の major が上がっていません（SkillPact §17）。作者署名鍵: " + (if .ident == "same" then "前版と同一（未検証。正規の鍵で署名された静かな拡大はアカウント侵害の兆候）" elif .ident == "changed" then "前版と異なる（未検証）" else "署名なし" end)')"
+      emit "$dl" "skillpact-account-compromise" "$cpath" "$dtxt" "$sp"
     fi
-    if [ -n "$cand" ]; then
-      if [ -n "$l2hash" ] && [ "$(sha256_file "$cand")" != "$l2hash" ]; then l2bad="記録の SHA-256 が契約と不一致"
-      else l2_tested=true; fi
-    fi
-
-    # --- L3 署名（存在のみ。信頼判定には使わない） ---
-    local signed=false sigf
-    sigf="$(jq -r '(.signature.file // .signature_file // empty) | tostring' "$cpath")"
-    if [ -n "$sigf" ]; then case "$sigf" in /*|*..*) ;; *) [ -f "$dir/$sigf" ] && signed=true ;; esac; fi
-    if [ "$signed" = false ]; then for p in "${sigfn[@]}"; do [ -f "$dir/$p" ] && { signed=true; break; }; done; fi
-
-    # --- 乖離（実態 − 宣言） ---
-    local divergence
-    divergence="$(jq -n -c --argjson o "$observed_json" --argjson d "$decl_bases" '$o - $d - ["read"] | map(select(. as $e | ["exec","network","secrets","write","spend"] | index($e)))')"
-    if [ "$persistence" -eq 1 ] && ! printf '%s' "$decl_bases" | jq -e 'index("persist") or index("write")' >/dev/null; then
-      divergence="$(printf '%s' "$divergence" | jq -c '. + ["persist"] | unique')"
-    fi
-
-    # --- 差分異常（同一 author の前バージョン） ---
-    local diff_anomaly=false diff_reason="" prev_path=""
-    if [ -n "$author" ] && [ -n "$cname" ] && [ -n "$cversion" ]; then
-      local pa pn pv pp best=""
-      while IFS="$US" read -r pa pn pv pp; do
-        [ "$pa" = "$author" ] && [ "$pn" = "$cname" ] && [ "$pp" != "$cpath" ] && [ -n "$pv" ] || continue
-        version_lt "$pv" "$cversion" || continue
-        if [ -z "$best" ] || version_lt "$best" "$pv"; then best="$pv"; prev_path="$pp"; fi
-      done < <(tsv_us <"$TMP_DIR/sp_index.tsv")
-      if [ -n "$prev_path" ]; then
-        local prev_tokens
-        prev_tokens="$(jq -c "$SP_EFFECTS_NORM"' [(.effects // [])[] | norm] + [(.operations // [])[] | (.effects // [])[] | norm] | map(select(length>0)) | unique' "$prev_path" 2>/dev/null)"
-        diff_reason="$(jq -n -r --argjson c "$decl_tokens" --argjson p "${prev_tokens:-[]}" --argjson th "$threshold" '
-          def bases: map(split(":")[0]) | unique;
-          ($c - $p) as $added | (($c - $p) + ($p - $c) | unique | length) as $delta | (($c + $p) | unique | length) as $union |
-          [ (if (($c|bases|index("exec")) and (($p|bases|index("exec"))|not)) then "exec 新規追加" else empty end),
-            (if ([$added[] | select(startswith("network"))] | length) > 0 then "network 送信先の新規追加" else empty end),
-            (if ([$added[] | select(startswith("secrets"))] | length) > 0 then "secrets スコープ拡大" else empty end),
-            (if $union > 0 and ($delta / $union) > $th then "エフェクト差分率 \(($delta * 100 / $union) | floor)% > 閾値 \($th * 100 | floor)%" else empty end)
-          ] | join(" / ")')"
-        [ -n "$diff_reason" ] && diff_anomaly=true
-      fi
-    fi
-
-    local sp
-    sp="$(jq -n -c --arg cp "$cpath" --arg cv "$cver" --arg lv "$level" --argjson sg "$signed" --arg au "$author" \
-          --argjson de "$decl_bases" --argjson ob "$observed_json" --arg pd "$pdecision" --argjson l2 "$l2_tested" \
-          --argjson dv "$divergence" --argjson da "$diff_anomaly" '
-          {contract_path:$cp, contract_version:(if $cv=="" then null else $cv end), level:(if $lv=="" then null else $lv end),
-           signed:$sg, author:(if $au=="" then null else $au end), declared_effects:$de, observed_effects:$ob,
-           policy_decision:(if $pd=="" then null else $pd end), l2_tested:$l2, divergence:$dv, diff_anomaly:$da}')"
-
-    # --- 検出ルール（Master Spec §5.7） ---
-    if ! printf '%s' "$schema_ok" | jq -e --arg v "$cver" 'index($v)' >/dev/null; then
-      medium "skillpact-divergence" "$cpath" "契約の schema_version が ${cver:-未指定}（対応: $(printf '%s' "$schema_ok" | jq -r 'join(",")')）。互換性不明" "$sp"
-    fi
-    if [ -n "$level" ] && ! jq -e --arg l "$level" '.skillpact.levels | index($l)' "$IOC_FILE" >/dev/null; then
-      medium "skillpact-divergence" "$cpath" "契約の level が L1/L2/L3 以外: $level" "$sp"
-    fi
-    if [ "$level" = "L3" ] && [ "$signed" = false ]; then
-      medium "skillpact-divergence" "$cpath" "L3 を宣言しているが署名ファイルが見つかりません" "$sp"
-    fi
-    if printf '%s' "$decl_bases" | jq -e 'index("exec") or index("network") or index("secrets")' >/dev/null && [ "$l2_tested" = false ]; then
-      high "skillpact-divergence" "$cpath" "exec/network/secrets を宣言しているが L2 テスト記録がありません${l2bad:+（$l2bad）}（宣言のみで検証なし）" "$sp"
-    fi
-    local sigtxt=""; [ "$signed" = true ] && sigtxt="（L3 署名済みでも重大度は下げません）"
-    for eff in exec network secrets; do
-      if printf '%s' "$divergence" | jq -e --arg e "$eff" 'index($e)' >/dev/null; then
-        critical "skillpact-divergence" "$dir" "契約は ${eff} を宣言していないが、実態に ${eff} を検出（宣言: $(printf '%s' "$decl_bases" | jq -r 'join(",")')）${sigtxt}" "$sp"
-      fi
-    done
-    printf '%s' "$divergence" | jq -e 'index("spend")' >/dev/null && high "skillpact-divergence" "$dir" "契約は spend を宣言していないが、実態に課金/決済処理を検出${sigtxt}" "$sp"
-    if printf '%s' "$divergence" | jq -e 'index("write")' >/dev/null && [ "$persistence" -eq 0 ]; then
-      medium "skillpact-divergence" "$dir" "契約は write を宣言していないが、実態にファイル書き込みを検出${sigtxt}" "$sp"
-    fi
-    if [ "$destructive" -eq 1 ] && [ "$pdecision" = "allow" ]; then
-      high "skillpact-divergence" "$dir" "破壊的操作（destructive_markers）を含むスキルが allow（自動許可）" "$sp"
-    fi
-    if [ "$persistence" -eq 1 ] && printf '%s' "$divergence" | jq -e 'index("persist")' >/dev/null; then
-      critical "skillpact-divergence" "$dir" "永続化操作（persistence_markers）を検出したが、契約に persist/write の宣言がありません${sigtxt}" "$sp"
-    fi
-    # prose と契約の突合
-    local claim
-    while IFS=$'\t' read -r claim pats forbids; do
-      [ -n "$claim" ] || continue
-      if grep -q -i -E -- "$pats" "$prose" 2>/dev/null || jq -r '.description // empty' "$cpath" | grep -q -i -E -- "$pats"; then
-        local hit; hit="$(jq -n -r --argjson d "$decl_bases" --argjson f "$forbids" '[$d[] | select(. as $e | $f | index($e))] | join(",")')"
-        [ -n "$hit" ] && high "skillpact-divergence" "$cpath" "prose（${claim}）と契約が矛盾: 契約が ${hit} を宣言" "$sp"
-      fi
-    done < <(jq -r '.skillpact.prose_claims[] | [.claim, (.patterns | join("|")), (.forbids | tojson)] | @tsv' "$IOC_FILE")
-    if [ "$diff_anomaly" = true ]; then
-      local s3=""; [ "$signed" = true ] && s3="L3 署名済みだが"
-      high "skillpact-account-compromise" "$cpath" "${s3}同一作者（${author}）の前バージョン ${best}（$prev_path）から差分異常: ${diff_reason}" "$sp"
-    fi
-    if [ -n "$policy_violation" ]; then
-      high "skillpact-divergence" "$ppath" "ポリシーが never_auto_allow_any を尊重していません（自動許可: ${policy_violation}）" "$sp"
-    elif [ -n "$contract_violation" ]; then
-      high "skillpact-divergence" "$cpath" "契約の decision: allow が never_auto_allow_any の対象（${contract_violation}）を自動許可しています" "$sp"
-    fi
-    jq -r --arg pd "$pdecision" '(.operations // [])[] | select(.reversible == false and ((.decision // $pd) == "allow")) | (.name // .id // "unnamed") | tostring' "$cpath" 2>/dev/null \
-    | while IFS= read -r m; do
-        critical "skillpact-divergence" "$cpath" "reversible: false の操作（${m}）が allow（不可逆操作の自動許可）" "$sp"
-      done
     local nf; nf="$(grep -c -F "\"contract_path\":\"$(json_escape "$cpath")\"" "$FINDINGS_FILE" 2>/dev/null)"
-    [ "${nf:-0}" -eq 0 ] && safe "SkillPact 契約と実態が一致（$dir）"
+    if [ "${nf:-0}" -eq 0 ]; then
+      log_info "$(printf '%s' "$a" | jq -r '"SkillPact 契約（\(.name // "?")@\(.sver // "?")、contract \(.cv)）: 宣言とコードの静的解析に乖離なし。L1 相当（ZES の部分検査）。L2/L3 は ZES では検証しません（L3 でも安全を意味しません）。署名: " + (if .signed then "あり（未検証）" else "なし" end)')（$dir）"
+    fi
   done < <(sp_skill_dirs)
   [ "$n_skills" -eq 0 ] && log_info "スキル（SKILL.md / skill.contract.json）が見つかりません"
+  [ "$n_skills" -gt 0 ] && [ "$n_contracts" -eq 0 ] && log_info "SkillPact 契約（skill.contract.json）のあるスキルはありません（§49 は契約付きスキルのみ比較します）"
   return 0
 }
 check_s49() { check_skillpact; return 0; }

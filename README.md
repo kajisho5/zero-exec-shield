@@ -11,7 +11,7 @@
 
 **incident_bundle: `ZES-2026-OCT-EMERGENCY-V5.2`**
 
-サプライチェーン攻撃・認証局危殆化・インフラ RCE・AI 開発環境トラップ・SkillPact 契約乖離を、**対象ランタイムを一切起動せず（Zero-Execution）**、静的解析だけで一括検疫する CLI スキャナです。
+サプライチェーン攻撃・認証局危殆化・インフラ RCE・AI 開発環境トラップ・AI エージェントのスキルの宣言と実態の乖離（SkillPact 契約、実験的）を、**対象ランタイムを一切起動せず（Zero-Execution）**、静的解析だけで一括検疫する CLI スキャナです。
 
 > **ゼロ実行原則と内容非読取方針**
 > ZES は検査対象のコード・スクリプト・パッケージを実行しません（`npm install` / `pip install` / 悪性スクリプトの実行は行いません）。検出時もファイル内容は出力せず、**パスとメタ情報（サイズ・mtime・SHA-256）のみ**を示します。検査できなかったモジュールは `errors[]` に記録し、0 件（安全）とは扱いません（fail-closed）。
@@ -65,7 +65,7 @@ chmod +x zes-scan.sh
 | `--skillpact` | §49 のみ |
 | `--url <URL>` | §4 の非侵襲 URL チェック（`curl -sI` で `X-Powered-By` ヘッダのみ取得。http/https のみ受理） |
 | `--json` | findings.json を標準出力へ（人間向けログは標準エラーへ） |
-| `--skillpact-cache <dir>` | §49 差分異常検出用の前バージョン契約キャッシュ |
+| `--skillpact-cache <dir>` | §49 前版比較用の SkillPact 契約の置き場所（ローカルのみ） |
 
 ### 環境変数
 
@@ -93,7 +93,7 @@ chmod +x zes-scan.sh
 - **外部通信ゼロ**: JS / CSS / `rules/ioc.json` をすべて 1 ファイルにインライン化しています。CSP は `default-src 'none'; connect-src 'none'`、スクリプトとスタイルはビルド時に計算した SHA-256 だけを許可します（`unsafe-inline` なし）
 - **ファイル内容は判定にのみ使用**: 画面・JSON 出力に出すのはパス・ルール・固定文言・ハッシュだけです。例外は設計書 §13-4 で承認した設定値（MCP の command / args、Actions の `uses:`、拡張のパーミッション名、120 文字まで）
 - **投入方法**: フォルダのドラッグ＆ドロップ、または「フォルダを選択…」（`webkitdirectory`）。テキスト貼り付け判定もできます（内容は再表示しません）
-- **18 タブ**: 総合（重大度サマリ・フィルタ・検索・Blast Radius）/ SkillPact（宣言と実態の差分を赤表示、L3 は「署名済みファイル」と表記し安全色を使わない）/ MCP・GitHub Actions・ブラウザ拡張ビューア ほか
+- **18 タブ**: 総合（重大度サマリ・フィルタ・検索・Blast Radius）/ SkillPact（実験的。宣言と実態の差分を赤表示、署名は「署名あり（未検証）」と表記し安全色を使わない）/ MCP・GitHub Actions・ブラウザ拡張ビューア ほか
 - **JSON 出力**: `schemas/findings.schema.json` 互換の findings.json をダウンロードします（パスは投入フォルダからの相対パスに `/` を前置。`status: partial`、`errors[]` に `ui:host_checks_not_performed` を記録）。CLI の findings.json の読み込み表示もできます
 - **ブラウザで判定できないもの**: プロセス・ネットワーク接続・カーネル・eBPF・マウント・インストール済みツールのバージョンなどのホスト状態は、該当タブに CLI（`./zes-scan.sh --full --json`）の案内を出し、0 件 ＝ 安全とは表示しません
 - **動作確認したブラウザ**: CI で Chromium・Firefox・WebKit（Playwright 版）の e2e を実行しています。WebKit では、直下が隠しエントリだけのフォルダ（`.mcp.json` や `.github/` だけ）を読み込めず、該当 2 件の e2e は除外しています。隠しファイルを渡さない挙動が実際の Safari でも起きるかは未確認です。Safari では、隠しファイル（`.mcp.json`・`.github/`・`.claude/` など）が検査から漏れる可能性があります。その場合はドラッグ＆ドロップか CLI で確認してください。0 件の選択は「0 件でした」と通知します
@@ -146,9 +146,8 @@ PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npm run test:e2e   # Playwright: file:
 | PHP2Shell | CVE-2026-109618/109619（認証不要 RCE、悪用試行あり） | 8.2.35 / 8.3.36 / 8.4.27 / 8.5.12 以上。8.1 以前はサポート版へ移行 |
 | eMudhra 中間 CA 侵害 | 危殆化 CA を OS・ランタイム・pip/Go/Rust 等が信頼 | ca-certificates・certifi・Node.js・Java・Docker Desktop 等を修正版へ、`emSign ECC Root CA G3` の除去確認 |
 | 2026-06〜10 収集インテル | 悪性 npm/PyPI/crates/gems、侵害 Actions、インフォスティーラー、AI ツール/MCP/拡張 | 該当キャンペーンの一次情報に従う（docs/ioc-verification.md「5.2.2 で追加した収集インテル」） |
-| SkillPact未宣言 | 契約なしスキルの`exec`/`network`/`write` | 契約ファイルの追加、またはスキル無効化 |
-| SkillPact乖離 | 契約と実態の不一致 | スキル停止、契約の再作成、L2テスト実施 |
-| SkillPactアカウント侵害 | L3署名済みでも差分異常 | 作者への確認、前バージョンとの差分レビュー、必要ならスキル停止 |
+| SkillPact 乖離（§49、実験的） | スキルのコードが契約（skill.contract.json）で宣言していない効果を持つ | スキルの利用停止、作者への確認、契約の修正 |
+| SkillPact 権限拡大（§49、実験的） | 前版から major を上げずに権限が拡大 | 前版との差分レビュー、作者への確認、必要ならスキル停止 |
 
 > 表と `rules/ioc.json` の値は、一次情報で確認できた相違を 5.2.1 で反映済みです（[docs/ioc-verification.md](docs/ioc-verification.md) の「5.2.1 での反映」）。確認できなかった値は注記付きで仕様書の値のままです。
 
@@ -161,57 +160,67 @@ PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers npm run test:e2e   # Playwright: file:
 - 対象: `~/.ssh`, `~/.aws`, `~/.config/gcloud`, `~/.claude`, `~/.cursor`, `~/.config/gh`, `~/.docker/config.json`, `~/.npmrc`, `~/.pypirc`, `~/.kube/config`, `~/.vault-token`, `~/.git-credentials`, `~/.netrc`, `~/.config/heroku/`, `~/.terraform.d/credentials.tfrc.json`, `~/.config/op/`
 - 存在のみ列挙（`stat` でサイズ・mtime のみ、内容は読まない）。§14 が前半 9 件、§19 が後半 7 件を担当
 
-## SkillPact 運用ガイド（§49）
+## §49 スキルの宣言と実態の照合（SkillPact 契約、**実験的**）
 
-- 契約ファイル（`skill.contract.json` または `.skillpact/contract.json`）はリポジトリにコミットし、レビュー対象にする
-- L2 テスト記録は CI で生成し、契約とセットで保管する（ZES は存在と SHA-256 のみ確認し、テストを再実行しない）
-- L3 署名は署名ファイルの存在のみを確認し、信頼判定は差分異常と併用する（ZES は `cosign verify` 等を実行しない。署名検証は判断層で人間が行う）
-- `reversible: false` の操作は二重承認を必須とする
+AI エージェントのスキル（Claude Code・Cursor・Codex などが読み込む `SKILL.md` のフォルダ）が**宣言した権限と、そのコードが実際にしていることが一致するか**を、何も実行せずに確かめます。
+
+- 宣言は [SkillPact](https://github.com/kajisho5/skillpact) 形式の `skill.contract.json`（`SKILL.md` と同じフォルダ）から読みます。SkillPact は、スキルが起こしうる副作用を 6 種類 — `read`（ファイルを読む）/ `write`（書く・消す）/ `network`（他のホストと通信）/ `exec`（他のプログラムを実行）/ `spend`（お金がかかる）/ `send`（人にメール・投稿・メッセージを送る）— に分け、それぞれ `none` / `scoped`（範囲を限定）/ `any` で宣言する契約形式です。ZES は SkillPact 0.8（`contract_version` 0.1〜0.8）に対応します。
+- **SkillPact を使っていないスキルは対象外です。** 契約がないことを問題として扱いません（影響の大きい効果 — exec / network / spend / send — がコードに見える場合だけ、参考として INFO を 1 件出します）。契約付きスキルの中にある別の `SKILL.md`（例: `.claude/skills/*`）も報告しません。
+- 実験的な機能です。検出ルール・出力は今後変わる可能性があります。
+
+### ZES がすること・しないこと
+
+| する | しない |
+|---|---|
+| 契約を JSON として読み、SkillPact 仕様の一部（I-JSON、構造、整合性、`integrity.files` のハッシュと網羅性）を検査 | スキル・テストの実行（L2 の確認） |
+| コードを静的に読み、6 効果のどれが見えるかを推定し、契約の宣言と比べる | 署名の検証（`signed: true` は「署名欄あり・**未検証**」） |
+| 同じスキルの前版の契約と比べ、major を上げない権限拡大を検出 | ポリシーの allow / ask / deny の評価（TODO。構造の検査のみ） |
+
+- `level` は契約の自己申告を使いません。ZES の部分検査に合格した契約だけを **「L1 相当」** とし、L2 / L3 は判定しません。**L3 であっても「安全」を意味しません**（SkillPact 仕様 §16.1）。署名の有無で重大度を上げ下げしません。
+- 正式な判定は SkillPact の参照実装（`skillpact validate` / `skillpact conformance`）で行ってください。ZES の結果は「まず見るべき乖離」を示すものです。
 
 ### 検出ルール
 
 | 検出条件 | レベル | campaign |
 |---|---|---|
-| 契約ファイルが存在しない（JSON として解析できない場合を含む） | HIGH | skillpact-undeclared |
-| `schema_version` が `0.8` 以外 | MEDIUM | skillpact-divergence |
-| `effects` に `exec`/`network`/`secrets` があり L2 記録なし（または SHA-256 不一致） | HIGH | skillpact-divergence |
-| 実態に `exec` / `network` / `secrets` があるが契約に無い | CRITICAL | skillpact-divergence |
-| `destructive_markers` を検出し、ポリシー決定が `allow` | HIGH | skillpact-divergence |
-| `persistence_markers` を検出し、契約に `persist`/`write` が無い | CRITICAL | skillpact-divergence |
-| prose（「読み取りのみ」「外部通信なし」等）と契約の矛盾 | HIGH | skillpact-divergence |
-| 同一作者の前バージョンから `exec` 新規 / `network` 送信先新規 / `secrets` 拡大 / 差分率が閾値超過（L3 署名済みでも） | HIGH | skillpact-account-compromise |
-| ポリシーが `never_auto_allow_any` を尊重していない | HIGH | skillpact-divergence |
-| `reversible: false` の操作が `allow` | CRITICAL | skillpact-divergence |
-| ZES 追加: L3 宣言だが署名ファイルなし / `level` が L1〜L3 以外 / decision 値が allow・ask・deny 以外 | MEDIUM | skillpact-divergence |
-| ZES 追加: 実態に `spend`（課金）があるが契約に無い | HIGH | skillpact-divergence |
-| ZES 追加: 実態に `write` があるが契約に無い（永続化を伴わない場合） | MEDIUM | skillpact-divergence |
+| 契約のないスキルで exec / network / spend / send がコードに見える（参考） | INFO | skillpact-undeclared |
+| 契約が I-JSON として不正（重複キー・±(2^53−1) 外の数値・深さ 64 超・孤立サロゲート・不正 UTF-8）。`errors[]` にも記録 | MEDIUM | skillpact-invalid |
+| 未対応の `contract_version`（0.1〜0.8 以外。0.x の未知の minor も含む、仕様 §17） | MEDIUM | skillpact-invalid |
+| ZES の部分検査で不合格（`SCHEMA` / `DUP_CAPABILITY` / `UNDECLARED_EFFECT` / `SCOPE_EMPTY` / `SCOPE_TRAVERSAL` / `SCOPE_WIDENED` / `UNKNOWN_REQUIREMENT` / `UNKNOWN_FEATURE_KIND` / `ENTRY_MISSING` / `NAME_MISMATCH` / `TEST_UNKNOWN_CAPABILITY` / `TEST_UNDECLARED_NETWORK` / `UNCONFIRMED_DRAFT` / `INTEGRITY_*` / `DUP_SIGNATURE`） | MEDIUM | skillpact-invalid |
+| コードに exec / network / spend / send が見えるが、契約の該当 `permissions.<効果>.level` が `none` | HIGH | skillpact-divergence |
+| コードが機密ファイル（`~/.ssh`・`.env`・認証情報など）を読む兆候があるが、契約の read がその範囲を含まない | MEDIUM | skillpact-divergence |
+| コードに作業領域外への永続的な書き込み（crontab・.bashrc・authorized_keys など）が見えるが、契約の write が `$WORKDIR` / `$OUTPUT` / `$TMPDIR` 内に限られる（または write が `none`）／ファイル書き込みが見えるが write が `none` | MEDIUM | skillpact-divergence |
+| 同じスキル名の前版から権限が広がったのに `skill.version` の major が上がっていない（仕様 §17。0.x は minor を major 扱い）。exec / network / spend / send の拡大は HIGH、それ以外は MEDIUM。作者署名鍵が前版と同じかどうかを併記（未検証） | HIGH / MEDIUM | skillpact-account-compromise |
+| SkillPact ポリシー（`policy_version` と `defaults` を持つ JSON、ファイル名は問わない）が policy-v0.8-r2 の構造に合わない | MEDIUM | skillpact-invalid |
 
-L3 署名済み（`signed: true`）でも重大度は一切下げません。
+`scoped` の宣言は「宣言あり」として扱います（範囲の細かな照合は read の機密ファイルと write の作業領域外のみ）。§49 は CRITICAL を出しません。
 
-### 契約スキーマの前提（要確認）
+#### 実態の推定と効果の対応
 
-SkillPact v0.8 の公式スキーマは一次情報で確認できていません。ZES は次のフィールドを寛容に読み取ります（未知のフィールドは無視）。
+| ZES の検出 | SkillPact の効果 | 根拠 |
+|---|---|---|
+| `subprocess` / `child_process` / `Command::new` 等、シェルのコードブロック、スクリプトファイル、`allowed-tools: Bash` | exec | 仕様 §6「run other programs」 |
+| `curl` / `requests` / `fetch(` 等、`WebFetch` / `WebSearch` | network | §6「talk to other hosts」 |
+| ファイル書き込み API・リダイレクト・`Write` / `Edit` | write | §6「create, change, delete」 |
+| 永続化（crontab・launchctl・.bashrc・authorized_keys 等） | write（作業領域外） | §13.3 の persistence（`$WORKDIR`/`$OUTPUT`/`$TMPDIR` 外への write） |
+| 機密ファイル（`~/.ssh`・`.aws/credentials`・`.netrc`・`.env`・keychain 等） | read（機密範囲） | §13.3 の exfiltration（sensitive scope の read）。範囲の判定は参照実装の SENSITIVE パターン |
+| 課金 API（stripe 等） / メール・Slack・Discord・Twilio 等への送信 | spend / send | §6 |
 
-```json
-{
-  "schema_version": "0.8",
-  "name": "formatter",
-  "version": "1.1.0",
-  "author": "example",
-  "level": "L3",
-  "description": "…",
-  "effects": ["read", "write", "exec:any", "network:telemetry.example.com", {"effect": "secrets", "scope": "GITHUB_TOKEN"}],
-  "decision": "ask",
-  "operations": [{"name": "purge", "effects": ["write"], "reversible": false, "decision": "allow"}],
-  "l2": {"record": ".skillpact/l2-record.json", "sha256": "<hex>"},
-  "signature": {"file": "skill.contract.json.sig"}
-}
-```
+環境変数（`API_KEY`、`os.environ` 等）の参照は効果として扱いません（SkillPact では `requirements.env[]` で宣言する要件で、副作用ではないため）。「長時間実行」は SkillPact に対応する効果がないため扱いません。
 
-- 著者は `author` → `publisher` の順で読む。L2 記録は `l2` / `tests.l2` / `l2_record`、署名は `signature.file` / `signature_file` と既定ファイル名（`rules/ioc.json` の `skillpact.signature_filenames`）を探す
-- ポリシー（`policy-v0.8.json` / `.skillpact/policy.json`）は `default`、`rules[]{effect, decision}`、`never_auto_allow_any`（配列。無い場合は `risk_flags`）として評価し、宣言エフェクトごとの決定のうち最も厳しいもの（deny > ask > allow）を `policy_decision` とする。契約自身に `decision` がある場合はそれを優先する
-- 前バージョンは ROOT 内とキャッシュ内の契約から、同一 `author` + `name` で `version` が小さい最大のものを使う。レジストリからの取得は行わない（通信しない）
-- 差分率 = 宣言トークンの対称差 / 和集合。閾値は `rules/ioc.json` の `skillpact.trust_model.diff_anomaly_detection.threshold`（既定 0.3）
+### 前版との比較
+
+- 前版は ROOT 内の `skill.contract.json` と `--skillpact-cache <dir>`（`ZES_SKILLPACT_CACHE`）内の契約から、同じ `skill.name` で `skill.version` が小さい最大のものを使います。レジストリからの取得は行いません（通信しない）。
+- 作者の同一性は作者署名（`role: author`）の鍵（`ed25519:…` / `sigstore:<issuer>|<identity>`）で比べます。署名は検証していないため、参考情報です。
+
+### TODO
+
+- ポリシーの allow / ask / deny 評価（仕様 §13: ルールの範囲照合、`never_auto_allow_any`、`min_contract_version`、`require_signature`）は未実装です。現在は構造の検査のみで、`skillpact.policy_decision` は常に `null`、`l2_tested` は常に `false` です。判定には `skillpact policy-check` を使ってください。
+- 署名の検証、`FM_NAME_DIR`（ディレクトリ名との一致。チェックアウト先の名前で誤検知するため対象外）、`BAD_SUBSCHEMA`、`SIGNATURE_*` は扱いません。
+
+### 出典・ライセンス
+
+SkillPact © SEVENTHWELL (shogo kajiyama), https://github.com/kajisho5/skillpact — 仕様の文章は CC BY 4.0、スキーマと実装は Apache-2.0。ZES は SkillPact の形式を読む独立した実装で、SEVENTHWELL による確認・承認を受けたものではありません。`tests/fixtures/skillpact-*` の一部は同リポジトリの conformance ケースと例を複製したものです（[tests/fixtures/skillpact-README.md](tests/fixtures/skillpact-README.md)）。
 
 ## 出力スキーマ（findings.json）
 

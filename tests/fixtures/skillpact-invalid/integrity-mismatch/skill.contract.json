@@ -1,0 +1,42 @@
+{
+  "contract_version": "0.5",
+  "kind": "instructions",
+  "skill": {
+    "name": "case",
+    "version": "1.0.0"
+  },
+  "permissions": {
+    "read": {
+      "level": "none"
+    },
+    "write": {
+      "level": "none"
+    },
+    "network": {
+      "level": "none"
+    },
+    "exec": {
+      "level": "none"
+    },
+    "spend": {
+      "level": "none"
+    },
+    "send": {
+      "level": "none"
+    }
+  },
+  "capabilities": [
+    {
+      "id": "guide",
+      "summary": "guidance only",
+      "effects": []
+    }
+  ],
+  "integrity": {
+    "algorithm": "sha256",
+    "files": {
+      "SKILL.md": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "signatures": []
+  }
+}

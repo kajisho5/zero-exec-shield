@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "campaign": "skillpact-invalid",
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "json-duplicate-key/skill.contract.json"
+    },
+    {
+      "campaign": "skillpact-invalid",
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "v08-json-bigint/skill.contract.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "skillpact"
+}

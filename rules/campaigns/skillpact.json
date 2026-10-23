@@ -4,6 +4,7 @@
   "source": "rules/ioc.json（本ファイルは複製。正はioc.json）",
   "campaigns": [
     "skillpact-undeclared",
+    "skillpact-invalid",
     "skillpact-divergence",
     "skillpact-account-compromise"
   ],
@@ -39,51 +40,176 @@
   "iocs": {
     "skillpact": {
       "campaign": "skillpact",
-      "contract_filenames": [
-        "skill.contract.json",
-        ".skillpact/contract.json"
+      "spec": {
+        "name": "SkillPact",
+        "version": "0.8",
+        "url": "https://github.com/kajisho5/skillpact",
+        "attribution": "SkillPact specification © SEVENTHWELL (shogo kajiyama), CC BY 4.0; schemas Apache-2.0",
+        "zes_support": "experimental: partial validation + static comparison of declared permissions with observed code. No signature verification, no test runs, no policy evaluation."
+      },
+      "contract_filename": "skill.contract.json",
+      "contract_keys": [
+        "$schema",
+        "contract_version",
+        "kind",
+        "skill",
+        "permissions",
+        "capabilities",
+        "requirements",
+        "compat",
+        "tests",
+        "integrity",
+        "x"
       ],
-      "schema_versions": [
+      "capability_keys": [
+        "id",
+        "summary",
+        "effects",
+        "entry",
+        "conditional_effects",
+        "destructive",
+        "dry_run",
+        "effect_scopes",
+        "idempotent",
+        "inputs",
+        "outputs",
+        "mcp_annotations",
+        "optional_features",
+        "requires",
+        "requires_features",
+        "role",
+        "x"
+      ],
+      "contract_versions": [
+        "0.1",
+        "0.2",
+        "0.3",
+        "0.4",
+        "0.5",
+        "0.6",
+        "0.7",
         "0.8"
       ],
       "effects": [
-        "exec",
-        "network",
-        "write",
         "read",
-        "secrets",
-        "spend"
-      ],
-      "levels": [
-        "L1",
-        "L2",
-        "L3"
-      ],
-      "policy_files": [
-        "policy-v0.8.json",
-        ".skillpact/policy.json"
+        "write",
+        "network",
+        "exec",
+        "spend",
+        "send"
       ],
       "decision_values": [
         "allow",
         "ask",
         "deny"
       ],
-      "risk_flags": [
-        "exec:any",
-        "network:any",
-        "write:outside_workspace",
-        "secrets:any",
-        "spend:any"
+      "policy_versions": [
+        "0.8",
+        "0.1"
       ],
-      "destructive_markers": [
-        "rm -rf",
-        "git reset --hard",
-        "git push --force",
-        "drop table",
-        "truncate",
-        "chmod 777",
-        "curl | bash",
-        "wget | sh"
+      "policy_keys": [
+        "policy_version",
+        "defaults",
+        "rules",
+        "skills",
+        "require_signature",
+        "trusted_keys",
+        "ask_on_destructive",
+        "allowlist_overrides_ask",
+        "never_auto_allow_any",
+        "limits",
+        "sandbox",
+        "hooks",
+        "audit",
+        "x",
+        "min_contract_version",
+        "compositions"
+      ],
+      "trust_model": {
+        "l3_means": "signed_files_and_tests_passed_in_isolation",
+        "l3_does_not_mean": "safe_or_trusted_author",
+        "zes_level": "L1 at most (ZES partial check); L2/L3 are never established by ZES"
+      },
+      "observed_effect_patterns": {
+        "exec": [
+          "subprocess",
+          "os\\.system",
+          "os\\.popen",
+          "os\\.exec[lv]",
+          "child_process",
+          "execSync",
+          "execFileSync",
+          "spawnSync",
+          "Command::new",
+          "bash -c",
+          "sh -c",
+          "Runtime\\.getRuntime",
+          "ProcessBuilder"
+        ],
+        "network": [
+          "\\bcurl\\b",
+          "\\bwget\\b",
+          "requests\\.(get|post|put|patch|delete|request|Session)",
+          "urllib\\.request",
+          "urlopen\\(",
+          "http\\.client",
+          "httpx\\.",
+          "aiohttp",
+          "\\bfetch\\(",
+          "axios",
+          "XMLHttpRequest",
+          "socket\\.connect",
+          "\\bnc\\s",
+          "Invoke-WebRequest",
+          "Invoke-RestMethod"
+        ],
+        "write": [
+          "\\btee\\b",
+          "\\bmkdir\\b",
+          "\\bcp\\s",
+          "\\bmv\\s",
+          "[^2&]>>?\\s*[~/$A-Za-z0-9._-]",
+          "open\\([^)]*['\"][wax]\\+?b?['\"]",
+          "writeFile",
+          "fs\\.write",
+          "\\.write_(text|bytes)\\(",
+          "\\bsed -i\\b",
+          "shutil\\.(copy|move|rmtree)",
+          "os\\.(remove|unlink|rename|makedirs)"
+        ],
+        "spend": [
+          "stripe\\.",
+          "api\\.stripe\\.com",
+          "paypal",
+          "checkout\\.sessions",
+          "purchase\\("
+        ],
+        "send": [
+          "smtplib",
+          "\\bsendmail\\b",
+          "nodemailer",
+          "hooks\\.slack\\.com",
+          "chat\\.postMessage",
+          "discord(app)?\\.com/api/webhooks",
+          "api\\.twilio\\.com",
+          "api\\.sendgrid\\.com"
+        ]
+      },
+      "sensitive_read_patterns": [
+        "\\.ssh/",
+        "\\.aws/credentials",
+        "\\.netrc",
+        "\\.git-credentials",
+        "\\.gnupg",
+        "\\.kube/config",
+        "\\.docker/config\\.json",
+        "\\.npmrc",
+        "\\.pypirc",
+        "\\bid_rsa\\b",
+        "\\bid_ed25519\\b",
+        "keychain",
+        "find-generic-password",
+        "(^|[^A-Za-z0-9_.])\\.env([^A-Za-z0-9_]|$)"
       ],
       "persistence_markers": [
         "crontab",
@@ -95,150 +221,89 @@
         ".zshrc",
         "authorized_keys"
       ],
-      "trust_model": {
-        "l3_means": "signed_files",
-        "l3_does_not_mean": "safe_or_trusted_author",
-        "account_compromise_resilient": false,
-        "mitigation": "diff_anomaly_detection",
-        "diff_anomaly_detection": {
-          "threshold": 0.3
-        }
-      },
-      "proposed_effects": [
-        "persist",
-        "longrun"
+      "sensitive_scope_regex": "(\\.ssh|\\.aws|\\.gnupg|\\.kube|\\.netrc|\\.npmrc|\\.pypirc|\\.docker/config|(^|/)\\.env(\\.|$|/)|secret|credential|token|password|keychain|\\.pem$|\\.key$|id_rsa|id_ed25519)",
+      "broad_scopes": [
+        "/**",
+        "**",
+        "~/**",
+        "$HOME/**",
+        "/*",
+        "~/*"
       ],
-      "prose_claims": [
-        {
-          "claim": "read_only",
-          "patterns": [
-            "読み取りのみ",
-            "読み取り専用",
-            "参照だけ",
-            "参照のみ",
-            "read-only",
-            "read only"
-          ],
-          "forbids": [
-            "exec",
-            "network",
-            "write"
-          ]
-        },
-        {
-          "claim": "no_network",
-          "patterns": [
-            "外部通信なし",
-            "外部通信しない",
-            "no network"
-          ],
-          "forbids": [
-            "network"
-          ]
-        },
-        {
-          "claim": "no_write",
-          "patterns": [
-            "ファイル変更なし",
-            "ファイルを変更しない",
-            "does not modify"
-          ],
-          "forbids": [
-            "write"
-          ]
-        },
-        {
-          "claim": "no_exec",
-          "patterns": [
-            "実行しない",
-            "does not execute"
-          ],
-          "forbids": [
-            "exec"
-          ]
-        }
+      "ephemeral_scope_prefixes": [
+        "$WORKDIR",
+        "$OUTPUT",
+        "$TMPDIR"
       ],
-      "observed_effect_patterns": {
-        "exec": [
-          "subprocess",
-          "os\\.system",
-          "os\\.popen",
-          "child_process",
-          "execSync",
-          "spawnSync",
-          "\\bexec\\(",
-          "\\beval\\(",
-          "Command::new",
-          "bash -c",
-          "sh -c",
-          "Runtime\\.getRuntime"
+      "integrity": {
+        "default_exclude": [
+          ".git/**",
+          "**/.DS_Store"
         ],
-        "network": [
-          "\\bcurl\\b",
-          "\\bwget\\b",
-          "requests\\.(get|post|put)",
-          "urllib\\.request",
-          "http\\.client",
-          "\\bfetch\\(",
-          "axios",
-          "XMLHttpRequest",
-          "socket\\.connect",
-          "\\bnc\\s",
-          "Invoke-WebRequest"
+        "protected": [
+          "SKILL.md",
+          "**/SKILL.md",
+          "**/CLAUDE.md",
+          "**/AGENTS.md",
+          "**/GEMINI.md",
+          "**/.mcp.json",
+          ".claude-plugin/**",
+          ".claude/**",
+          ".cursor/**",
+          ".codex/**",
+          ".gemini/**",
+          ".agents/**",
+          "hooks/**",
+          "package.json",
+          "pyproject.toml"
         ],
-        "write": [
-          "\\btee\\b",
-          "\\bmkdir\\b",
-          "\\bcp\\s",
-          "\\bmv\\s",
-          "[^2&]>>?\\s*[~/$A-Za-z0-9._-]",
-          "open\\([^)]*['\"][wa]\\+?['\"]",
-          "writeFile",
-          "fs\\.write",
-          "\\.write_text\\(",
-          "\\bsed -i\\b"
-        ],
-        "secrets": [
-          "\\.env\\b",
-          "API_KEY",
-          "_TOKEN\\b",
-          "SECRET",
-          "\\.ssh/",
-          "\\.aws/credentials",
-          "\\.netrc",
-          "\\.git-credentials",
-          "keychain",
-          "find-generic-password",
-          "\\bprintenv\\b",
-          "os\\.environ",
-          "process\\.env"
-        ],
-        "spend": [
-          "stripe\\.",
-          "api\\.stripe\\.com",
-          "paypal",
-          "checkout\\.sessions",
-          "purchase\\("
+        "code_extensions": [
+          "py",
+          "pyc",
+          "pyo",
+          "pyd",
+          "sh",
+          "bash",
+          "zsh",
+          "fish",
+          "js",
+          "mjs",
+          "cjs",
+          "ts",
+          "mts",
+          "cts",
+          "rb",
+          "pl",
+          "pm",
+          "php",
+          "lua",
+          "ps1",
+          "psm1",
+          "bat",
+          "cmd",
+          "exe",
+          "so",
+          "dylib",
+          "dll",
+          "jar",
+          "class",
+          "wasm",
+          "pth"
         ]
       },
-      "write_outside_workspace_regex": [
-        "~/",
-        "\\$HOME",
-        "/etc/",
-        "/usr/",
-        "/Library/"
-      ],
-      "l2_record_filenames": [
-        ".skillpact/l2-record.json",
-        "l2-test-record.json",
-        ".skillpact/l2/record.json"
-      ],
-      "signature_filenames": [
-        "skill.contract.json.sig",
-        "skill.contract.json.bundle",
-        ".skillpact/contract.sig",
-        ".skillpact/contract.bundle",
-        ".skillpact/signature.sig"
+      "shell_fence_langs": [
+        "bash",
+        "sh",
+        "shell",
+        "zsh",
+        "fish",
+        "console",
+        "shell-session",
+        "powershell",
+        "ps1",
+        "pwsh",
+        "cmd",
+        "bat"
       ],
       "script_extensions": [
         "sh",

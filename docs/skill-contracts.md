@@ -95,9 +95,9 @@
 - **SkillPact**
   - `skillpact.divergence` が非空の finding は `exception` を許可しない（必ず `remediate` または `defer`）
   - `skillpact.diff_anomaly: true` の finding は `approved_by` に 2 名以上を要求
-  - `skillpact.signed: true` でも `divergence` が非空なら CRITICAL 相当として扱う
+  - `skillpact.signed: true` でも `divergence` が非空なら CRITICAL 相当として扱う（`signed` は ZES が署名欄の有無を見ただけで未検証）
   - `skillpact_policy.l3_trusted` は既定 `false`。L3 署名を信頼の根拠にしない（差分異常と併せて評価）
-  - L3 署名の検証（`cosign verify` 等）が必要な場合は、判断層で人間が実行する（検知層は存在確認のみ）
+  - SkillPact 署名の検証（`skillpact validate` 等）が必要な場合は、判断層で人間が実行する（検知層は署名欄の有無のみ確認し、L2/L3 を判定しない）
 
 ## 5. GER 入力
 
@@ -158,7 +158,7 @@
 - 1 件でも `failed` が出たら残りを実行せずロールバック
 - 【追加】実行者（`--operator`）は `approval.approved_by` に含まれてはならない。dry-run 記録は既定 24 時間で失効し、監査ログのハッシュチェーンが壊れている場合は dry-run 記録を信用しない
 - **SkillPact**
-  - `skillpact.declared_effects` に `exec` / `network` / `secrets` が含まれるスキルの修復は、その操作が `allowed_actions` に明示されていなければ拒否
+  - `skillpact.declared_effects` に `exec` / `network` / `spend` / `send` が含まれるスキルの修復は、その操作が `allowed_actions` に明示されていなければ拒否
   - `skillpact.signed: true` を承認の代替にしない（人間承認は必須）
 
 ## 8. 層間連携ルール
@@ -178,7 +178,7 @@
 
 - トップレベルキーは `schema_version` / `incident_bundle` / `scan_started_at` / `scan_finished_at` / `scan_mode` / `status` / `findings` / `errors` のみ
 - finding のキーは `id` / `level` / `module` / `campaign` / `path` / `detail` / `evidence_hash`（§49 のみ `skillpact` を追加）のみ
-- `skillpact` のキーは `contract_path` / `contract_version` / `level` / `signed` / `author` / `declared_effects` / `observed_effects` / `policy_decision` / `l2_tested` / `divergence` / `diff_anomaly` のみ
+- `skillpact` のキーは `contract_path` / `contract_version` / `level` / `signed` / `author` / `declared_effects` / `observed_effects` / `policy_decision` / `l2_tested` / `divergence` / `diff_anomaly` のみ。効果名は SkillPact 0.8 の `read` / `write` / `network` / `exec` / `spend` / `send` のみ（`secrets` / `persist` / `longrun` は廃止）。`policy_decision` は常に `null`、`l2_tested` は常に `false`（ZES は評価しない）
 - `id` は `sha256:` + 64 桁 16 進で決定的。`path` は絶対パスまたは `null`
 - `evidence_hash` は通常ファイルならその SHA-256（100MB 超はパス・サイズ・mtime の SHA-256）
 - ファイル内容・シークレット値を含まない

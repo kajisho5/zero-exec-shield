@@ -2,21 +2,15 @@
   "findings": [
     {
       "campaign": "skillpact-divergence",
-      "level": "CRITICAL",
+      "level": "HIGH",
       "module": "§49",
-      "path": "."
+      "path": "v08-valid-signed"
     },
     {
-      "campaign": "skillpact-divergence",
-      "level": "CRITICAL",
+      "campaign": "skillpact-invalid",
+      "level": "MEDIUM",
       "module": "§49",
-      "path": "."
-    },
-    {
-      "campaign": "skillpact-divergence",
-      "level": "CRITICAL",
-      "module": "§49",
-      "path": "."
+      "path": "v08-valid-signed/skill.contract.json"
     }
   ],
   "home": "_home",

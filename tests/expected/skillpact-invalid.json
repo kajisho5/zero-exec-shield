@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "campaign": "skillpact-invalid",
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "integrity-mismatch/skill.contract.json"
+    },
+    {
+      "campaign": "skillpact-invalid",
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "undeclared-effect/skill.contract.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "skillpact"
+}

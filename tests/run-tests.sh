@@ -86,7 +86,7 @@ CAMPAIGN_DEFS=(
   'hf-supply-chain|["hf-supply-chain","hf-dataset-poisoning","hf-lerobot-rce"]|[["model_supply_chain"]]'
   'ebpf-rootkit|["ebpf-rootkit"]|[["worm_iocs","quasar_linux"],["worm_iocs","linkpro"],["worm_iocs","voidlink"],["persistence","ebpf_rootkit"]]'
   'ghostaction-oct2026|["ghostaction-oct2026","megalodon-ci"]|[["github_actions"]]'
-  'skillpact|["skillpact-undeclared","skillpact-divergence","skillpact-account-compromise"]|[["skillpact"]]'
+  'skillpact|["skillpact-undeclared","skillpact-invalid","skillpact-divergence","skillpact-account-compromise"]|[["skillpact"]]'
 )
 for def in "${CAMPAIGN_DEFS[@]}"; do
   IFS='|' read -r f camps secs <<<"$def"
@@ -164,9 +164,15 @@ cmp -s "$TMP/id1" "$TMP/id2" && [ -s "$TMP/id1" ] && ok "findings[].id が決定
 n="$(run_scan "$FIX" skillpact "$FIX/_home" | jq '[.findings[] | select(.module == "§49" and (has("skillpact") | not))] | length')"
 [ "$n" = "0" ] && ok "§49 の全 finding に skillpact フィールド" || ng "skillpact フィールドの無い §49 finding が $n 件"
 
-# L3 署名は重大度を下げない（同一乖離で signed=true でも CRITICAL）
-lv="$(run_scan "$FIX/skillpact-signed-divergence" skillpact "$FIX/_home" | jq -r '[.findings[] | select(.skillpact.signed == true and (.skillpact.divergence | length) > 0) | .level] | unique | join(",")')"
-[ "$lv" = "CRITICAL" ] && ok "L3 署名済みでも乖離は CRITICAL（L3 を信頼判定に使わない）" || ng "L3 署名済み乖離の重大度が CRITICAL ではない: $lv"
+# 署名は重大度を変えない（ZES は署名を検証しない）: 署名付き契約の未宣言 network も HIGH
+lv="$(run_scan "$FIX/skillpact-signed-divergence" skillpact "$FIX/_home" | jq -r '[.findings[] | select(.skillpact.signed == true and (.skillpact.divergence | index("network"))) | select(.campaign == "skillpact-divergence") | .level] | unique | join(",")')"
+[ "$lv" = "HIGH" ] && ok "署名付き契約でも未宣言 network は HIGH（署名を信頼判定に使わない）" || ng "署名付き契約の乖離の重大度が HIGH ではない: $lv"
+# 実在する SkillPact 形式の契約（tests/fixtures/skillpact-clean）は §49 で何も報告しない（誤検知なし）
+n="$(run_scan "$FIX/skillpact-clean" skillpact "$FIX/_home" | jq '.findings | length')"
+[ "$n" = "0" ] && ok "有効な SkillPact 0.8 契約で §49 の検出 0 件" || ng "有効な SkillPact 契約で $n 件を検出（誤検知）"
+# §49 は CRITICAL を出さない（契約は自己申告。乖離は最大 HIGH）
+n="$(run_scan "$FIX" skillpact "$FIX/_home" | jq '[.findings[] | select(.module == "§49" and .level == "CRITICAL")] | length')"
+[ "$n" = "0" ] && ok "§49 は CRITICAL を出さない" || ng "§49 が CRITICAL を $n 件出力"
 
 # 内容非読取: フィクスチャ内の秘密様文字列が出力に含まれない
 out="$(run_scan "$FIX" full "$FIX/_home")"

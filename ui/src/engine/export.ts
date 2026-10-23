@@ -64,7 +64,7 @@ const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const MODULE = /^§([1-9]|[1-4][0-9])$/;
 const RFC3339 = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
 const BUNDLE = /^ZES-[0-9]{4}-[A-Z]{3}-[A-Z]+-V[0-9]+\.[0-9]+$/;
-const EFFECTS = ['exec', 'network', 'write', 'read', 'secrets', 'spend', 'persist', 'longrun'];
+const EFFECTS = ['read', 'write', 'network', 'exec', 'spend', 'send'];
 const MODES = ['quick', 'standard', 'full', 'worm', 'skillpact'];
 const STATUSES = ['ok', 'partial', 'error'];
 const onlyKeys = (o: Obj, allowed: string[], required: string[] = allowed) =>
@@ -78,7 +78,7 @@ function validSkillpact(v: unknown): v is SkillPactFindingField {
   return (v['contract_path'] === null || (isStr(v['contract_path']) && v['contract_path'].startsWith('/')))
     && strOrNull(v['contract_version']) && strOrNull(v['level']) && strOrNull(v['author']) && strOrNull(v['policy_decision'])
     && typeof v['signed'] === 'boolean' && typeof v['l2_tested'] === 'boolean' && typeof v['diff_anomaly'] === 'boolean'
-    && uniqueStrings(v['declared_effects']) && uniqueStrings(v['observed_effects'], EFFECTS) && uniqueStrings(v['divergence'], EFFECTS);
+    && uniqueStrings(v['declared_effects'], EFFECTS) && uniqueStrings(v['observed_effects'], EFFECTS) && uniqueStrings(v['divergence'], EFFECTS);
 }
 
 const F_KEYS = ['id', 'level', 'module', 'campaign', 'path', 'detail', 'evidence_hash'];
