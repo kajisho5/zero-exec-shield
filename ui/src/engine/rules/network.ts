@@ -26,8 +26,28 @@ export function networkIocs(ioc: IocDb): NetIoc[] {
   return all.filter((i) => { const k = i.value.toLowerCase(); return seen.has(k) ? false : (seen.add(k), true); });
 }
 
+/** シェル履歴の直近 n 件のコマンド。zsh の拡張履歴（": <開始時刻>:<経過秒>;<コマンド>"）は複数行のエントリを 1 件にまとめ、接頭辞を除く。 */
+export function lastHistoryEntries(text: string, n: number): string[] {
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+  while (lines.length && lines[lines.length - 1] === '') lines.pop();
+  const ext = /^: \d+:\d+;/;
+  const zsh = lines.some((x) => ext.test(x));
+  const entries: string[] = [];
+  for (const l of lines) {
+    if (zsh && entries.length && !ext.test(l) && /\\$/.test(entries[entries.length - 1] ?? '')) entries[entries.length - 1] += '\n' + l;
+    else entries.push(l.replace(ext, ''));
+  }
+  return entries.slice(-n);
+}
+
 export function networkRules(ctx: RuleCtx): void {
-  ctx.checks.add('s18-netioc');
+  ctx.checks.add('s18-netioc').add('s18-history-curlsh');
+  // CLI check_s18: シェル履歴の直近 5 件に curl|sh 形式の実行
+  for (const f of readable(ctx).filter((x) => /(^|\/)\.(bash|zsh)_history$/.test(x.relPath))) {
+    if (lastHistoryEntries(f.text, 5).some((e) => /(curl|wget)[^|]*\|\s*(ba|z)?sh/.test(e))) {
+      push(ctx, { level: 'HIGH', module: '§18', campaign: null, path: f.relPath, detail: 'シェル履歴の直近5件に curl|sh 形式の実行', ruleId: 's18-history-curlsh', evidenceSha: f.sha256 });
+    }
+  }
   const iocs = networkIocs(ctx.ioc);
   for (const f of readable(ctx)) {
     const low = f.text.toLowerCase();
