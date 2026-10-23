@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pickDir } from './pick-dir';
 
 const INDEX = 'file://' + fileURLToPath(new URL('../../../index.html', import.meta.url));
 const FIX = fileURLToPath(new URL('../../../tests/fixtures/', import.meta.url));
@@ -31,7 +32,7 @@ async function open(page: Page) {
 }
 
 async function scan(page: Page, dir: string) {
-  await page.getByTestId('dir-input').setInputFiles(dir);
+  await pickDir(page, dir);
   await expect(page.getByTestId('scan-status')).toContainText('スキャン完了');
 }
 

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validate } from '../unit/schema';
+import { pickDir } from './pick-dir';
 
 const INDEX = 'file://' + fileURLToPath(new URL('../../../index.html', import.meta.url));
 const FIX = fileURLToPath(new URL('../../../tests/fixtures/', import.meta.url));
@@ -23,7 +24,7 @@ async function open(page: Page) {
 }
 
 async function scan(page: Page, fixture: string) {
-  await page.getByTestId('dir-input').setInputFiles(FIX + fixture);
+  await pickDir(page, FIX + fixture);
   await expect(page.getByTestId('scan-status')).toContainText('スキャン完了');
 }
 
@@ -127,7 +128,7 @@ test('隠しファイルだけのフォルダでも無反応にならない（�
   // （隠しエントリを除外して 0 件になり change が発火しないとみられる。実 Safari での挙動は未確認）。PR #8 参照
   test.skip(browserName === 'webkit', 'Playwright WebKit は隠しエントリだけのフォルダを setInputFiles できない');
   await open(page);
-  await page.getByTestId('dir-input').setInputFiles(FIX + 'mcp');
+  await pickDir(page, FIX + 'mcp');
   const done = page.getByTestId('scan-status').getByText('スキャン完了');
   const none = page.getByRole('status').getByText('ファイルが 0 件でした');
   await expect(done.or(none)).toBeVisible();
@@ -253,7 +254,7 @@ test('次のスキャン中は前回の結果を表示せず、書き出しも�
   mkdirSync(join(big, 'd'));
   // 300 件で足りる: 読み取り（50 件ごとに UI へ制御を返す）の途中の画面を確かめられる。1,500 件では遅いエンジンで不安定だった
   for (let i = 0; i < 300; i++) writeFileSync(join(big, 'd', `f${i}.txt`), 'hello ' + i);
-  await page.getByTestId('dir-input').setInputFiles(big);
+  await pickDir(page, big);
   const status = page.getByTestId('scan-status');
   await expect(status).toContainText(/読み取り中|判定中|スキャン完了/);
   if (!(await status.textContent())?.includes('スキャン完了')) {

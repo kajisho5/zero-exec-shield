@@ -2,6 +2,7 @@
 // フォーカスの見え方、320px の集計、SkillPact の紫印。index.html（ビルド成果物）を file:// で開く。
 import { expect, test, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
+import { pickDir } from './pick-dir';
 
 const INDEX = 'file://' + fileURLToPath(new URL('../../../index.html', import.meta.url));
 const FIX = fileURLToPath(new URL('../../../tests/fixtures/', import.meta.url));
@@ -28,7 +29,7 @@ async function open(page: Page) {
 }
 
 async function scan(page: Page, fixture: string) {
-  await page.getByTestId('dir-input').setInputFiles(FIX + fixture);
+  await pickDir(page, FIX + fixture);
   await expect(page.getByTestId('scan-status')).toContainText('スキャン完了');
 }
 
