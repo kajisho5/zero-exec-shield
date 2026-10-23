@@ -571,7 +571,7 @@ env -u LC_ALL LANG=C "$SCAN" --bogus >/dev/null 2>"$TMP/lang-arg.err"; rc=$?
 [ "$sel_ok" -eq 1 ] && ok "端末の言語の選択（--lang > ZES_LANG > LC_ALL > LC_MESSAGES > LANG、eucJP / SJIS / 不正な ZES_LANG は en、--lang xx は 64）" || ng "端末の言語の選択が不正:$sel_msg"
 # The help and argument errors equal the catalog (cli.*): checked above with the inline block. An unreadable catalog is exit 64
 ZES_I18N_DIR="$TMP/no-catalog" run_scan "$FIX/chaindrop" quick "$FIX/_home" >/dev/null; rc=$?
-{ [ "$rc" = 64 ] && grep -q -F "ZES: cannot read the message catalog: $TMP/no-catalog/en.json" "$TMP/stderr.txt"; } \
+{ [ "$rc" = 64 ] && grep -q -F "ZES: Cannot read the message catalog: $TMP/no-catalog/en.json" "$TMP/stderr.txt"; } \
   && ok "メッセージカタログを読めない場合は exit 64" || ng "読めないメッセージカタログで exit 64 にならない（rc=$rc）"
 mkdir -p "$TMP/bad-catalog" && printf '{\n"f.x": "a\\u0041"\n}\n' >"$TMP/bad-catalog/en.json"
 ZES_I18N_DIR="$TMP/bad-catalog" run_scan "$FIX/chaindrop" quick "$FIX/_home" >/dev/null; rc=$?
