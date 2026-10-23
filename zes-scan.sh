@@ -22,6 +22,8 @@
 set -u
 set -o pipefail
 umask 077
+# CDPATH が export されていると相対パスの cd が別ディレクトリへ解決され、パスも標準出力へ出るため無効化
+unset CDPATH
 
 ZES_VERSION="0.1.0"      # ソフトウェアの版
 ZES_SPEC_VERSION="5.2"   # 準拠する Master Specification の版
@@ -34,7 +36,7 @@ if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
 fi
 
 export LC_ALL=C
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 IOC_FILE="${ZES_IOC:-$SCRIPT_DIR/rules/ioc.json}"
 HOME_DIR="${ZES_HOME:-${HOME:-}}"
 HOST_CHECKS="${ZES_HOST_CHECKS:-1}"
@@ -95,7 +97,12 @@ if [ ! -d "$ROOT" ]; then
   echo "ZES: --root がディレクトリではありません: $ROOT" >&2
   exit 64
 fi
-ROOT="$(cd "$ROOT" && pwd -P)"
+case "$ROOT" in -*) ROOT="./$ROOT" ;; esac  # "-" や "-dash" を cd のオプション/OLDPWD と解釈させない
+ROOT="$(cd -- "$ROOT" 2>/dev/null && pwd -P)"
+if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
+  echo "ZES: --root を解決できません" >&2
+  exit 64
+fi
 
 if [ -n "$TARGET_URL" ]; then
   case "$TARGET_URL" in
@@ -212,8 +219,8 @@ resolve_path() {
   local p="$1" r=""
   r="$(readlink -f -- "$p" 2>/dev/null)" && [ -n "$r" ] && { printf '%s' "$r"; return 0; }
   r="$(realpath -- "$p" 2>/dev/null)" && [ -n "$r" ] && { printf '%s' "$r"; return 0; }
-  if [ -d "$p" ]; then (cd "$p" 2>/dev/null && pwd -P); else
-    local d; d="$(cd "$(dirname -- "$p")" 2>/dev/null && pwd -P)" || return 1
+  if [ -d "$p" ]; then (cd -- "$p" 2>/dev/null && pwd -P); else
+    local d; d="$(cd -- "$(dirname -- "$p")" 2>/dev/null && pwd -P)" || return 1
     printf '%s/%s' "$d" "$(basename -- "$p")"
   fi
 }

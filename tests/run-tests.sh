@@ -196,6 +196,14 @@ n="$(ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$TMP/outer-root/zes/
 "$SCAN" --root /nonexistent-zes-dir >/dev/null 2>&1; [ $? -eq 64 ] && ok "存在しない --root を拒否" || ng "存在しない --root を受理"
 "$SCAN" --quick --url 'file:///etc/passwd' >/dev/null 2>&1; [ $? -eq 64 ] && ok "http(s) 以外の --url を拒否" || ng "不正な --url を受理"
 "$SCAN" --quick --full >/dev/null 2>&1; [ $? -eq 64 ] && ok "モード重複指定を拒否" || ng "モード重複指定を受理"
+# '-' 始まりの --root は cd のオプションと解釈させない（空ルートで exit 0 にしない）
+mkdir -p "$TMP/dash" && cp -R "$FIX/chaindrop" "$TMP/dash/-dash"
+n="$(cd "$TMP/dash" && ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --quick --root -dash --json 2>/dev/null | jq --arg r "$TMP/dash/-dash/" '[.findings[] | select((.path // "") | startswith($r))] | length' 2>/dev/null)"
+[ "${n:-0}" -gt 0 ] && ok "'-' で始まる --root を走査（cd -- で解決）" || ng "'-' で始まる --root を走査していません（${n:-?} 件）"
+# export された CDPATH で相対 --root が別ディレクトリへ解決されない
+mkdir -p "$TMP/cdpath/decoy/chaindrop" "$TMP/cdpath/cwd" && cp -R "$FIX/chaindrop" "$TMP/cdpath/cwd/chaindrop"
+n="$(cd "$TMP/cdpath/cwd" && CDPATH="$TMP/cdpath/decoy" ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --quick --root chaindrop --json 2>/dev/null | jq --arg r "$TMP/cdpath/cwd/chaindrop/" '[.findings[] | select((.path // "") | startswith($r))] | length' 2>/dev/null)"
+[ "${n:-0}" -gt 0 ] && ok "CDPATH が相対 --root を書き換えない" || ng "CDPATH により相対 --root が別ディレクトリへ解決されました（${n:-?} 件）"
 
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"
