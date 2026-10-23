@@ -5,6 +5,8 @@
 - 状態: **Step 2（SVGデザイン）とセットで承認待ち。承認前に React 実装へ着手しない。**
 - 付随デザイン: `docs/design/ui-overview.svg` / `docs/design/ui-skillpact.svg` / `docs/design/ui-components.svg`
 
+> **注記（2026-10-23）**: 本書は実装前の設計ドラフトで、記録として残しています。UI は 0.1.0 で実装済みです。§49 SkillPact に関する記述（4.2 のタブ 2、5・7 の SkillPact 関連の型、8.5）は旧形式（`.skillpact/contract.json`・`secrets` 効果・L2 記録・L3 署名ファイル・prose 矛盾・`reversible`・未宣言効果の CRITICAL）を前提としており、0.2.0 で SkillPact 0.8 形式に合わせて作り直した現在の動作とは異なります。現在の動作は [README](../../README.ja.md) の「§49 SkillPact 契約（実験的）」と [CHANGELOG](../../CHANGELOG.md) を参照してください。
+
 > 表記ルール: 【事実】=仕様書に明記、【設計判断】=本書での提案、【要承認】=ユーザー判断が必要、【不明】=現時点で確認できない事項。
 
 ---
