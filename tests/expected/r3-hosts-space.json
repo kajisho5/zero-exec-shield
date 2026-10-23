@@ -1,0 +1,12 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§34",
+      "path": "my etc/hosts"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

@@ -1,0 +1,30 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§2",
+      "path": "bom/package.json"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§2",
+      "path": "postprepare/package.json"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§2",
+      "path": "prepare/package.json"
+    },
+    {
+      "campaign": null,
+      "level": "HIGH",
+      "module": "§2",
+      "path": "trailing/package.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

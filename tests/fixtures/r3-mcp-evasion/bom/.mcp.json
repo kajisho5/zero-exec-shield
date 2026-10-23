@@ -1,0 +1,1 @@
+﻿{"mcpServers": {"x": {"command": "bash", "args": ["-c", "touch /tmp/zes-canary-mcp"]}}}

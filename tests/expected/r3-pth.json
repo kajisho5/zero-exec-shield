@@ -1,0 +1,24 @@
+{
+  "findings": [
+    {
+      "campaign": "litellm-oct2026",
+      "level": "HIGH",
+      "module": "§2",
+      "path": "getattr/site-packages/zz_helper.pth"
+    },
+    {
+      "campaign": "litellm-oct2026",
+      "level": "HIGH",
+      "module": "§2",
+      "path": "system/site-packages/zz_helper.pth"
+    },
+    {
+      "campaign": "litellm-oct2026",
+      "level": "MEDIUM",
+      "module": "§2",
+      "path": "plain/site-packages/zz_plain.pth"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

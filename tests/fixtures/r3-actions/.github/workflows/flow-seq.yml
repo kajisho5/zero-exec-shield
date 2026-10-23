@@ -1,0 +1,10 @@
+# ZES test fixture (r3): steps をフロー列（複数行・コメント付き）で書いた pwn request
+on: pull_request_target
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps: [
+      {uses: tj-actions/changed-files@v35},  # flow
+      {uses: actions/checkout@v4, with: {ref: "${{ github.event.pull_request.head.sha }}"}},
+      {run: "echo ${{ secrets.T }}"}
+    ]

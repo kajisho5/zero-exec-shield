@@ -1,0 +1,55 @@
+{
+  "contract_version": "0.8",
+  "skill": {
+    "name": "net-tool",
+    "version": "1.2.0"
+  },
+  "permissions": {
+    "read": {
+      "level": "scoped",
+      "scope": [
+        "$INPUT"
+      ]
+    },
+    "write": {
+      "level": "scoped",
+      "scope": [
+        "$OUTPUT"
+      ]
+    },
+    "network": {
+      "level": "none"
+    },
+    "exec": {
+      "level": "scoped",
+      "scope": [
+        "python3"
+      ]
+    },
+    "spend": {
+      "level": "none"
+    },
+    "send": {
+      "level": "none"
+    }
+  },
+  "capabilities": [
+    {
+      "id": "make",
+      "summary": "make a thumbnail",
+      "effects": [
+        "read",
+        "write",
+        "exec"
+      ],
+      "entry": {
+        "cli": [
+          "python3",
+          "$SKILL_DIR/scripts/thumb",
+          "$INPUT",
+          "$OUTPUT"
+        ]
+      }
+    }
+  ]
+}

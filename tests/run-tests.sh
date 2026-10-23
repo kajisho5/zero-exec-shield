@@ -233,8 +233,9 @@ if command -v git >/dev/null 2>&1 && command -v mkfifo >/dev/null 2>&1 && comman
   done
   mkfifo "$TMP/git-inc/.git/hang.fifo" && printf '[include]\n\tpath = hang.fifo\n[includeIf "gitdir:/"]\n\tpath = hang.fifo\n' >>"$TMP/git-inc/.git/config"
   out="$(ZES_GIT_TIMEOUT=10 timeout 120 env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --full --root "$TMP/git-inc" --json 2>/dev/null)"
-  printf '%s' "$out" | jq -e '([.findings[] | select(.module == "§46" and (.detail | test("1 コミット中")))] | length == 1) and ([.errors[] | select(.reason | test("^git_"))] | length == 0)' >/dev/null 2>&1 \
-    && ok "検査対象 .git/config の include.path（FIFO）を読まずに §46 を完走" || ng "include.path（FIFO）で走査が停止または §46 が失敗"
+  # include の参照先（FIFO）は読まずに git_include_unresolved を記録し、git の失敗（git_timeout 等）は起きない
+  printf '%s' "$out" | jq -e '([.findings[] | select(.module == "§46" and (.detail | test("1 コミット中")))] | length == 1) and ([.errors[] | select(.reason | test("^git_")) | select(.reason | test("^git_include_unresolved:") | not)] | length == 0) and ([.errors[] | select(.reason | test("^git_include_unresolved:"))] | length >= 1)' >/dev/null 2>&1 \
+    && ok "検査対象 .git/config の include.path（FIFO）を読まずに §46 を完走（errors[] に git_include_unresolved）" || ng "include.path（FIFO）で走査が停止または §46 が失敗"
   mkfifo "$TMP/git-pr/.git/packed-refs"
   out="$(ZES_GIT_TIMEOUT=2 timeout 120 env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --full --root "$TMP/git-pr" --json 2>/dev/null)"
   printf '%s' "$out" | jq -e '[.errors[] | select(.module == "§46" and .reason == "git_timeout")] | length >= 1' >/dev/null 2>&1 \
@@ -337,6 +338,124 @@ n="$(cd "$TMP/dash" && ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$S
 mkdir -p "$TMP/cdpath/decoy/chaindrop" "$TMP/cdpath/cwd" && cp -R "$FIX/chaindrop" "$TMP/cdpath/cwd/chaindrop"
 n="$(cd "$TMP/cdpath/cwd" && CDPATH="$TMP/cdpath/decoy" ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --quick --root chaindrop --json 2>/dev/null | jq --arg r "$TMP/cdpath/cwd/chaindrop/" '[.findings[] | select((.path // "") | startswith($r))] | length' 2>/dev/null)"
 [ "${n:-0}" -gt 0 ] && ok "CDPATH が相対 --root を書き換えない" || ng "CDPATH により相対 --root が別ディレクトリへ解決されました（${n:-?} 件）"
+
+# ---------------------------------------------------------------------------
+echo "== round 3（CLI の検出回避・fail-closed） =="
+# R3-01: PATH の相対・空のエントリと、実パスが検査ルート配下のエントリは外し、errors[] に path_entry_dropped を記録する
+mkdir -p "$TMP/pathroot/node_modules/.bin"
+printf '#!/bin/sh\n: >"%s/path-canary"\nexec /usr/bin/env jq "$@"\n' "$TMP" >"$TMP/pathroot/node_modules/.bin/jq"; chmod +x "$TMP/pathroot/node_modules/.bin/jq"
+out="$(cd "$TMP/pathroot/node_modules/.bin" && PATH=".:$TMP/pathroot/node_modules/.bin:$PATH" run_scan "$TMP/pathroot" quick "$FIX/_home")"
+printf '%s' "$out" | jq -e --arg p "path_entry_dropped:$TMP/pathroot/node_modules/.bin" '([.errors[] | select(.module == "core" and (.reason == "path_entry_dropped:." or .reason == $p))] | length == 2)' >/dev/null 2>&1 \
+  && [ ! -e "$TMP/path-canary" ] && ok "PATH の相対エントリ・検査ルート配下のエントリを外し errors[] に記録（ルート内の jq を起動しない）" \
+  || ng "PATH の無害化が不正（canary=$([ -e "$TMP/path-canary" ] && echo yes || echo no)）"
+
+# R3-02: .git ファイル（gitdir:）・入れ子のリポジトリ・include.path の参照先の Git 設定を静的に検査し、git には読ませない
+if command -v git >/dev/null 2>&1; then
+  printf '#!/bin/sh\n: >"%s/git-r3-canary"\n' "$TMP" >"$TMP/git-r3-pwn.sh"; chmod +x "$TMP/git-r3-pwn.sh"
+  ginit() { ( export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1; mkdir -p "$1" && cd "$1" && git init -q . ) >/dev/null 2>&1; }
+  # gitdir: ファイル（.git がファイルで、実体は gd/）
+  ginit "$TMP/r3git/gitfile" && mv "$TMP/r3git/gitfile/.git" "$TMP/r3git/gitfile/gd" && printf 'gitdir: gd\n' >"$TMP/r3git/gitfile/.git" \
+    && printf '\tfsmonitor = %s\n' "$TMP/git-r3-pwn.sh" >>"$TMP/r3git/gitfile/gd/config"
+  # 入れ子のリポジトリ（vendor/lib/.git）
+  ginit "$TMP/r3git/nested" && ginit "$TMP/r3git/nested/vendor/lib" && printf '\tfsmonitor = %s\n' "$TMP/git-r3-pwn.sh" >>"$TMP/r3git/nested/vendor/lib/.git/config"
+  # include.path の参照先（../tools.cfg）
+  ginit "$TMP/r3git/include" && printf '[include]\n\tpath = ../tools.cfg\n' >>"$TMP/r3git/include/.git/config" \
+    && printf '[core]\n\tfsmonitor = %s\n' "$TMP/git-r3-pwn.sh" >"$TMP/r3git/include/tools.cfg"
+  # 検査ルート外を指す gitdir:（git worktree 等）は読まずに errors[] に記録
+  mkdir -p "$TMP/r3git/outside" && printf 'gitdir: %s/r3git/gitfile/gd\n' "$TMP" >"$TMP/r3git/outside/.git"
+  # .git/config がルート外（/proc 等）を指すリンク: 読まずに errors[] に記録し、走査が停止しない
+  ginit "$TMP/r3git/proclink" && rm -f "$TMP/r3git/proclink/.git/config" && ln -s /proc/self/status "$TMP/r3git/proclink/.git/config"
+  for k in gitfile:gd/config nested:vendor/lib/.git/config include:tools.cfg; do
+    r="$TMP/r3git/${k%%:*}"
+    run_scan "$r" full "$FIX/_home" >"$TMP/r3git.json"
+    jq -e --arg p "$r/${k#*:}" '[.findings[] | select(.module == "§26" and .level == "CRITICAL" and .path == $p)] | length == 1' "$TMP/r3git.json" >/dev/null 2>&1 \
+      && ok "Git 設定を静的に検査（${k%%:*}: ${k#*:} の core.fsmonitor を CRITICAL）" || ng "Git 設定（${k%%:*}）の core.fsmonitor を検出していません"
+  done
+  run_scan "$TMP/r3git/outside" quick "$FIX/_home" | jq -e --arg p "gitdir_outside_root:$TMP/r3git/outside/.git" '[.errors[] | select(.reason == $p)] | length == 1' >/dev/null 2>&1 \
+    && ok "検査ルート外を指す gitdir: を errors[] に gitdir_outside_root として記録" || ng "検査ルート外を指す gitdir: が errors[] に記録されていません"
+  out="$(ZES_GIT_TIMEOUT=10 timeout 120 env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --full --root "$TMP/r3git/proclink" --json 2>/dev/null)"
+  printf '%s' "$out" | jq -e --arg p "path_leaves_root:$TMP/r3git/proclink/.git/config" '[.errors[] | select(.reason == $p)] | length == 1' >/dev/null 2>&1 \
+    && ok ".git/config がルート外（/proc）を指すリンクは読まずに errors[] に path_leaves_root" || ng ".git/config のルート外リンクの扱いが不正"
+  [ -e "$TMP/git-r3-canary" ] && ng "検査対象の Git 設定（fsmonitor）が実行されました" || ok "検査対象の Git 設定（gitdir: / 入れ子 / include）を実行しない"
+
+  # R3-21: §38 の git log はパスを C 形式で引用させない（core.quotePath=false と -z）
+  ( export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+    mkdir -p "$TMP/r3qp/.github/workflows" && cd "$TMP/r3qp" && git init -q . \
+      && printf 'on: push\njobs: {}\n' >".github/workflows/été.yml" && printf 'on: push\njobs: {}\n' >'.github/workflows/a"b.yml' && git add -A \
+      && GIT_COMMITTER_DATE="@$((1792800000 - 86400)) +0000" GIT_AUTHOR_DATE="@$((1792800000 - 86400)) +0000" git -c user.name=a -c user.email=a@example.invalid commit -q -m init ) >/dev/null 2>&1
+  n="$(run_scan "$TMP/r3qp" full "$FIX/_home" | jq --arg a "$TMP/r3qp/.github/workflows/été.yml" --arg b "$TMP/r3qp/.github/workflows/a\"b.yml" '[.findings[] | select(.module == "§38" and (.path == $a or .path == $b))] | length')"
+  [ "$n" = "2" ] && ok "§38 の新規ワークフローのパスを引用符・\\NNN なしで出力（é / \" を含む名前）" || ng "§38 のパスが C 形式で引用されています（一致 ${n:-?} 件）"
+
+  # K2: timeout が無い環境（bash のウォッチドッグ）でも孤児の sleep を残さない
+  mkdir -p "$TMP/notimeout"
+  for b in /usr/bin/* /bin/*; do n="${b##*/}"; [ "$n" = timeout ] || [ -e "$TMP/notimeout/$n" ] || ln -s "$b" "$TMP/notimeout/$n" 2>/dev/null; done
+  ZES_GIT_TIMEOUT=37 PATH="$TMP/notimeout" ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --full --root "$TMP/r3qp" --json >/dev/null 2>&1
+  sleep 1
+  n="$(pgrep -f -x 'sleep 37' 2>/dev/null | wc -l | tr -d ' ')"
+  [ "$n" = "0" ] && ok "timeout が無い環境のウォッチドッグが sleep を残さない" || ng "ウォッチドッグの sleep が ${n} 個残っています"
+else
+  printf '  SKIP git が無いため round 3 の Git 設定チェックを省略\n'
+fi
+
+# R3-07 / R3-08: パスのバックスラッシュを awk -v で展開しない（行の偽造・パスの改変をしない）
+mkdir -p "$TMP/r3bs/app\\nx" "$TMP/r3bs/q\\nnpm\\tkeyv\\t6.0.0\\tz"
+printf '# yarn lockfile v1\n\n"keyv@^6.0.0":\n  version "6.0.0"\n' >"$TMP/r3bs/app\\nx/yarn.lock"
+printf '# yarn lockfile v1\n\n"left-pad@^1.0.0":\n  version "1.3.0"\n' >"$TMP/r3bs/q\\nnpm\\tkeyv\\t6.0.0\\tz/yarn.lock"
+out="$(run_scan "$TMP/r3bs" worm "$FIX/_home")"
+printf '%s' "$out" | jq -e --arg p "$TMP/r3bs/app\\nx/yarn.lock" '[.findings[] | select(.module == "§15")] | (length == 1 and .[0].path == $p)' >/dev/null 2>&1 \
+  && ok "パス中の \\n / \\t を awk で展開しない（偽の依存行を作らせない・パスを変えない）" || ng "パスのバックスラッシュで §15 の結果が変わっています"
+
+# R3-10: リンク名の設定（.mcp.json → cfg/servers.json）を検査。ルート外を指す設定名のリンクは errors[] に記録
+printf '%s' "$(run_scan "$FIX/r3-symlink-config" quick "$FIX/_home")" | jq -e --arg p "symlink_leaves_root:$FIX/r3-symlink-config/out/.mcp.json" '[.errors[] | select(.reason == $p)] | length == 1' >/dev/null 2>&1 \
+  && ok "検査ルート外を指す設定名のリンクを errors[] に symlink_leaves_root として記録" || ng "ルート外を指す設定名のリンクが errors[] に記録されていません"
+
+# R3-05: YAML のエイリアスは解決せず errors[] に記録
+run_scan "$FIX/r3-actions" quick "$FIX/_home" >/dev/null
+run_scan "$FIX/r3-actions" standard "$FIX/_home" | jq -e --arg p "yaml_alias_unresolved:$FIX/r3-actions/.github/workflows/alias.yml" '[.errors[] | select(.module == "§21" and .reason == $p)] | length == 1' >/dev/null 2>&1 \
+  && ok "YAML のエイリアス（*x）を errors[] に yaml_alias_unresolved として記録" || ng "YAML のエイリアスが errors[] に記録されていません"
+
+# R3-17: bun.lockb（バイナリ）は解析せず errors[] に lockfile_unparsed
+run_scan "$FIX/r3-lockfiles" worm "$FIX/_home" | jq -e --arg p "lockfile_unparsed:$FIX/r3-lockfiles/bunb/bun.lockb" '[.errors[] | select(.module == "§15" and .reason == $p)] | length == 1' >/dev/null 2>&1 \
+  && ok "bun.lockb を errors[] に lockfile_unparsed として記録" || ng "bun.lockb が errors[] に記録されていません"
+
+# NV-1: アーカイブは展開せず errors[] に archive_not_inspected（status は ok のまま）
+run_scan "$FIX/r3-archive" worm "$FIX/_home" | jq -e --arg p "archive_not_inspected:$FIX/r3-archive/vendor/zes_demo-1.0-py3-none-any.whl" '.status == "ok" and ([.errors[] | select(.module == "core" and .reason == $p)] | length == 1)' >/dev/null 2>&1 \
+  && ok "アーカイブを errors[] に archive_not_inspected として記録（status は ok のまま）" || ng "アーカイブの扱いが不正"
+
+# R3-18: HOME の監視パスに空白があっても（~/Library/Application Support/…）ブラウザ拡張を検査
+mkdir -p "$TMP/r3home/Library/Application Support/Google/Chrome/Default/Extensions/abcd/1.0" "$TMP/r3empty"
+cp "$FIX/browser-ext/Extensions/abcd/manifest.json" "$TMP/r3home/Library/Application Support/Google/Chrome/Default/Extensions/abcd/1.0/manifest.json"
+run_scan "$TMP/r3empty" standard "$TMP/r3home" | jq -e --arg p "$TMP/r3home/Library/Application Support/Google/Chrome/Default/Extensions/abcd/1.0/manifest.json" '[.findings[] | select(.module == "§24" and .path == $p)] | length >= 1' >/dev/null 2>&1 \
+  && ok "空白を含む HOME 監視パス（Application Support）のブラウザ拡張を検査" || ng "Application Support 配下のブラウザ拡張を検査していません"
+
+# R3-24: --root の値・引数エラーの値の制御文字を端末に出さない
+d="$TMP/r3esc/pkg"$'\033]0;pwned\007\033[2J'
+mkdir -p "$d"
+run_scan "$d" quick "$FIX/_home" >/dev/null
+"$SCAN" --root "$TMP/r3esc/nope"$'\033]0;x\007' >/dev/null 2>"$TMP/r3esc.err"
+if grep -q $'\033' "$TMP/stderr.txt" "$TMP/r3esc.err"; then ng "バナー・引数エラーに ESC（端末エスケープ）がそのまま出力されています"
+else ok "バナー・引数エラーの --root の制御文字を \\xHH で表示"; fi
+
+# R3-11 / K1: 読めないディレクトリ・ファイルは errors[] に unreadable、ルート自体を読めなければ status=error・終了コード 2
+#   root で実行している場合は setpriv で nobody として実行する（無ければ SKIP）
+as_user=""
+if [ "$(id -u)" = "0" ]; then command -v setpriv >/dev/null 2>&1 && as_user="setpriv --reuid=65534 --regid=65534 --clear-groups"; else as_user="env"; fi
+if [ -n "$as_user" ]; then
+  P="$TMP/r3perm"; mkdir -p "$P/root/locked" "$P/root/d" "$P/home" "$P/zes" "$P/unreadable-root"
+  printf '# yarn lockfile v1\n' >"$P/root/locked/yarn.lock"; printf '# yarn lockfile v1\n' >"$P/root/d/yarn.lock"
+  cp -R "$SCAN" "$REPO/rules" "$P/zes/"
+  chmod 755 "$TMP" "$P" "$P/root" "$P/root/d" "$P/home" "$P/zes"; chmod -R a+rX "$P/zes"
+  chmod 000 "$P/root/locked" "$P/root/d/yarn.lock"; chmod 311 "$P/unreadable-root"
+  out="$(cd / && $as_user env HOME="$P/home" TMPDIR=/tmp ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$P/home" "$P/zes/zes-scan.sh" --worm --root "$P/root" --json 2>/dev/null)"
+  printf '%s' "$out" | jq -e --arg a "unreadable:$P/root/locked" --arg b "unreadable:$P/root/d/yarn.lock" '.status == "partial" and ([.errors[] | select(.module == "core" and (.reason == $a or .reason == $b))] | length == 2)' >/dev/null 2>&1 \
+    && ok "読めないディレクトリ・ファイルを errors[] に unreadable として記録" || ng "読めないディレクトリ・ファイルが errors[] に記録されていません"
+  out="$(cd / && $as_user env HOME="$P/home" TMPDIR=/tmp ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$P/home" "$P/zes/zes-scan.sh" --worm --root "$P/unreadable-root" --json 2>/dev/null)"; rc=$?
+  [ "$rc" = "2" ] && printf '%s' "$out" | jq -e '.status == "error" and ([.errors[] | select(.reason == "inventory_failed")] | length == 1)' >/dev/null 2>&1 \
+    && ok "検査ルート自体を読めない場合は status=error・終了コード 2" || ng "検査ルートを読めない場合の status/終了コードが不正（rc=$rc）"
+  chmod -R u+rwx "$P" 2>/dev/null
+else
+  printf '  SKIP 読めないファイルの検査（root で setpriv が無い）\n'
+fi
 
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"

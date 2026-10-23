@@ -1,0 +1,30 @@
+{
+  "findings": [
+    {
+      "campaign": "skillpact-divergence",
+      "level": "HIGH",
+      "module": "§49",
+      "path": "noext"
+    },
+    {
+      "campaign": "skillpact-divergence",
+      "level": "HIGH",
+      "module": "§49",
+      "path": "symlinked"
+    },
+    {
+      "campaign": "skillpact-divergence",
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "noext"
+    },
+    {
+      "campaign": "skillpact-divergence",
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "symlinked"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

@@ -1,0 +1,108 @@
+{
+  "findings": [
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/anchor.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/flow-seq.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/ref-case.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/ref-index.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/ref-mcsha.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/ref-merge.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§21",
+      "path": ".github/workflows/tag.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "HIGH",
+      "module": "§21",
+      "path": ".github/workflows/ref-expr.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§22",
+      "path": ".github/workflows/anchor.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§22",
+      "path": ".github/workflows/flow-seq.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§22",
+      "path": ".github/workflows/tag.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "HIGH",
+      "module": "§22",
+      "path": ".github/workflows/alias.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "HIGH",
+      "module": "§22",
+      "path": ".github/workflows/anchor.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "HIGH",
+      "module": "§22",
+      "path": ".github/workflows/flow-seq.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "HIGH",
+      "module": "§22",
+      "path": ".github/workflows/tag.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§38",
+      "path": ".github/workflows/tojson-lower.yml"
+    },
+    {
+      "campaign": "ghostaction-oct2026",
+      "level": "CRITICAL",
+      "module": "§38",
+      "path": ".github/workflows/tojson-star.yml"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

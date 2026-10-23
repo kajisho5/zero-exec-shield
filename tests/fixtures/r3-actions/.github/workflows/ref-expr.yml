@@ -1,0 +1,10 @@
+# ZES test fixture (r3): 出所を静的に判定できない式の ref（HIGH）
+on: pull_request_target
+jobs:
+  b:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ env.CHECKOUT_REF }}
+      - run: echo ${{ secrets.TOKEN }}
