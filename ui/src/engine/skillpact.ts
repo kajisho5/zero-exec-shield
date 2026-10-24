@@ -19,7 +19,10 @@ const HIGH_EFFECTS: Effect[] = ['exec', 'network', 'spend', 'send'];
 const CONTRACT = 'skill.contract.json';
 
 // ---------------------------------------------------------------- I-JSON (spec §4.1)
-/** Detects duplicate keys, depth over 64, numbers outside ±(2^53−1), lone surrogates and invalid UTF-8 (U+FFFD). null if there is no problem. */
+/** Detects duplicate keys, depth over 64, numbers outside ±(2^53−1), lone surrogates and invalid UTF-8 (U+FFFD). null if there is no problem.
+ *  Reports one problem in the fixed priority order of the CLI's sp_ijson_problem (not the first one in the document):
+ *  not JSON → not an object → duplicate member → depth → number → U+FFFD. As jq 1.7 does, a high-surrogate escape that is
+ *  not followed by a low-surrogate escape is not JSON, and a lone low-surrogate escape becomes U+FFFD. */
 export function ijsonProblem(text: string): string | null {
   const s = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   let value: unknown;
@@ -28,9 +31,8 @@ export function ijsonProblem(text: string): string | null {
   } catch {
     return 'not valid JSON (or lone surrogate)';
   }
-  if (!isObj(value)) return 'top-level value is not an object';
   let i = 0;
-  let problem: string | null = null;
+  const found = new Set<string>();
   const ws = () => { while (i < s.length && ' \t\r\n'.includes(s[i]!)) i++; };
   const str = (): string => {
     let out = '';
@@ -38,17 +40,25 @@ export function ijsonProblem(text: string): string | null {
     while (i < s.length && s[i] !== '"') {
       if (s[i] === '\\') {
         const c = s[i + 1];
-        if (c === 'u') { out += String.fromCharCode(parseInt(s.slice(i + 2, i + 6), 16)); i += 6; continue; }
+        if (c === 'u') {
+          const u = parseInt(s.slice(i + 2, i + 6), 16);
+          if (u >= 0xd800 && u <= 0xdbff) {
+            const m = /^\\u([dD][c-fC-F][0-9a-fA-F]{2})/.exec(s.slice(i + 6, i + 12));
+            if (!m) { found.add('not valid JSON (or lone surrogate)'); out += '\ufffd'; i += 6; continue; }
+            out += String.fromCharCode(u, parseInt(m[1]!, 16)); i += 12; continue;
+          }
+          out += u >= 0xdc00 && u <= 0xdfff ? '\ufffd' : String.fromCharCode(u); i += 6; continue;
+        }
         out += c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c === 'b' ? '\b' : c === 'f' ? '\f' : c;
         i += 2;
       } else out += s[i++];
     }
     i++;
-    if (/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|�/.test(out)) problem ??= 'invalid UTF-8 or lone surrogate';
+    if (/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|\uFFFD/.test(out)) found.add('invalid UTF-8 or lone surrogate');
     return out;
   };
   const val = (depth: number): void => {
-    if (depth > 64) { problem ??= 'nesting deeper than 64'; }
+    if (depth > 64) found.add('nesting deeper than 64');
     ws();
     const c = s[i];
     if (c === '{') {
@@ -58,7 +68,7 @@ export function ijsonProblem(text: string): string | null {
       for (;;) {
         ws();
         const k = str();
-        if (seen.has(k)) problem ??= 'duplicate member name';
+        if (seen.has(k)) found.add('duplicate member name');
         seen.add(k);
         ws(); i++; // :
         val(depth + 1);
@@ -82,13 +92,15 @@ export function ijsonProblem(text: string): string | null {
       i += tok.length || 1;
       if (/^-?\d/.test(tok)) {
         const n = Number(tok);
-        if (!Number.isFinite(n) || Math.abs(n) > Number.MAX_SAFE_INTEGER) problem ??= 'number outside ±(2^53-1)';
+        if (!Number.isFinite(n) || Math.abs(n) > Number.MAX_SAFE_INTEGER) found.add('number outside ±(2^53-1)');
       }
     }
   };
   val(1);
-  return problem;
+  if (!found.has(IJSON_ORDER[0]!) && !isObj(value)) return 'top-level value is not an object';
+  return IJSON_ORDER.find((p) => found.has(p)) ?? null;
 }
+const IJSON_ORDER = ['not valid JSON (or lone surrogate)', 'duplicate member name', 'nesting deeper than 64', 'number outside ±(2^53-1)', 'invalid UTF-8 or lone surrogate'];
 
 // ---------------------------------------------------------------- globs (spec §6.1; same as core._glob_re of the reference implementation)
 const reEsc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

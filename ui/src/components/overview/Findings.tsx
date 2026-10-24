@@ -206,7 +206,7 @@ function FindingSheet({ finding, onClose, returnFocus }: { finding: Finding | nu
           <span aria-hidden="true" className={cn('absolute top-5 left-0 h-9 w-1', SEV[f.level].bar)} />
           <div className="flex flex-col gap-4 overflow-y-auto px-4 pt-3">
             {f.path ? <PathText path={f.path} wrap className="text-[15px] leading-snug" /> : <span className="text-muted-foreground">{t('ui.findings.pasted')}</span>}
-            <p lang={textLang(ft(f))} className="text-sm leading-relaxed">{visiblePath(ft(f))}</p>
+            <p lang={textLang(ft(f))} className="text-sm leading-relaxed wrap-anywhere">{visiblePath(ft(f))}</p>
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 border-t border-border pt-3 text-[13px]">
               <dt className="text-muted-foreground">{t('ui.findings.campaign')}</dt><dd className="wrap-anywhere">{visibleOpt(f.campaign) ?? '—'}</dd>
               <dt className="text-muted-foreground">{t('ui.findings.module')}</dt><dd>{f.module}</dd>

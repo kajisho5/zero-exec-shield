@@ -14,6 +14,9 @@ export interface RuleCtx {
   checks: Set<string>;
   /** Top-level directory of the loaded folder (first element of webkitRelativePath; '' if none) */
   root: string;
+  /** Files of the root .git that the CLI reads although it prunes $ROOT/.git, .hg and .svn from its inventory:
+   *  .git/config (§26) and .git/hooks/* (§7). They are not in files, so no other rule sees them */
+  vcs: FileInput[];
   /** Result of homeLike() (fixed on the first call) */
   home?: boolean;
 }

@@ -133,7 +133,14 @@ describe('SkillPact（§49、実験的）', () => {
   it('I-JSON 検査', () => {
     expect(ijsonProblem('{"a":1,"a":2}')).toBe('duplicate member name');
     expect(ijsonProblem('{"a":9007199254740993}')).toBe('number outside ±(2^53-1)');
-    expect(ijsonProblem('{"a":"\\ud800"}')).toBe('invalid UTF-8 or lone surrogate');
+    // as jq 1.7: a lone high-surrogate escape is not JSON, a lone low one becomes U+FFFD
+    expect(ijsonProblem('{"a":"\\ud800"}')).toBe('not valid JSON (or lone surrogate)');
+    expect(ijsonProblem('{"a":"\\udc00"}')).toBe('invalid UTF-8 or lone surrogate');
+    expect(ijsonProblem('{"a":"\\ud83d\\ude00"}')).toBeNull();
+    // one problem in the CLI's fixed priority order, not the first one in the document
+    expect(ijsonProblem('{"n":9007199254740993,"x":1,"x":2}')).toBe('duplicate member name');
+    expect(ijsonProblem('{"s":"\\udc00","n":1e400}')).toBe('number outside ±(2^53-1)');
+    expect(ijsonProblem('["\\ud800"]')).toBe('not valid JSON (or lone surrogate)');
     expect(ijsonProblem('[]')).toBe('top-level value is not an object');
     expect(ijsonProblem('{"a":{"b":[1,2,{"c":"x"}]},"d":-1.5e3}')).toBeNull();
   });
@@ -250,8 +257,9 @@ describe('findings 1.2: code, params, English detail, id v2 (the CLI emit)', () 
         expect(Object.keys(p).sort(), f.code).toEqual([...new Set([...t!.matchAll(/\{([a-z_]+)\}/g)].map((m) => m[1]))].sort());
         expect(Object.values(p).every((v) => typeof v === 'string'), f.code).toBe(true);
         expect(f.detail).toBe(render(t!, p));
-        const canon = Object.keys(p).sort().map((k) => `${k}=${p[k]}`).join('\u001f');
-        expect(f.id).toBe('sha256:' + (await sha(['zes-id-v2', f.module, f.campaign ?? '', f.path ?? '', f.code, canon].join('|'))));
+        const esc = (x: string) => x.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\u001f/g, '\\u001f');
+        const canon = Object.keys(p).sort().map((k) => `${k}=${esc(p[k]!)}`).join('\u001f');
+        expect(f.id).toBe('sha256:' + (await sha(['zes-id-v2', ...[f.module, f.campaign ?? '', f.path ?? '', f.code].map(esc), canon].join('|'))));
         expect(f.detail).not.toMatch(/[\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]/);
       }
     }

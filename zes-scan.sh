@@ -28,7 +28,7 @@ umask 077
 # If CDPATH is exported, a relative cd resolves to another directory and also prints the path to stdout, so disable it
 unset CDPATH
 
-ZES_VERSION="0.5.0"      # software version
+ZES_VERSION="0.5.1"      # software version
 ZES_SPEC_VERSION="5.2"   # version of the Master Specification this conforms to
 INCIDENT_BUNDLE="ZES-2026-OCT-EMERGENCY-V5.2"
 FINDINGS_SCHEMA_VERSION="1.2"  # 1.2: code / params (catalog key and values), English detail, id v2
@@ -54,12 +54,14 @@ zes_lang_of_locale() {  # zes_lang_of_locale VALUE → ZES_LANG_RESOLVED
       esac ;;
   esac
 }
-ZES_LANG_ARG=""; ZES_LANG_ARG_SET=0
+ZES_LANG_ARG=""; ZES_LANG_ARG_BAD=0
 _zes_a=("$@"); _zes_i=0
 while [ "$_zes_i" -lt "${#_zes_a[@]}" ]; do
   case "${_zes_a[_zes_i]}" in
     --root|--url|--skillpact-cache) _zes_i=$((_zes_i + 1)) ;;
-    --lang) ZES_LANG_ARG_SET=1; ZES_LANG_ARG="${_zes_a[_zes_i + 1]-}"; _zes_i=$((_zes_i + 1)) ;;
+    # every --lang value is checked (not only the last one, which decides the language)
+    --lang) ZES_LANG_ARG="${_zes_a[_zes_i + 1]-}"; _zes_i=$((_zes_i + 1))
+            case "$ZES_LANG_ARG" in en|ja) ;; *) ZES_LANG_ARG_BAD=1 ;; esac ;;
   esac
   _zes_i=$((_zes_i + 1))
 done
@@ -281,9 +283,7 @@ set_mode() {
 }
 
 # --lang was read before parsing (so argument errors use it); a missing or invalid value is an argument error
-if [ "$ZES_LANG_ARG_SET" -eq 1 ]; then
-  case "$ZES_LANG_ARG" in en|ja) ;; *) arg_error cli.arg.lang ;; esac
-fi
+[ "$ZES_LANG_ARG_BAD" -eq 0 ] || arg_error cli.arg.lang
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -333,44 +333,62 @@ if [ -n "$TARGET_URL" ]; then
   esac
 fi
 
-# Message catalog (i18n/en.json and, for a Japanese terminal, i18n/ja.json): read once, by one awk run, into
-#   MSG_EN (findings.json: detail is always English) and MSG_LANG (the terminal). No jq: a run without jq must give the
-#   same detail and id. The files are flat JSON, one "key": "value" per line, with only \" and \\ escapes
+# Message catalog (i18n/en.json and i18n/ja.json): read once, by one awk run, into MSG_EN (findings.json: detail is
+#   always English) and MSG_LANG (the terminal). No jq: a run without jq must give the same detail and id. The files are
+#   flat JSON, one "key": "value" per line, with only \" and \\ escapes. Fail-closed (exit 64): each file must be complete
+#   ("{" first, "}" last, a comma after every entry but the last, no duplicate key), both files must have the same key
+#   set, and the cli.* / f.* / log.* keys must be exactly the ones this script was released with (ZES_CATALOG_KEYS_SHA256,
+#   the SHA-256 of those keys in C-locale order, one per line; tests/run-tests.sh checks it against i18n/en.json).
+#   A file is told apart by its name (an empty file has no line 1, so counting files by FNR would be wrong)
+ZES_CATALOG_KEYS_SHA256="f27b8c68b014fb8003d203da2222d5664ec9cd0002ec40bea0241a66794fd8d4"
 I18N_DIR="${ZES_I18N_DIR:-$SCRIPT_DIR/i18n}"
 declare -A MSG_EN=() MSG_LANG=()
 ZES_CATALOG_AWK='
-  FNR == 1 { fi++ }
+  function fail() { bad = 1; exit }
+  FNR == 1 { t = (FILENAME == ENVIRON["ZES_CAT_EN"]) ? "E" : (FILENAME == ENVIRON["ZES_CAT_JA"]) ? "J" : ""
+             if (t == "" || (t in opened)) fail() }
   { line = $0 }
-  line == "{" || line == "}" { next }
+  FNR == 1 { if (line != "{") fail(); opened[t] = 1; next }
+  (t in closed) { fail() }
+  line == "}" { if (comma[t] || !cnt[t]) fail(); closed[t] = 1; next }
   {
-    if (substr(line, 1, 1) != "\"") { bad = 1; exit }
+    if ((t in comma) && !comma[t]) fail()
+    if (substr(line, 1, 1) != "\"") fail()
     i = index(substr(line, 2), "\""); key = substr(line, 2, i - 1)
-    if (key !~ /^[a-z0-9_.]+$/ || substr(line, i + 2, 3) != ": \"") { bad = 1; exit }
+    if (key !~ /^[a-z0-9_.]+$/ || substr(line, i + 2, 3) != ": \"") fail()
     r = substr(line, i + 5); v = ""; n = length(r); done = 0
     for (k = 1; k <= n; k++) {
       c = substr(r, k, 1)
-      if (c == "\\") { k++; c = substr(r, k, 1); if (c != "\"" && c != "\\") { bad = 1; exit } v = v c; continue }
+      if (c == "\\") { k++; c = substr(r, k, 1); if (c != "\"" && c != "\\") fail(); v = v c; continue }
       if (c == "\"") { done = 1; break }
       v = v c }
     rest = substr(r, k + 1)
-    if (!done || (rest != "" && rest != ",")) { bad = 1; exit }
-    printf "%s\037%s\037%s\n", (fi == 1 ? "E" : "J"), key, v; nk++ }
-  END { if (!bad && nk > 0) print "OK" }'
+    if (!done || (rest != "" && rest != ",")) fail()
+    if ((t SUBSEP key) in seen) fail()
+    seen[t, key] = 1; comma[t] = (rest == ","); cnt[t]++
+    printf "%s\037%s\037%s\n", t, key, v }
+  END {
+    if (bad || !("E" in closed) || !("J" in closed) || cnt["E"] != cnt["J"]) exit
+    for (x in seen) { split(x, p, SUBSEP); if (!(((p[1] == "E" ? "J" : "E") SUBSEP p[2]) in seen)) exit }
+    print "OK" }'
 zes_load_catalog() {
-  local en="$I18N_DIR/en.json" ja="$I18N_DIR/ja.json" f line t k ok=0
-  local -a files=("$en")
-  [ "$ZES_LANG_RESOLVED" = ja ] && files+=("$ja")
-  for f in "${files[@]}"; do { [ -f "$f" ] && [ -r "$f" ]; } || cli_fail cli.err.catalog path="$f"; done
+  local en="$I18N_DIR/en.json" ja="$I18N_DIR/ja.json" f line t k ok=0 sum
+  for f in "$en" "$ja"; do { [ -f "$f" ] && [ -r "$f" ]; } || cli_fail cli.err.catalog path="$f"; done
   local -a lines=()
-  mapfile -t lines < <(awk "$ZES_CATALOG_AWK" "${files[@]}" 2>/dev/null)
+  mapfile -t lines < <(ZES_CAT_EN="$en" ZES_CAT_JA="$ja" awk "$ZES_CATALOG_AWK" "$en" "$ja" 2>/dev/null)
   for line in "${lines[@]}"; do
     case "$line" in
       OK) ok=1 ;;
-      E"$US_CHAR"*) line="${line#E"$US_CHAR"}"; k="${line%%"$US_CHAR"*}"; t="${line#*"$US_CHAR"}"; MSG_EN["$k"]="$t"; MSG_LANG["$k"]="$t" ;;
-      J"$US_CHAR"*) line="${line#J"$US_CHAR"}"; k="${line%%"$US_CHAR"*}"; t="${line#*"$US_CHAR"}"; MSG_LANG["$k"]="$t" ;;
+      E"$US_CHAR"*) line="${line#E"$US_CHAR"}"; k="${line%%"$US_CHAR"*}"; t="${line#*"$US_CHAR"}"; MSG_EN["$k"]="$t"
+                    [ "$ZES_LANG_RESOLVED" = ja ] || MSG_LANG["$k"]="$t" ;;
+      J"$US_CHAR"*) line="${line#J"$US_CHAR"}"; k="${line%%"$US_CHAR"*}"; t="${line#*"$US_CHAR"}"
+                    [ "$ZES_LANG_RESOLVED" = ja ] && MSG_LANG["$k"]="$t" ;;
     esac
   done
-  [ "$ok" -eq 1 ] || cli_fail cli.err.catalog path="${files[*]}"
+  [ "$ok" -eq 1 ] || cli_fail cli.err.catalog path="$en $ja"
+  sum="$(for k in "${!MSG_EN[@]}"; do case "$k" in cli.*|f.*|log.*) printf '%s\n' "$k" ;; esac; done | sort \
+    | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; } 2>/dev/null)"
+  [ "${sum%% *}" = "$ZES_CATALOG_KEYS_SHA256" ] || cli_fail cli.err.catalog path="$en $ja"
 }
 US_CHAR=$'\037'
 zes_load_catalog
@@ -579,9 +597,12 @@ default_related() {
 
 # emit LEVEL CAMPAIGN PATH CODE [key=value ...] [--sp=SKILLPACT_JSON] [--x=EXTRA_JSON]
 #   CODE is the message id: detail = render(i18n/en.json "f.CODE", params), always English. The terminal line uses the
-#   selected language. Params are the values of the message (strings), never file contents.
+#   selected language. Params are the values of the message: strings taken from the finding, which can hold text from
+#   scanned files (such as a uses: reference) but never more of a file than that.
 #   id v2: sha256("zes-id-v2|" module "|" campaign "|" path "|" CODE "|" canon), canon = "key=value" in C-locale key
-#   order joined by U+001F, values in the zes_enc normal form (a null campaign / path is the empty string)
+#   order joined by U+001F, values in the zes_enc normal form (a null campaign / path is the empty string). Every
+#   component and every param value is escaped first (zes_id_esc: \ → \\, | → \|, U+001F → the six characters \u001f),
+#   so that a "|" or U+001F inside a path or value cannot make two findings share a preimage
 #   evidence_hash is the SHA-256 of the file for a regular file, otherwise the SHA-256 of the (English) detail (same as findings 1.0; do not change)
 #   evidence (findings 1.1) is typed evidence: file for a regular file (large_file over 100MB; same value as evidence_hash),
 #   symlink for a symbolic link (SHA-256 of the bytes of the readlink value), tree for a directory (ger-tree-v1),
@@ -589,6 +610,12 @@ default_related() {
 #   EXTRA_JSON holds the kind / subject / locators / related members (built with x_*). It does not affect id or evidence_hash
 #   When a path contains invalid UTF-8 bytes, path becomes the value after "\xHH" replacement, so non_utf8_path is recorded in errors[]
 declare -A SEEN_IDS=()
+ZES_BS='\'
+zes_id_esc() {  # zes_id_esc VALUE → ID_ESC
+  local v="${1//"$ZES_BS"/"$ZES_BS$ZES_BS"}"
+  v="${v//"|"/"$ZES_BS|"}"
+  ID_ESC="${v//"$US_CHAR"/"${ZES_BS}u001f"}"
+}
 emit() {
   local level="$1" campaign="$2" path="$3" code="$4"; shift 4
   local module="$CURRENT_MODULE" sp="" extra="" a k i j
@@ -612,7 +639,8 @@ emit() {
     kv+=("${ks[i]}=${vs[i]}")
     zes_enc "${vs[i]}"
     [ "$i" -gt 0 ] && canon+=$'\037'
-    canon+="${ks[i]}=$ENC_NORM"
+    zes_id_esc "$ENC_NORM"
+    canon+="${ks[i]}=$ID_ESC"
     pj+="${pj:+,}\"${ks[i]}\":\"$ENC_JSON\""
   done
   local id ev evk evh color np jp tp pbad nd jd td nc jc
@@ -621,7 +649,9 @@ emit() {
   if [ "$ZES_LANG_RESOLVED" != en ]; then zes_render "${MSG_LANG["f.$code"]-"f.$code"}" "${kv[@]}"; zes_enc "$RENDERED"; td="$ENC_TERM"; fi
   zes_enc "$path"; np="$ENC_NORM"; jp="$ENC_JSON"; tp="$ENC_TERM"; pbad="$ENC_BAD"
   zes_enc "$campaign"; nc="$ENC_NORM"; jc="$ENC_JSON"
-  id="sha256:$(sha256_str "zes-id-v2|$module|$nc|$np|$code|$canon")"
+  local im ic ip
+  zes_id_esc "$module"; im="$ID_ESC"; zes_id_esc "$nc"; ic="$ID_ESC"; zes_id_esc "$np"; ip="$ID_ESC"; zes_id_esc "$code"
+  id="sha256:$(sha256_str "zes-id-v2|$im|$ic|$ip|$ID_ESC|$canon")"
   # Each id only once. If the raw paths differ but the normal form is the same (the string "\xHH" vs. the invalid byte 0xHH),
   #   the dropped duplicate is recorded in errors[] (same handling as dedup_findings; dedup_findings catches those across subshells)
   if [ -n "${SEEN_IDS[$id]+x}" ]; then
@@ -1671,7 +1701,7 @@ intel_host_files() {
         ;;
       launch_label)
         while IFS= read -r f; do
-          [ -n "$f" ] && [ "$(plist_label "$f")" = "$val" ] && critical "$camp" "$f" intel.launchd label="$val"
+          [ -n "$f" ] && plist_label "$f" && [ "$PLIST_LABEL" = "$val" ] && critical "$camp" "$f" intel.launchd label="$val"
         done < <(files_path '/LaunchAgents/[^/]+\.plist$|/LaunchDaemons/[^/]+\.plist$'; ls "$HOME_DIR"/Library/LaunchAgents/*.plist 2>/dev/null; host_enabled && ls /Library/LaunchAgents/*.plist /Library/LaunchDaemons/*.plist 2>/dev/null)
         ;;
       systemd_unit)
@@ -1912,14 +1942,19 @@ check_s2() {
 check_s3() {
   log_section "§3"
   local ver f found=0
-  # The CVEs evaluated are infrastructures[gitlab].cves in ioc (those with a fixed version). Without jq, the 3 known ones
+  # The CVEs evaluated are infrastructures[gitlab].cves in ioc (those with a fixed version). Without jq, the 3 known ones,
+  #   with the CVSS literal read from the same ioc.json line as infra_fixed does (code, params and id must not depend on jq)
   local -a gcves; local -A gcvss=()
+  local c v
   if [ "$HAVE_JQ" -eq 1 ]; then
-    local c v
     while IFS=$'\t' read -r c v; do gcves+=("$c"); [ -n "$v" ] && gcvss[$c]="$v"; done \
       < <(jq -r '.infrastructures[] | select(.id=="gitlab") | .cves[] | select((.fixed // []) | length > 0) | [.id, ((.cvss // "") | tostring)] | @tsv' "$IOC_FILE")
   else
     gcves=(CVE-2026-110264 CVE-2026-85706 CVE-2026-19478)
+    for c in "${gcves[@]}"; do
+      v="$(grep -o "\"$c\".*" "$IOC_FILE" | head -n1 | grep -o '"cvss": *[0-9][0-9.]*' | grep -o '[0-9][0-9.]*$')"
+      [ -n "$v" ] && gcvss[$c]="$v"
+    done
   fi
   while IFS=$'\t' read -r ver f; do
     [ -n "$ver" ] || continue
@@ -2387,7 +2422,8 @@ check_s8() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     fgrep_q -i '^[[:space:]]*USER[[:space:]]+(root|0)([[:space:]]|$)' "$f" && medium "" "$f" s8.user_root
-    grep -E -i '^[[:space:]]*FROM[[:space:]]+' "$f" 2>/dev/null | awk '{print $2}' | while IFS= read -r img; do
+    # sub(): a CRLF Dockerfile must not leave "\r" in the image (it hid ":latest" and went into params)
+    grep -E -i '^[[:space:]]*FROM[[:space:]]+' "$f" 2>/dev/null | awk '{ sub(/\r$/, ""); print $2 }' | while IFS= read -r img; do
       case "$img" in scratch|'$'*|*@sha256:*) continue ;; esac
       if [[ "$img" == *:latest ]] || [[ "${img##*/}" != *:* ]]; then medium "" "$f" s8.floating_image image="$img"; fi
     done
@@ -3305,6 +3341,20 @@ check_s26() {
   return 0
 }
 
+# toml_value_head TEXT → TOML_VALUE: the value at the start of TEXT (what follows "key =" on its line): a """...""",
+#   '''...''', "..." or '...' string without its quotes (empty when the closing quotes are not on the line), otherwise the bare
+#   word up to a blank, "#", a quote or CR. Same rule as tomlValueHead of the browser engine
+toml_value_head() {
+  local v="$1" q
+  v="${v#"${v%%[!$' \t']*}"}"
+  TOML_VALUE=""
+  case "$v" in
+    \"\"\"*|\'\'\'*) q="${v:0:3}"; v="${v:3}"; [[ "$v" == *"$q"* ]] && TOML_VALUE="${v%%"$q"*}" ;;
+    \"*|\'*) q="${v:0:1}"; v="${v:1}"; [[ "$v" == *"$q"* ]] && TOML_VALUE="${v%%"$q"*}" ;;
+    *) TOML_VALUE="${v%%[$' \t\r#"\'']*}" ;;
+  esac
+}
+
 # §27 Build hooks (build.rs / go:generate / build-backend / cmdclass)
 check_s27() {
   log_section "§27"
@@ -3326,7 +3376,8 @@ check_s27() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     local be
-    be="$(grep -E '^[[:space:]]*build-backend[[:space:]]*=' "$f" 2>/dev/null | head -n1 | sed -E 's/.*=[[:space:]]*["'"'"']([^"'"'"']+)["'"'"'].*/\1/')"
+    be="$(grep -a -E '^[[:blank:]]*build-backend[[:blank:]]*=' "$f" 2>/dev/null | head -n1)"
+    toml_value_head "${be#*=}"; be="$TOML_VALUE"
     [ -n "$be" ] || continue
     printf '%s\n' "${safeb[@]}" | grep_q -x -F -- "$be" || medium "" "$f" s27.build_backend backend="$be"
     fgrep_q '^[[:space:]]*backend-path[[:space:]]*=' "$f" && high "" "$f" s27.backend_path
@@ -3388,13 +3439,22 @@ check_s29() {
 }
 
 # §30 macOS persistence
-plist_label() { grep -A1 -E '<key>Label</key>' "$1" 2>/dev/null | grep -o -E '<string>[^<]*</string>' | head -n1 | sed -E 's#</?string>##g'; }
+# plist_label FILE → PLIST_LABEL: the <string> right after <key>Label</key>, with any XML whitespace (blank lines, line
+#   breaks) between them and line breaks inside the value kept, like a plist parser (the browser engine uses the same
+#   rule). Returned in a variable: a command substitution would drop a trailing line break of the value
+plist_label() {
+  local v
+  v="$(awk '{ s = s $0 "\n" } END {
+      if (match(s, /<key>Label<\/key>[ \t\r\n]*<string>[^<]*<\/string>/)) {
+        m = substr(s, RSTART, RLENGTH); sub(/^<key>Label<\/key>[ \t\r\n]*<string>/, "", m); sub(/<\/string>$/, "", m); printf "%s", m } }' "$1" 2>/dev/null; printf x)"
+  PLIST_LABEL="${v%x}"
+}
 check_s30() {
   log_section "§30"
   local f lb
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    lb="$(plist_label "$f")"
+    plist_label "$f"; lb="$PLIST_LABEL"
     if [ -n "$lb" ] && ! printf '%s' "$lb" | grep_q '\.'; then
       high "" "$f" s30.random_label label="$lb"
     fi
@@ -3464,7 +3524,8 @@ check_s32() {
     [ -n "$f" ] || continue
     case "$f" in */node_modules/*|*/.git/*) continue ;; esac
     medium "hf-supply-chain" "$f" s32.pickle_model format="${f##*.}"
-  done < <(files_named '\.(pkl|pickle|pt|pth)$' | grep -v -E '\.pth$' ; files_named '\.bin$' | grep -E '/(models?|checkpoints?|weights)/|pytorch_model[^/]*\.bin$')
+  done < <(awk '{ n = $0; sub(/.*\//, "", n); n = tolower(n)
+                  if (n ~ /\.(pkl|pickle|pt)$/ || (n ~ /\.bin$/ && $0 ~ /\/(models?|checkpoints?|weights)\/|pytorch_model[^\/]*\.bin$/)) print }' "$FILES_LIST")
   files_path '\.(py|ipynb)$' | grep_l 'weights_only[[:space:]]*=[[:space:]]*False' | while IFS= read -r f; do
     [ -n "$f" ] && high "hf-supply-chain" "$f" s32.torch_load
   done

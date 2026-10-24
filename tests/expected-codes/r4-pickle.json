@@ -1,0 +1,52 @@
+[
+  {
+    "campaign": "hf-supply-chain",
+    "code": "s32.pickle_model",
+    "level": "MEDIUM",
+    "module": "§32",
+    "params": {
+      "format": "pt"
+    },
+    "path": "a.pt"
+  },
+  {
+    "campaign": "hf-supply-chain",
+    "code": "s32.pickle_model",
+    "level": "MEDIUM",
+    "module": "§32",
+    "params": {
+      "format": "PKL"
+    },
+    "path": "model.PKL"
+  },
+  {
+    "campaign": "hf-supply-chain",
+    "code": "s32.pickle_model",
+    "level": "MEDIUM",
+    "module": "§32",
+    "params": {
+      "format": "BIN"
+    },
+    "path": "models/c.BIN"
+  },
+  {
+    "campaign": "hf-supply-chain",
+    "code": "s32.pickle_model",
+    "level": "MEDIUM",
+    "module": "§32",
+    "params": {
+      "format": "Pickle"
+    },
+    "path": "w.Pickle"
+  },
+  {
+    "campaign": "hf-supply-chain",
+    "code": "s32.pickle_model",
+    "level": "MEDIUM",
+    "module": "§32",
+    "params": {
+      "format": "pt"
+    },
+    "path": "x_node_modules/b.pt"
+  }
+]
