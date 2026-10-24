@@ -8,7 +8,7 @@ import { push, type RuleCtx } from './context';
 import type { DiffAnomaly, Effect, FileInput, RuleResult, Severity, SkillPactAnalysis, SkillPactDivergence, SkillPactFindingField } from './types';
 import { SEVERITY_RANK } from './types';
 import type { MsgKey } from '../i18n';
-import { basename, dirname, ere, type FCode } from './util';
+import { asciiLower, basename, dirname, ere, type FCode } from './util';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -186,8 +186,8 @@ export function globRe(p: string): RegExp {
 const gmatch = (s: string, p: string) => globRe(p).test(s);
 function hostMatch(h0: string, p0: string): boolean {
   if (p0 === '@local') return h0 === '@local';
-  const h = h0.toLowerCase().replace(/\.$/, '');
-  const p = p0.toLowerCase().replace(/\.$/, '');
+  const h = asciiLower(h0).replace(/\.$/, '');
+  const p = asciiLower(p0).replace(/\.$/, '');
   if (p === '*') return true;
   const hl = h.split('.');
   const pl = p.split('.');
@@ -430,7 +430,7 @@ function observe(ctx: RuleCtx, files: FileInput[], policyPaths: Set<string>, pre
       for (; i < lines.length; i++) {
         const l = lines[i]!;
         if (/^[\t\v\f\r ]*(```|~~~)/.test(l)) {
-          if (!infence) { const lang = l.replace(/^[\t\v\f\r ]*(```|~~~)[\t\v\f\r ]*/, '').replace(/[\t\v\f\r {].*$/, '').toLowerCase(); if (R.shell_fence_langs.includes(lang)) shell = true; }
+          if (!infence) { const lang = asciiLower(l.replace(/^[\t\v\f\r ]*(```|~~~)[\t\v\f\r ]*/, '').replace(/[\t\v\f\r {].*$/, '')); if (R.shell_fence_langs.includes(lang)) shell = true; }
           infence = !infence;
           continue;
         }

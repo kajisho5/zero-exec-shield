@@ -20,10 +20,17 @@ export function dirname(p: string): string {
   return i < 0 ? '' : p.slice(0, i);
 }
 
+/** toLowerCase() of the ASCII letters only, as the CLI's tolower / grep -i in the C locale (JS would also fold the Kelvin
+ *  sign to "k", "İ" to "i̇" …, so "a.p\u212Al" would read as a .pkl file). */
+export function asciiLower(s: string): string {
+  return s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+}
+
+/** Lower-case extension (ASCII letters only, see asciiLower); '' when the only dot is the first character. */
 export function extname(p: string): string {
   const b = basename(p);
   const i = b.lastIndexOf('.');
-  return i <= 0 ? '' : b.slice(i + 1).toLowerCase();
+  return i <= 0 ? '' : asciiLower(b.slice(i + 1));
 }
 
 const enc = new TextEncoder();
@@ -212,7 +219,7 @@ export function splitMarkdown(text: string): { code: string; prose: string; fron
     const l = lines[i] ?? '';
     const m = /^[\t\v\f\r ]*(```|~~~)[\t\v\f\r ]*([^\t\n\v\f\r {]*)/.exec(l);
     if (m) {
-      if (!infence) langs.push((m[2] ?? '').toLowerCase());
+      if (!infence) langs.push(asciiLower((m[2] ?? '')));
       infence = !infence;
       continue;
     }

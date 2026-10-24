@@ -3,7 +3,7 @@
 import { homeLike, push, readable, rootRel, type RuleCtx } from '../context';
 import type { InfraCve } from '../ioc';
 import type { Severity } from '../types';
-import { basename, ere, versionCmp, versionMatches, type FCode } from '../util';
+import { asciiLower, basename, ere, versionCmp, versionMatches, type FCode } from '../util';
 import { hookLocators } from './agentConfig';
 import { workflowText } from './ciAndExtensions';
 import { DOCKERFILE, plistLabel } from './codeAndHost';
@@ -229,13 +229,13 @@ export function intelRules(ctx: RuleCtx): void {
   for (const s of intel.strings ?? []) {
     const rx = ere(s.file_regex ?? '.');
     if (!rx) continue;
-    const strs = (s.strings ?? []).map((x) => x.toLowerCase());
+    const strs = (s.strings ?? []).map((x) => asciiLower(x));
     for (const f of readable(ctx).filter((x) => rx.test('/' + x.relPath))) {
-      const low = f.text.toLowerCase();
+      const low = asciiLower(f.text);
       const hit = strs.find((x) => low.includes(x));
       if (hit === undefined) continue;
       // If it is a hook in an agent config file, the location of the hook containing the first matched string (same as intel_strings in the CLI)
-      const locators = /(^|\/)\.claude\/settings(\.local)?\.json$/.test(f.relPath) ? hookLocators(f.text, (c) => c.toLowerCase().includes(hit)) : undefined;
+      const locators = /(^|\/)\.claude\/settings(\.local)?\.json$/.test(f.relPath) ? hookLocators(f.text, (c) => asciiLower(c).includes(hit)) : undefined;
       push(ctx, { level: sev(s.severity, 'HIGH'), module: s.module, campaign: s.campaign, path: f.relPath, code: 'intel.campaign_string', params: { campaign: s.campaign }, ruleId: `s7-intel-strings:${s.campaign}`, evidenceSha: f.sha256, ...(locators ? { locators } : {}) });
     }
   }

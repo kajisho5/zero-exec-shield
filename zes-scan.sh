@@ -1246,6 +1246,18 @@ build_inventory() {
 files_named() { ZES_RE="$1" awk '{n=$0; sub(/.*\//,"",n); if (n ~ ENVIRON["ZES_RE"]) print}' "$FILES_LIST"; }
 # files_path REGEX   … files whose full path matches the ERE
 files_path() { grep -E -- "$1" "$FILES_LIST" 2>/dev/null || true; }
+# zes_rel PATH → REL: the path relative to the scan root (or to the home for home files) with a leading "/". Directory
+#   skips (node_modules, .git, site-packages …) test REL, as the browser tests the path inside the dropped folder: a scan
+#   root that is itself under node_modules/ is not skipped as a whole
+zes_rel() {
+  case "$1" in
+    "$RP"/*) REL="/${1#"$RP"/}" ;;
+    "$HOME_DIR"/*) REL="/${1#"$HOME_DIR"/}" ;;
+    *) REL="$1" ;;
+  esac
+}
+# files_rel REGEX … files whose REL (see zes_rel) matches the ERE (full paths are printed)
+files_rel() { ZES_RE="$1" ZES_RP="$RP" awk 'BEGIN { rp = ENVIRON["ZES_RP"] "/" } { r = (index($0, rp) == 1) ? substr($0, length(rp)) : $0; if (r ~ ENVIRON["ZES_RE"]) print }' "$FILES_LIST"; }
 
 # A leading UTF-8 BOM is not part of the text, on both sides: the browser reads files with TextDecoder (which drops one
 #   BOM), and the CLI reads a copy without it for every text check. bom_prepare (after build_inventory) copies each scanned
@@ -1412,7 +1424,7 @@ build_deps() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     local n v
-    n="$(printf '%s' "$f" | sed -E 's#.*/node_modules/((@[^/]+/)?[^/]+)/package\.json$#\1#')"
+    zes_rel "$f"; n="$(printf '%s' "$REL" | sed -E 's#.*/node_modules/((@[^/]+/)?[^/]+)/package\.json$#\1#')"
     # Only the top-level .version (handles minified JSON and nested "version")
     if [ "$HAVE_JQ" -eq 1 ]; then
       v="$(jq -r 'if type == "object" and (.version | type) == "string" then .version else "" end' "$f" 2>/dev/null)" \
@@ -1422,7 +1434,7 @@ build_deps() {
     fi
     v="$(printf '%s' "$v" | tr -d '\t\r\n')"
     printf 'npm\t%s\t%s\t%s\n' "$n" "$v" "$f" >>"$DEPS_TSV"
-  done < <(files_path '/node_modules/(@[^/]+/)?[^/]+/package\.json$')
+  done < <(files_rel '/node_modules/(@[^/]+/)?[^/]+/package\.json$')
   # pypi: requirements*.txt / constraints*.txt
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -1529,7 +1541,8 @@ build_deps() {
 # pkg_kind SOURCE … kind of a compromised-package finding. What is actually installed (node_modules/<name>/package.json,
 #   *.dist-info, *.egg-info) is pkg.compromised; lockfiles and dependency declarations are pkg.lockfile_compromised
 pkg_kind() {
-  case "$1" in
+  zes_rel "$1"
+  case "$REL" in
     */node_modules/*/package.json|*.dist-info|*.egg-info) printf 'pkg.compromised' ;;
     *) printf 'pkg.lockfile_compromised' ;;
   esac
@@ -2005,7 +2018,7 @@ check_s2() {
     [ -n "$scripts" ] || continue
     if printf '%s' "$scripts" | grep_q -E '(curl|wget|bash|sh -c|base64|eval|node -e|\.mjs|https?://)'; then
       high "" "$f" s2.lifecycle_suspicious
-    elif [[ "$f" != */node_modules/* ]]; then
+    elif zes_rel "$f"; [[ "$REL" != */node_modules/* ]]; then
       medium "" "$f" s2.lifecycle_defined
     fi
   done < <(files_named '^package\.json$')
@@ -3088,7 +3101,7 @@ check_s19() { log_section "§19"; blast_list extended; return 0; }
 
 # Files that look like MCP server implementations or tool definitions
 mcp_source_files() {
-  files_path '\.(json|js|mjs|cjs|ts|py)$' | grep -v -E '/node_modules/(typescript|@types)/' \
+  files_path '\.(json|js|mjs|cjs|ts|py)$' | ZES_RP="$RP" awk 'BEGIN { rp = ENVIRON["ZES_RP"] "/" } { r = (index($0, rp) == 1) ? substr($0, length(rp)) : $0 } r !~ /\/node_modules\/(typescript|@types)\//' \
     | grep_l '(inputSchema|mcpServers|@modelcontextprotocol|FastMCP|mcp\.server|"tools"[[:space:]]*:)'
 }
 
@@ -3710,7 +3723,7 @@ check_s32() {
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    case "$f" in */node_modules/*|*/.git/*) continue ;; esac
+    zes_rel "$f"; case "$REL" in */node_modules/*|*/.git/*) continue ;; esac
     medium "hf-supply-chain" "$f" s32.pickle_model format="${f##*.}"
   done < <(awk '{ n = $0; sub(/.*\//, "", n); n = tolower(n)
                   if (n ~ /\.(pkl|pickle|pt)$/ || (n ~ /\.bin$/ && $0 ~ /\/(models?|checkpoints?|weights)\/|pytorch_model[^\/]*\.bin$/)) print }' "$FILES_LIST")
@@ -3820,7 +3833,7 @@ check_s36() {
   done
   files_named '\.py$' | grep_l '(def __reduce__|pickle\.loads?\(|dill\.loads?\(|cloudpickle\.loads?\()' | while IFS= read -r f; do
     [ -n "$f" ] || continue
-    case "$f" in */site-packages/*|*/dist-packages/*|*/node_modules/*) continue ;; esac
+    zes_rel "$f"; case "$REL" in */site-packages/*|*/dist-packages/*|*/node_modules/*) continue ;; esac
     medium "hf-supply-chain" "$f" s36.pickle
   done
   files_named '\.(ya?ml|json|jinja2?|j2)$' | grep_l '\{\{[^}]*(__class__|__globals__|__import__|cycler|lipsum|os\.popen)' | while IFS= read -r f; do
@@ -4260,7 +4273,8 @@ check_s48() {
       || { record_error "§48" "sbom_parse_failed:$f"; continue; }
     local created; created="$(jq -r '.metadata.timestamp // .creationInfo.created // empty' "$f" 2>/dev/null)"
     # Match against the dependencies from lockfiles in the same directory (npm/pypi)
-    ZES_V_D="$dir/" awk -F'\t' 'BEGIN { d = ENVIRON["ZES_V_D"] } index($4, d)==1 && ($1=="npm" || $1=="pypi") && $4 !~ /\/node_modules\/.*\/package\.json$/ {print $2"\t"$3}' "$DEPS_TSV" | sort -u >"$TMP_DIR/lock.tsv"
+    ZES_V_D="$dir/" ZES_RP="$RP" awk -F'\t' 'BEGIN { d = ENVIRON["ZES_V_D"]; rp = ENVIRON["ZES_RP"] "/" } { r = (index($4, rp) == 1) ? substr($4, length(rp)) : $4 }
+      index($4, d)==1 && ($1=="npm" || $1=="pypi") && r !~ /\/node_modules\/.*\/package\.json$/ {print $2"\t"$3}' "$DEPS_TSV" | sort -u >"$TMP_DIR/lock.tsv"
     if [ -s "$TMP_DIR/lock.tsv" ]; then
       local missing mism
       # comm / join are not used (missing in busybox etc.). The same aggregation is done in awk

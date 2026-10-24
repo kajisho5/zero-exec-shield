@@ -1,7 +1,7 @@
 // §21 / §22 / §38 GitHub Actions, §24 / §42 browser extensions
 import { pathMatch, push, readable, type RuleCtx } from '../context';
 import type { UsesRef } from '../types';
-import { clip, dirname } from '../util';
+import { asciiLower, clip, dirname } from '../util';
 
 const lead = (x: string) => (/^[ \t]*/.exec(x)?.[0] ?? '').length;
 /** Removes node properties (anchors &x, tags !!str / !tag) from the start (same as props in CLI yaml_flatten) */
@@ -164,7 +164,7 @@ export function checkoutRefs(yaml: string): ('noref' | 'prhead' | 'otherref' | '
       r = r.replace(/[,}].*$/, '');
     }
     // Normalization: to lower case, remove spaces, convert subscript notation (github.event['pull_request']['head'] / ["…"]) to dot notation
-    r = r.toLowerCase().replace(/[ \t]/g, '').replace(/\[["']/g, '.').replace(/["']\]/g, '');
+    r = asciiLower(r).replace(/[ \t]/g, '').replace(/\[["']/g, '.').replace(/["']\]/g, '');
     if (/github\.(event\.pull_request\.(head|merge_commit_sha|number)|head_ref|event\.number)|refs\/pull\//.test(r)) ref = 'prhead';
     // If only base-side expressions (base.sha / base.ref / base_ref / github.sha / github.ref / default_branch), it does not come from the PR
     else if (r.replace(/\$\{\{(github\.event\.pull_request\.base\.(sha|ref)|github\.base_ref|github\.sha|github\.ref|github\.event\.repository\.default_branch)\}\}/g, '').includes('${{')) ref = 'exprref'; // any other expression cannot be confirmed as not coming from the PR (at least HIGH)
@@ -173,7 +173,7 @@ export function checkoutRefs(yaml: string): ('noref' | 'prhead' | 'otherref' | '
   for (const line of workflowText(yaml)) {
     const lead = (/^[\t\v\f\r ]*/.exec(line)?.[0] ?? '').length;
     // Quoted ones (uses: "actions/checkout@v4"), owner names differing in case, and flow-mapping steps are covered too
-    if (/^[\t\v\f\r ]*(-[\t\v\f\r ]+)?(\{([^}#]*,)?[\t\v\f\r ]*)?uses:[\t\v\f\r ]*["']?actions\/checkout@/.test(line.toLowerCase())) {
+    if (/^[\t\v\f\r ]*(-[\t\v\f\r ]+)?(\{([^}#]*,)?[\t\v\f\r ]*)?uses:[\t\v\f\r ]*["']?actions\/checkout@/.test(asciiLower(line))) {
       flush(); inChk = true; ind = lead;
       const at = line.lastIndexOf('actions/checkout@');
       getRef(at < 0 ? line : line.slice(at + 'actions/checkout@'.length));
@@ -228,7 +228,7 @@ export function actionsRules(ctx: RuleCtx): void {
       push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.write_all', ruleId: 's21-writeall', evidenceSha: f.sha256 });
     }
     if (isWorkflow && yamlHasAlias(y)) ctx.errors.push({ module: '§21', reason: `yaml_alias_unresolved:${f.relPath}` });
-    const n = new Set([...y.matchAll(/secrets\.([A-Za-z0-9_]+)/gi)].map((m) => m[1]!.toLowerCase())).size;
+    const n = new Set([...y.matchAll(/secrets\.([A-Za-z0-9_]+)/gi)].map((m) => asciiLower(m[1]!))).size;
     if (n > threshold) push(ctx, { level: 'HIGH', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's38.many_secrets', params: { n, threshold }, ruleId: 's38-secrets', evidenceSha: f.sha256 });
     if (/tojson\([\t\v\f\r ]*secrets[\t\v\f\r ]*(\.[\t\v\f\r ]*\*[\t\v\f\r ]*)?\)/i.test(y)) push(ctx, { level: 'CRITICAL', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's38.tojson_secrets', ruleId: 's38-tojson', evidenceSha: f.sha256 });
 
@@ -242,11 +242,11 @@ export function actionsRules(ctx: RuleCtx): void {
         push(ctx, { level: 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's22.no_version', params: { ref }, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
         continue;
       }
-      const act = ref.slice(0, at).toLowerCase();
+      const act = asciiLower(ref.slice(0, at));
       const ver = ref.slice(at + 1);
       // A reference that matches versions, or, when safe_tags exists, is "neither a safe tag nor a SHA", is possibly poisoned (trivy-action)
-      const known = compromised.find((c) => c.action.toLowerCase() === act && (c.versions.includes(ver) || (!!c.safe_tags && !/^[0-9a-f]{40}$/.test(ver) && !c.safe_tags.includes(ver))));
-      const org = compromised.some((c) => c.action.endsWith('/*') && act.startsWith(c.action.slice(0, -1).toLowerCase()));
+      const known = compromised.find((c) => asciiLower(c.action) === act && (c.versions.includes(ver) || (!!c.safe_tags && !/^[0-9a-f]{40}$/.test(ver) && !c.safe_tags.includes(ver))));
+      const org = compromised.some((c) => c.action.endsWith('/*') && act.startsWith(asciiLower(c.action.slice(0, -1))));
       if (known) {
         uses.push({ ref: clip(ref), kind: 'compromised' });
         push(ctx, { level: 'CRITICAL', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's22.poisoned_tag', params: { ref }, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });

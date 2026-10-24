@@ -1,7 +1,7 @@
 // §10 / §26 / §27 / §28 / §30 / §31 / §32 / §33 / §35 / §36 / §40 / §43 / §48
 // The browser can evaluate only up to "the content of the loaded files". Host state is referred to the CLI with CliOnlyNotice.
 import { HOME_RC_FILES, homeLike, named, push, readable, rootRel, type RuleCtx } from '../context';
-import { asciiTrim, extname, textLocators, tomlValueHead } from '../util';
+import { asciiLower, asciiTrim, textLocators, tomlValueHead } from '../util';
 import { collectDeps } from './supplyChain';
 
 const RC = /(^|\/)(\.bashrc|\.bash_profile|\.profile|\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bash_login)$/;
@@ -33,10 +33,12 @@ export function buildHookRules(ctx: RuleCtx): void {
 export function modelSupplyRules(ctx: RuleCtx): void {
   ctx.checks.add('s32-pickle-ext').add('s32-weights-only').add('s32-extra-index').add('s36-trust-remote').add('s36-dataset-exec').add('s36-pickle-load').add('s36-lerobot');
   for (const f of ctx.files) {
-    const e = extname(f.name);
-    // path segments, as the CLI's */node_modules/* and */.git/* (x_node_modules/ is not skipped); extname is lower case
-    if (/(^|\/)(node_modules|\.git)\//.test(f.relPath)) continue;
-    if (['pkl', 'pickle', 'pt'].includes(e) || (e === 'bin' && /\/(models?|checkpoints?|weights)\/|pytorch_model[^/]*\.bin$/.test('/' + f.relPath))) {
+    // Path segments inside the dropped folder (rootRel), as the CLI's */node_modules/* and */.git/* on the path relative to
+    //   the scan root (x_node_modules/ is not skipped; a dropped folder that is itself node_modules/ is not skipped as a
+    //   whole). The name is lower-cased ASCII only, like the CLI's tolower, and a name that is only ".pkl" counts too
+    if (/(^|\/)(node_modules|\.git)\//.test(rootRel(ctx, f))) continue;
+    const n = asciiLower(f.name);
+    if (/\.(pkl|pickle|pt)$/.test(n) || (/\.bin$/.test(n) && /\/(models?|checkpoints?|weights)\/|pytorch_model[^/]*\.bin$/.test('/' + f.relPath))) {
       push(ctx, { level: 'MEDIUM', module: '§32', campaign: 'hf-supply-chain', path: f.relPath, code: 's32.pickle_model', params: { format: f.name.slice(f.name.lastIndexOf('.') + 1) }, ruleId: 's32-pickle-ext', evidenceSha: f.sha256 });
     }
   }
@@ -47,7 +49,7 @@ export function modelSupplyRules(ctx: RuleCtx): void {
     if (f.name.endsWith('.py') && /(GeneratorBasedBuilder|DatasetBuilder|datasets\.load_dataset|_split_generators)/.test(f.text) && /(subprocess|os\.system|eval\(|exec\(|__import__)/.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§36', campaign: 'hf-dataset-poisoning', path: f.relPath, code: 's36.dataset_loader', ruleId: 's36-dataset-exec', evidenceSha: f.sha256 });
     }
-    if (f.name.endsWith('.py') && !/(site|dist)-packages\/|node_modules\//.test(f.relPath) && /(def __reduce__|pickle\.loads?\(|dill\.loads?\(|cloudpickle\.loads?\()/.test(f.text)) {
+    if (f.name.endsWith('.py') && !/(^|\/)((site|dist)-packages|node_modules)\//.test(rootRel(ctx, f)) && /(def __reduce__|pickle\.loads?\(|dill\.loads?\(|cloudpickle\.loads?\()/.test(f.text)) {
       push(ctx, { level: 'MEDIUM', module: '§36', campaign: 'hf-supply-chain', path: f.relPath, code: 's36.pickle', ruleId: 's36-pickle-load', evidenceSha: f.sha256 });
     }
   }
@@ -167,7 +169,7 @@ export function sigstoreRules(ctx: RuleCtx): void {
     const created = (meta && typeof meta === 'object' ? meta['timestamp'] : undefined) ?? (ci && typeof ci === 'object' ? ci['created'] : undefined);
     const dir = f.relPath.includes('/') ? f.relPath.slice(0, f.relPath.lastIndexOf('/') + 1) : '';
     const under = deps.filter((d) => d.path.startsWith(dir));
-    const lock = [...new Set(under.filter((d) => (d.eco === 'npm' || d.eco === 'pypi') && !/\/node_modules\/.*\/package\.json$/.test('/' + d.path)).map((d) => `${d.name}\t${d.version}`))].map((x) => x.split('\t') as [string, string]);
+    const lock = [...new Set(under.filter((d) => (d.eco === 'npm' || d.eco === 'pypi') && !/\/node_modules\/.*\/package\.json$/.test('/' + rootRel(ctx, { relPath: d.path }))).map((d) => `${d.name}\t${d.version}`))].map((x) => x.split('\t') as [string, string]);
     if (!lock.length) continue;
     const sbomNames = new Set(sbom.map((x) => x[0]));
     const uniqSbom = [...new Set(sbom.map((x) => x.join('\t')))].map((x) => x.split('\t') as [string, string]);

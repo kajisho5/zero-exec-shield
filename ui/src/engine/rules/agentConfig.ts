@@ -1,8 +1,8 @@
 // §7 / §17 / §20 / §37: MCP and agent configs, SymJack, IDE hooks, injection words in tool definitions
-import { push, readable, type RuleCtx } from '../context';
+import { push, readable, rootRel, type RuleCtx } from '../context';
 import type { McpServerView } from '../types';
 import { parseCodexToml } from '../toml';
-import { clip, jsonPointer, parseJsonc, versionCmp, type LocatorSpec } from '../util';
+import { asciiLower, clip, jsonPointer, parseJsonc, versionCmp, type LocatorSpec } from '../util';
 import { INVISIBLE_CLASS } from '../hiddenChars';
 import { collectDeps } from './supplyChain';
 
@@ -132,7 +132,7 @@ export function mcpRules(ctx: RuleCtx): void {
   const decoys = ctx.ioc.mcp_poisoning.symjack.decoy_name_patterns;
   for (const f of ctx.files) {
     const rel = ctx.root ? f.relPath.slice(ctx.root.length + 1) : f.relPath;
-    const decoy = decoys.some((d) => (d.endsWith('/') ? rel.startsWith(d) : f.name.toLowerCase().startsWith(d)));
+    const decoy = decoys.some((d) => (d.endsWith('/') ? rel.startsWith(d) : asciiLower(f.name).startsWith(d)));
     if (decoy && f.size === 0) {
       push(ctx, { level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, code: 's17.symjack_zero_byte', ruleId: 's17-symjack' });
     }
@@ -148,7 +148,8 @@ export function mcpRules(ctx: RuleCtx): void {
       push(ctx, { level: 'HIGH', module: '§7', campaign: 'mcp-poisoning', path: f.relPath, code: 's7.folder_open', ruleId: 's7-folderopen', evidenceSha: f.sha256, locators: runOnLocators(f.text) });
     }
   }
-  const mcpSrc = readable(ctx).filter((x) => /\.(json|js|mjs|cjs|ts|py)$/.test(x.name) && /(inputSchema|mcpServers|@modelcontextprotocol|FastMCP|mcp\.server|"tools"[\t\v\f\r ]*:)/.test(x.text));
+  // the CLI's mcp_source_files (node_modules/typescript and node_modules/@types are not MCP servers)
+  const mcpSrc = readable(ctx).filter((x) => /\.(json|js|mjs|cjs|ts|py)$/.test(x.name) && !/(^|\/)node_modules\/(typescript|@types)\//.test(rootRel(ctx, x)) && /(inputSchema|mcpServers|@modelcontextprotocol|FastMCP|mcp\.server|"tools"[\t\v\f\r ]*:)/.test(x.text));
   for (const f of mcpSrc) {
     if (/(ignore (all |any )?(the )?previous instructions|do not tell the user|don't tell the user|without (telling|informing) the user)/i.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§20', campaign: 'mcp-poisoning', path: f.relPath, code: 's20.prompt_injection', ruleId: 's20-injection', evidenceSha: f.sha256 });

@@ -1,7 +1,7 @@
 // §2 / §15 / §25 / §36 / §41: matching of file names, hashes, package.json and lockfiles
-import { atRoot, push, readable, type RuleCtx } from '../context';
+import { atRoot, push, readable, rootRel, type RuleCtx } from '../context';
 import type { IocPackage } from '../ioc';
-import { asciiTrim, basename, dirname, parseJsonc, versionMatches } from '../util';
+import { asciiLower, asciiTrim, basename, dirname, parseJsonc, versionMatches } from '../util';
 import type { FindingRelated } from '../types';
 
 export function filenameRules(ctx: RuleCtx): void {
@@ -36,7 +36,7 @@ export function filenameRules(ctx: RuleCtx): void {
     if (n === 'transformers.pyz') {
       push(ctx, { level: 'CRITICAL', module: '§36', campaign: 'hf-supply-chain', path: f.relPath, code: 's36.transformers_pyz', ruleId: 's36-pyz', evidenceSha: f.sha256 });
     }
-    if (n.toLowerCase() === 'git.exe' && atRoot(ctx, f)) {
+    if (asciiLower(n) === 'git.exe' && atRoot(ctx, f)) {
       push(ctx, { level: 'CRITICAL', module: '§41', campaign: null, path: f.relPath, code: 's41.git_exe', ruleId: 's41-gitexe', evidenceSha: f.sha256 });
     }
   }
@@ -68,7 +68,7 @@ export function pthRules(ctx: RuleCtx): void {
 export type Dep = { eco: 'npm' | 'pypi' | 'cargo' | 'packagist' | 'gem' | 'go'; name: string; version: string; path: string; sha: string | null };
 
 function normPypi(n: string): string {
-  return n.toLowerCase().replace(/[-_.]+/g, '-'); // PEP 503
+  return asciiLower(n).replace(/[-_.]+/g, '-'); // PEP 503
 }
 
 const lines = (t: string) => t.split(/\r?\n/);
@@ -195,9 +195,9 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
       add('npm', yarnLockDeps(f.text));
     } else if (f.name === 'pnpm-lock.yaml') {
       add('npm', pnpmLockDeps(f.text));
-    } else if (f.name === 'package.json' && /\/node_modules\/(@[^/]+\/)?[^/]+\/package\.json$/.test('/' + f.relPath)) {
+    } else if (f.name === 'package.json' && /\/node_modules\/(@[^/]+\/)?[^/]+\/package\.json$/.test('/' + rootRel(ctx, f))) {
       // As in the CLI, the name comes from the path (after the last node_modules/) and the version from the top-level "version" (empty if none; used for any_version etc.)
-      const name = /.*\/node_modules\/((@[^/]+\/)?[^/]+)\/package\.json$/.exec('/' + f.relPath)?.[1] ?? '';
+      const name = /.*\/node_modules\/((@[^/]+\/)?[^/]+)\/package\.json$/.exec('/' + rootRel(ctx, f))?.[1] ?? '';
       let version = '';
       try {
         const j = JSON.parse(f.text) as unknown;
@@ -317,7 +317,7 @@ export function packageRules(ctx: RuleCtx): void {
     if (hooks.length) {
       if (hooks.some((h) => /(curl|wget|bash|sh -c|base64|eval|node -e|\.mjs|https?:\/\/)/.test(h))) {
         push(ctx, { level: 'HIGH', module: '§2', campaign: null, path: f.relPath, code: 's2.lifecycle_suspicious', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
-      } else if (!f.relPath.includes('node_modules/')) {
+      } else if (!/(^|\/)node_modules\//.test(rootRel(ctx, f))) {
         push(ctx, { level: 'MEDIUM', module: '§2', campaign: null, path: f.relPath, code: 's2.lifecycle_defined', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
       }
     }
@@ -340,7 +340,8 @@ export function packageRules(ctx: RuleCtx): void {
   }
 }
 
-/** Same as pkg_kind of the CLI: what is actually installed is pkg.compromised; lockfiles and dependency declarations are pkg.lockfile_compromised */
+/** Same as pkg_kind of the CLI: what is actually installed is pkg.compromised; lockfiles and dependency declarations are pkg.lockfile_compromised.
+ *  path is relative to the dropped folder (rootRel), as the CLI tests the path relative to the scan root */
 function pkgKind(path: string): string {
   return /\/node_modules\/.+\/package\.json$/.test('/' + path) || /\.(dist-info|egg-info)$/.test(path) ? 'pkg.compromised' : 'pkg.lockfile_compromised';
 }
@@ -359,7 +360,7 @@ function emitPackage(ctx: RuleCtx, p: IocPackage, d: Dep): void {
   const safe = p.safe_version || null;
   const x = match === 'vulnerable_versions'
     ? { kind: 'pkg.vulnerable', subject: { ecosystem: d.eco, package: d.name, version: d.version || null, safe_version: safe, fixed_versions: safe ? [safe] : [] } }
-    : { kind: pkgKind(d.path), subject: { ecosystem: d.eco, package: d.name, version: d.version || null, safe_version: safe, fixed_versions: [] } };
+    : { kind: pkgKind(rootRel(ctx, { relPath: d.path })), subject: { ecosystem: d.eco, package: d.name, version: d.version || null, safe_version: safe, fixed_versions: [] } };
   const related = pkgRelated(ctx, d.eco, d.name, d.path);
   const base = { ...x, ...(related ? { related } : {}), directory: /\.(dist-info|egg-info)$/.test(d.path) && !ctx.byPath.has(d.path) };
   const pk = { ecosystem: d.eco, package: d.name, version: d.version || '?' };
