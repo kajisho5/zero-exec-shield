@@ -90,7 +90,8 @@ export function ijsonProblem(s: string): string | null {
       const c = s[i]!;
       const d = types.length;
       if (need === 'v' || need === 'v0') {
-        if (need === 'v0' && c === ']') { types.pop(); need = 'a'; i++; continue; }
+        // an empty array: its key set is popped with it (keys stays aligned with types)
+        if (need === 'v0' && c === ']') { types.pop(); keys.pop(); need = 'a'; i++; continue; }
         if (d + 1 > 64) deep = true;
         if (top === '') top = c;
         if (c === '{') { types.push('o'); keys.push(new Set()); need = 'k0'; i++; }

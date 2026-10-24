@@ -47,14 +47,21 @@ const yieldToUi = () => new Promise<void>((r) => setTimeout(r, 0));
  *  Too many eat memory (2 MiB × concurrency) and file handles, so it is capped at 8. */
 export const READ_CONCURRENCY = 8;
 
+/** The first 4096 bytes of a Git pointer file (.git, commondir), which git.ts reads as bytes (FileInput.head). */
+export function pointerHead(name: string, buf: Uint8Array): Uint8Array | undefined {
+  return name === '.git' || name === 'commondir' ? buf.slice(0, 4096) : undefined;
+}
+
 async function readOne({ file, relPath }: PickedFile, dec: TextDecoder): Promise<FileInput> {
   const base: Omit<FileInput, 'text' | 'sha256' | 'readState'> = { relPath, name: file.name, size: file.size, lastModified: file.lastModified };
-  if (file.size > MAX_READ_BYTES) return { ...base, text: null, sha256: null, readState: 'skipped-size' };
+  // The File is kept (not read) so that a large Git config can still be parsed up to GIT_CONFIG_MAX (engine/git.ts)
+  if (file.size > MAX_READ_BYTES) return { ...base, text: null, sha256: null, readState: 'skipped-size', blob: file };
   try {
     const buf = new Uint8Array(await file.arrayBuffer());
     const sha = await sha256Hex(buf);
+    const head = pointerHead(file.name, buf);
     // Files containing NUL are also evaluated as strings (same as grep -a in the CLI; so that inserting a single NUL cannot evade the checks)
-    return { ...base, text: dec.decode(buf), sha256: sha, readState: 'read' };
+    return { ...base, text: dec.decode(buf), sha256: sha, readState: 'read', ...(head ? { head } : {}) };
   } catch {
     return { ...base, text: null, sha256: null, readState: 'error' };
   }

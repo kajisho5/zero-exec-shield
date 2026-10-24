@@ -3,6 +3,7 @@ import { push, readable, rootRel, type RuleCtx } from '../context';
 import type { FileInput, McpServerView } from '../types';
 import { parseCodexToml } from '../toml';
 import { asciiLower, clip, jsonPointer, parseJsonc, versionCmp, type LocatorSpec } from '../util';
+import { jsonView, lenientJson, unescapeAscii } from '../lenientJson';
 import { INVISIBLE_7 } from '../hiddenChars';
 import { collectDeps } from './supplyChain';
 
@@ -25,7 +26,7 @@ const HIGH_CMD = new RegExp([
 ].join('|'), 'i');
 const MED_CMD = /(^|[\t\v\f\r "/])(npx|uvx|bunx|pnpm dlx)([\t\v\f\r "]|$)/;
 
-type Server = { name: string; command: string; args: string[]; path: (string | number)[] };
+type Server = { name: string; command: string; args: string[]; path: (string | number)[]; unknown?: boolean; hook?: boolean };
 function collectServers(obj: unknown, out: Server[], name = '', path: (string | number)[] = []): void {
   if (Array.isArray(obj)) { obj.forEach((v, i) => collectServers(v, out, name, [...path, i])); return; }
   if (!obj || typeof obj !== 'object') return;
@@ -52,7 +53,24 @@ type HookEntry = { pointer: string; cmds: string[]; lines: string[] };
 function hookEntries(text: string): { fmt: 'json' | 'jsonc'; entries: HookEntry[] } | null {
   let fmt: 'json' | 'jsonc' = 'json';
   let j: unknown;
-  try { j = JSON.parse(text); } catch { fmt = 'jsonc'; try { j = parseJsonc(text); } catch { return null; } }
+  try { j = JSON.parse(text); } catch {
+    fmt = 'jsonc';
+    try { j = parseJsonc(text); } catch {
+      // the lenient reading (lenientJson; the CLI's json_lenient_cmds hook): the entries that hold an object with command
+      const l = lenientJson(text);
+      if (!l) return null;
+      const by = new Map<string, HookEntry>();
+      for (const c of l.cmds) {
+        if (!c.entry) continue;
+        const ptr = jsonPointer(c.entry);
+        const e = by.get(ptr) ?? { pointer: ptr, cmds: [], lines: [] };
+        if (c.commandIsString) e.cmds.push(c.command);
+        e.lines.push(...`${c.command} ${c.args}`.split('\n'));
+        by.set(ptr, e);
+      }
+      return { fmt: l.jsonc ? 'jsonc' : 'json', entries: [...by.values()] };
+    }
+  }
   const hooks = j && typeof j === 'object' && !Array.isArray(j) ? (j as Record<string, unknown>)['hooks'] : undefined;
   const entries: HookEntry[] = [];
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return { fmt, entries };
@@ -135,18 +153,25 @@ export function mcpRules(ctx: RuleCtx): void {
       fmt = 'toml';
       for (const p of r.problems) ctx.errors.push({ module: '§17', reason: `codex_toml_unparsed:${p}:${f.relPath}` });
     } else {
-      // VS Code etc. allow comments and trailing commas, so read as JSONC
+      // VS Code etc. allow comments and trailing commas, so read as JSONC; what neither reads goes to the lenient reading
+      //   (lenientJson, as the CLI: what jq or JSON.parse would read, at any depth)
       try { JSON.parse(f.text); } catch { fmt = 'jsonc'; }
-      try { collectServers(parseJsonc(f.text), servers); } catch { parseError = true; }
+      try { collectServers(parseJsonc(f.text), servers); } catch {
+        const l = lenientJson(f.text);
+        if (l) {
+          fmt = l.jsonc ? 'jsonc' : 'json';
+          servers = l.cmds.map((c) => ({ name: c.path ? String(c.path[c.path.length - 1] ?? '') : '', command: c.command, args: [c.args], path: c.path ?? [], unknown: c.path === null, hook: c.entry !== null }));
+        } else parseError = true;
+      }
       // Hook entries are judged by the agent-hook check below (which also applies HIGH_CMD to them)
-      if (AGENT_HOOK_FILE.test(f.relPath)) servers = servers.filter((s) => !inHookEntry(s.path));
+      if (AGENT_HOOK_FILE.test(f.relPath)) servers = servers.filter((s) => !(s.hook ?? inHookEntry(s.path)));
     }
     if (parseError) {
       // An unparsable config is never reported as "no findings" (fail closed)
       ctx.errors.push({ module: '§17', reason: `mcp_config_parse_failed:${f.relPath}` });
       push(ctx, { level: 'MEDIUM', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, code: 's17.config_unparsed', ruleId: 's17-mcp-command:parse-error', evidenceSha: f.sha256 });
     }
-    const locs = (risk: string) => servers.filter((s) => riskOf(s) === risk).map((s) => ({ format: fmt, pointer: jsonPointer(s.path) }));
+    const locs = (risk: string) => servers.filter((s) => riskOf(s) === risk && !s.unknown).map((s) => ({ format: fmt, pointer: jsonPointer(s.path) }));
     const views: McpServerView[] = servers.map((s) => {
       const line = `${s.command} ${s.args.join(' ')}`;
       const risk = HIGH_CMD.test(line) ? 'high' : MED_CMD.test(line) ? 'medium' : 'none';
@@ -174,12 +199,15 @@ export function mcpRules(ctx: RuleCtx): void {
   //   is not reported. A curl in mcpServers is not a hook. When the file does not parse, the preselection decides
   const HOOK_RE = /(curl|wget|base64|nc |\/dev\/tcp)/;
   for (const f of readable(ctx).filter((x) => AGENT_HOOK_FILE.test(x.relPath))) {
-    const gate = /"hooks"[\t\v\f\r ]*:/.test(f.text) && /"command"[\t\v\f\r ]*:[\t\v\f\r ]*"[^"\n]*(curl|wget|base64|nc |\/dev\/tcp)/.test(f.text);
-    const parsed = f.text.includes('"hooks"') ? hookEntries(f.text) : null;
+    // judged on the parsed document (keys and strings decoded); only a file that cannot be read at all falls back to the
+    //   text with ASCII \u escapes decoded (fail-closed), as the CLI
+    const parsed = hookEntries(f.text);
     const locators: LocatorSpec[] = (parsed?.entries ?? [])
-      .filter((e) => (gate && e.cmds.some((c) => HOOK_RE.test(c))) || e.lines.some((l) => l !== '' && HIGH_CMD.test(l)))
+      .filter((e) => e.cmds.some((c) => HOOK_RE.test(c)) || e.lines.some((l) => l !== '' && HIGH_CMD.test(l)))
       .map((e) => ({ format: parsed!.fmt, pointer: e.pointer }));
-    if (!locators.length && !(gate && !parsed)) continue;
+    const view = parsed ? '' : unescapeAscii(f.text);
+    const gate = !parsed && /"hooks"[\t\v\f\r ]*:/.test(view) && /"command"[\t\v\f\r ]*:[\t\v\f\r ]*"([^"\\\n]|\\[^\n])*(curl|wget|base64|nc |\/dev\/tcp)/.test(view);
+    if (!locators.length && !gate) continue;
     push(ctx, { level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, code: 's17.agent_hook', ruleId: 's17-agent-hook', evidenceSha: f.sha256, locators });
   }
   // SymJack: the browser cannot fetch the link target, so a decoy name with 0 bytes is "needs manual review" (§8.3)
@@ -198,7 +226,8 @@ export function mcpRules(ctx: RuleCtx): void {
     }
   }
   for (const f of readable(ctx).filter((x) => /(^|\/)\.(vscode|claude|cursor)\/tasks\.json$/.test(x.relPath))) {
-    if (/"runOn"[\t\v\f\r ]*:[\t\v\f\r ]*"folderOpen"/.test(f.text)) {
+    // on the decoded document (jsonView, the CLI's json_view): "run\u004fn" is runOn as VS Code reads it
+    if (/"runOn"[\t\v\f\r ]*:[\t\v\f\r ]*"folderOpen"/.test(jsonView(f.text, parseJsonc))) {
       push(ctx, { level: 'HIGH', module: '§7', campaign: 'mcp-poisoning', path: f.relPath, code: 's7.folder_open', ruleId: 's7-folderopen', evidenceSha: f.sha256, locators: runOnLocators(f.text) });
     }
   }

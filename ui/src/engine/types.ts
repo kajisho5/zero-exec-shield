@@ -25,6 +25,12 @@ export interface FileInput {
   /** SHA-256 of the content (hex without "sha256:"). null if it could not be read */
   sha256: string | null;
   readState: 'read' | 'skipped-size' | 'skipped-binary' | 'error';
+  /** The first 4096 bytes of a file named .git or commondir (Git pointer files are read as bytes, like the CLI's
+   *  git_read_pointer: a BOM or a NUL is seen as it is). Absent for other files */
+  head?: Uint8Array;
+  /** The file itself when the generic read skipped it for its size: the engine reads the first GIT_CONFIG_MAX bytes of a Git
+   *  config from it (git.ts). Never read for anything else, never part of the output */
+  blob?: Blob;
 }
 
 export interface SkillPactFindingField {

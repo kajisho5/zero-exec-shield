@@ -1,9 +1,19 @@
 // §10 / §26 / §27 / §28 / §30 / §31 / §32 / §33 / §35 / §36 / §40 / §43 / §48
 // The browser can evaluate only up to "the content of the loaded files". Host state is referred to the CLI with CliOnlyNotice.
 import { HOME_RC_FILES, homeLike, named, push, readable, rootRel, type RuleCtx } from '../context';
-import { asciiLower, asciiTrim, textLocators, tomlValueHead } from '../util';
+import { asciiLower, asciiTrim, lf, lineLocators, textLocators, tomlValueHead } from '../util';
+import { s26Hits } from '../gitConfig';
 import { collectDeps } from './supplyChain';
 
+// line-based like the CLI's grep (lf: lines end at LF only; a lone CR or U+2028 does not start a line)
+const GO_GENERATE = lf(/^\/\/go:generate[\t\v\f\r ]+(curl|wget|bash|sh[\t\v\f\r ]+-c)/m);
+const LD_PRELOAD_RC = lf(/(^|[\t\v\f\r ]|export[\t\v\f\r ]+)LD_PRELOAD=/m);
+const PROMPT_CMD = lf(/(^|[\t\v\f\r ])PROMPT_COMMAND=/m);
+const HIST_OFF = lf(/(HISTFILE=\/dev\/null|HISTSIZE=0([^0-9]|$)|HISTFILESIZE=0([^0-9]|$)|SAVEHIST=0([^0-9]|$)|unset[\t\v\f\r ]+HISTFILE)/m);
+const AUTOSTART_EXEC = lf(/^[\t\v\f\r ]*(ExecStart|ExecStartPre|Exec)[\t\v\f\r ]*=[^#\n]*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/|\/\.[^/\t\n\v\f\r ]+\/|curl|wget|base64|bash -c|sh -c)/m);
+const USER_ROOT = /^[\t\v\f\r ]*USER[\t\v\f\r ]+(root|0)(:[^\t\n\v\f\r ]*)?([\t\v\f\r ]|$)/i;
+const IGNORE_SCRIPTS = lf(/^[\t\v\f\r ]*ignore-scripts[\t\v\f\r ]*=[\t\v\f\r ]*true/m);
+const REQUIRE_VENV = lf(/^[\t\v\f\r ]*require-virtualenv[\t\v\f\r ]*=[\t\v\f\r ]*(true|1)/m);
 const RC = /(^|\/)(\.bashrc|\.bash_profile|\.profile|\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bash_login)$/;
 
 export function buildHookRules(ctx: RuleCtx): void {
@@ -15,7 +25,7 @@ export function buildHookRules(ctx: RuleCtx): void {
       if (cmd && /"(curl|wget|sh|bash|powershell|cmd)"|(curl|wget)/.test(f.text)) push(ctx, { level: 'HIGH', module: '§27', campaign: null, path: f.relPath, code: 's27.build_rs_exec', ruleId: 's27-buildrs', evidenceSha: f.sha256 });
       else if (cmd) push(ctx, { level: 'MEDIUM', module: '§27', campaign: null, path: f.relPath, code: 's27.build_rs_process', ruleId: 's27-buildrs', evidenceSha: f.sha256 });
       else if (/(include_bytes!|include_str!)/.test(f.text)) push(ctx, { level: 'LOW', module: '§27', campaign: null, path: f.relPath, code: 's27.build_rs_include', ruleId: 's27-buildrs', evidenceSha: f.sha256 });
-    } else if (f.name.endsWith('.go') && /^\/\/go:generate[\t\v\f\r ]+(curl|wget|bash|sh[\t\v\f\r ]+-c)/m.test(f.text)) {
+    } else if (f.name.endsWith('.go') && GO_GENERATE.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§27', campaign: null, path: f.relPath, code: 's27.go_generate', ruleId: 's27-gogenerate', evidenceSha: f.sha256 });
     } else if (f.name === 'pyproject.toml') {
       // build-backend / backend-path of the [build-system] table only (buildSystemKeys); the value is parsed like the CLI
@@ -64,26 +74,29 @@ export function persistenceRules(ctx: RuleCtx): void {
   // §26 Git configs (the CLI's check_s26): ~/.gitconfig and ~/.config/git/config of a home folder, every .gitconfig, and
   //   the configs gitDiscover found (config / config.worktree of every gitdir and commondir, include targets)
   const home = homeLike(ctx);
-  const gitConfigs = [...new Set([...readable(ctx).filter((f) => f.name === '.gitconfig' || (home && rootRel(ctx, f) === '.config/git/config')), ...ctx.git.configs])]
-    .filter((f): f is typeof f & { text: string } => f.text !== null);
+  //   Each config is parsed as git parses it (gitConfig.ts, the CLI's ZES_GITCFG_AWK) and every assignment counts (s26Hits)
+  const gitConfigs = [...new Set([...readable(ctx).filter((f) => f.name === '.gitconfig' || (home && rootRel(ctx, f) === '.config/git/config')), ...ctx.git.configs])];
+  const S26 = { fsmonitor: ['CRITICAL', 's26.fsmonitor', 's26-gitconfig:fsmonitor'], sshcommand: ['HIGH', 's26.ssh_command', 's26-gitconfig:ssh'], hookspath: ['MEDIUM', 's26.hooks_path', 's26-gitconfig:hooks'] } as const;
   for (const f of gitConfigs) {
-    const p = f.relPath;
-    if (/^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=/im.test(f.text) && !/^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=[\t\v\f\r ]*(true|false)[\t\v\f\r ]*$/im.test(f.text)) push(ctx, { level: 'CRITICAL', module: '§26', campaign: null, path: p, code: 's26.fsmonitor', ruleId: 's26-gitconfig:fsmonitor', evidenceSha: f.sha256, locators: textLocators(f.text, /^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=/i, /^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=[\t\v\f\r ]*(true|false)[\t\v\f\r ]*$/i) });
-    if (/^[\t\v\f\r ]*sshCommand[\t\v\f\r ]*=/im.test(f.text)) push(ctx, { level: 'HIGH', module: '§26', campaign: null, path: p, code: 's26.ssh_command', ruleId: 's26-gitconfig:ssh', evidenceSha: f.sha256, locators: textLocators(f.text, /^[\t\v\f\r ]*sshCommand[\t\v\f\r ]*=/i) });
-    if (/^[\t\v\f\r ]*hooksPath[\t\v\f\r ]*=/im.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§26', campaign: null, path: p, code: 's26.hooks_path', ruleId: 's26-gitconfig:hooks', evidenceSha: f.sha256, locators: textLocators(f.text, /^[\t\v\f\r ]*hooksPath[\t\v\f\r ]*=/i) });
+    const t = f.text !== null ? { text: f.text, sha256: f.sha256 } : ctx.git.texts.get(f.relPath);
+    if (!t) continue;
+    for (const h of s26Hits(t.text)) {
+      const [level, code, ruleId] = S26[h.key];
+      push(ctx, { level, module: '§26', campaign: null, path: f.relPath, code, ruleId, evidenceSha: t.sha256 ?? undefined, locators: lineLocators(t.text, h.lines) });
+    }
   }
   for (const f of readable(ctx)) {
     const p = f.relPath;
     if (RC.test(p)) {
       if (/(curl|wget)[^|#\n]*\|[\t\v\f\r ]*(ba|z)?sh/.test(f.text)) push(ctx, { level: 'HIGH', module: '§10', campaign: null, path: p, code: 's10.curl_sh', ruleId: 's10-rc:curlsh', evidenceSha: f.sha256, locators: textLocators(f.text, /(curl|wget)[^|#]*\|[\t\v\f\r ]*(ba|z)?sh/) });
       if (/base64[\t\v\f\r ]+(-d|--decode)/.test(f.text)) push(ctx, { level: 'HIGH', module: '§10', campaign: null, path: p, code: 's10.obfuscated', ruleId: 's10-rc:base64', evidenceSha: f.sha256, locators: textLocators(f.text, /base64[\t\v\f\r ]+(-d|--decode)|\\x[0-9a-f]{2}\\x[0-9a-f]{2}\\x[0-9a-f]{2}/) });
-      if (/(^|[\t\v\f\r ]|export[\t\v\f\r ]+)LD_PRELOAD=/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§31', campaign: 'ebpf-rootkit', path: p, code: 's31.ld_preload_rc', ruleId: 's31-ldpreload:rc', evidenceSha: f.sha256, locators: textLocators(f.text, /(^|[\t\v\f\r ]|export[\t\v\f\r ]+)LD_PRELOAD=/) });
+      if (LD_PRELOAD_RC.test(f.text)) push(ctx, { level: 'HIGH', module: '§31', campaign: 'ebpf-rootkit', path: p, code: 's31.ld_preload_rc', ruleId: 's31-ldpreload:rc', evidenceSha: f.sha256, locators: textLocators(f.text, /(^|[\t\v\f\r ]|export[\t\v\f\r ]+)LD_PRELOAD=/) });
       if (/DYLD_INSERT_LIBRARIES/.test(f.text)) push(ctx, { level: 'HIGH', module: '§30', campaign: null, path: p, code: 's30.dyld_insert', ruleId: 's30-dyld', evidenceSha: f.sha256 });
-      if (/(^|[\t\v\f\r ])PROMPT_COMMAND=/m.test(f.text)) {
+      if (PROMPT_CMD.test(f.text)) {
         const bad = /PROMPT_COMMAND=.*(curl|wget|base64|nc |\/dev\/tcp)/.test(f.text);
         push(ctx, { level: bad ? 'HIGH' : 'MEDIUM', module: '§33', campaign: null, path: p, code: bad ? 's33.prompt_command_suspicious' : 's33.prompt_command', ruleId: 's33-prompt', evidenceSha: f.sha256 });
       }
-      if (/(HISTFILE=\/dev\/null|HISTSIZE=0([^0-9]|$)|HISTFILESIZE=0([^0-9]|$)|SAVEHIST=0([^0-9]|$)|unset[\t\v\f\r ]+HISTFILE)/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§35', campaign: null, path: p, code: 's35.history_disabled', ruleId: 's35-history', evidenceSha: f.sha256 });
+      if (HIST_OFF.test(f.text)) push(ctx, { level: 'HIGH', module: '§35', campaign: null, path: p, code: 's35.history_disabled', ruleId: 's35-history', evidenceSha: f.sha256 });
     }
     if (f.name === 'ld.so.preload' && f.text.split(/\r?\n/).some((l) => asciiTrim(l) !== '' && !asciiTrim(l).startsWith('#'))) {
       push(ctx, { level: 'CRITICAL', module: '§31', campaign: 'ebpf-rootkit', path: p, code: 's31.ld_so_preload', ruleId: 's31-ldpreload:file', evidenceSha: f.sha256, locators: textLocators(f.text, /.*/, /^[\t\v\f\r ]*(#|$)/) });
@@ -99,7 +112,7 @@ export function persistenceRules(ctx: RuleCtx): void {
       if (/<string>(\/tmp\/|\/private\/tmp\/|\/Users\/Shared\/|\/var\/tmp\/)|<string>[^<\n]*\/\.[^/<\n]+\/[^<\n]*<\/string>/.test(canon)) push(ctx, { level: 'HIGH', module: '§30', campaign: null, path: p, code: 's30.tmp_program', ruleId: 's30-launchagent:path', evidenceSha: f.sha256 });
       if (/(curl|osascript|base64|python[0-9.]* -c|bash -c)/.test(canon)) push(ctx, { level: 'HIGH', module: '§30', campaign: null, path: p, code: 's30.program_arguments', ruleId: 's30-launchagent:args', evidenceSha: f.sha256 });
     }
-    if (/(^|\/)systemd\/user\/[^/]+\.service$|(^|\/)autostart\/[^/]+\.desktop$/.test(p) && /^[\t\v\f\r ]*(ExecStart|ExecStartPre|Exec)[\t\v\f\r ]*=[^#\n]*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/|\/\.[^/\t\n\v\f\r ]+\/|curl|wget|base64|bash -c|sh -c)/m.test(f.text)) {
+    if (/(^|\/)systemd\/user\/[^/]+\.service$|(^|\/)autostart\/[^/]+\.desktop$/.test(p) && AUTOSTART_EXEC.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§31', campaign: 'ebpf-rootkit', path: p, code: 's31.autostart_suspicious', ruleId: 's31-autostart', evidenceSha: f.sha256, locators: textLocators(f.text, /^[\t\v\f\r ]*(ExecStart|ExecStartPre|Exec)[\t\v\f\r ]*=[^#]*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/|\/\.[^/\t\n\v\f\r ]+\/|curl|wget|base64|bash -c|sh -c)/) });
     }
   }
@@ -209,7 +222,7 @@ export function containerRules(ctx: RuleCtx): void {
     }
     if (DOCKERFILE.test(f.name)) {
       // USER root, USER 0, USER root:<group>, USER 0:0 (the CLI's grep is line based: no line break in the classes)
-      if (/^[\t\v\f\r ]*USER[\t\v\f\r ]+(root|0)(:[^\t\n\v\f\r ]*)?([\t\v\f\r ]|$)/im.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§8', campaign: null, path: f.relPath, code: 's8.user_root', ruleId: 's8-dockerfile:root', evidenceSha: f.sha256 });
+      if (dockerfileLines(f.text).some((l) => USER_ROOT.test(l))) push(ctx, { level: 'MEDIUM', module: '§8', campaign: null, path: f.relPath, code: 's8.user_root', ruleId: 's8-dockerfile:root', evidenceSha: f.sha256 });
       for (const img of fromImages(f.text)) {
         if (img === 'scratch' || img.startsWith('$') || img.includes('@sha256:')) continue;
         if (img.endsWith(':latest') || !img.slice(img.lastIndexOf('/') + 1).includes(':')) {
@@ -226,11 +239,15 @@ export function containerRules(ctx: RuleCtx): void {
 /** build-backend (the text after its "=") and backend-path of the [build-system] table of a pyproject.toml: the CLI's
  *  pyproject_build_system. Only keys of that table count: lines under [build-system] (until the next table header),
  *  "build-system.build-backend = …" before the first header, and the keys of "build-system = { … }" on its line. Lines
- *  inside multi-line strings (""" / ''') are never keys, so a description cannot hold a decoy. TOML whitespace is space and
+ *  inside multi-line strings (""" / ''') or inside an array / inline table over several lines are never keys or headers,
+ *  so a description or an array element cannot hold a decoy. TOML whitespace is space and
  *  tab; a NUL becomes U+0001 (the CLI cannot keep NUL in a shell variable). The first build-backend counts. */
 export function buildSystemKeys(text: string): { backend?: string; backendPath: boolean } {
   let inml = false;
   let mlq = '';
+  // bracket depth outside strings and comments: a line inside an array / inline table that spans lines (as inside a
+  //   multi-line string) is neither a table header nor a key (the CLI's tokenizer state)
+  let dep = 0;
   let tbl = '';
   let backend: string | undefined;
   let backendPath = false;
@@ -247,6 +264,8 @@ export function buildSystemKeys(text: string): { backend?: string; backendPath: 
       if (x.startsWith('"""', i) || x.startsWith("'''", i)) { mlq = x.slice(i, i + 3); inml = true; i += 3; continue; }
       if (c === '"') { let j = i + 1; for (; j < x.length; j++) { if (x[j] === '\\') { j++; continue; } if (x[j] === '"') break; } i = j + 1; continue; }
       if (c === "'") { const j = x.indexOf("'", i + 1); if (j < 0) return; i = j + 1; continue; }
+      if (c === '[' || c === '{') dep++;
+      else if ((c === ']' || c === '}') && dep > 0) dep--;
       i++;
     }
   };
@@ -254,11 +273,18 @@ export function buildSystemKeys(text: string): { backend?: string; backendPath: 
   const be = (rest: string) => { if (backend === undefined) backend = rest; };
   for (const raw of text.split('\n')) {
     const line = raw.replace(/\r$/, '').replace(/\0/g, '\u0001');
-    if (inml) { scan(line); continue; }
+    if (inml || dep > 0) { scan(line); continue; }
     if (/^[ \t]*\[/.test(line)) {
       let h = line.replace(/^[ \t]*\[/, '');
       if (h.startsWith('[')) tbl = 'other';
-      else { h = h.replace(/\].*$/, '').replace(/^[ \t]+|[ \t]+$/g, '').replace(/^["']|["']$/g, ''); tbl = h === 'build-system' ? 'bs' : 'other'; }
+      else {
+        h = h.replace(/\].*$/, '');
+        let a = 0; let b = h.length;
+        while (a < b && (h[a] === ' ' || h[a] === '\t')) a++;
+        while (b > a && (h[b - 1] === ' ' || h[b - 1] === '\t')) b--;
+        h = h.slice(a, b).replace(/^["']|["']$/g, '');
+        tbl = h === 'build-system' ? 'bs' : 'other';
+      }
       continue;
     }
     let m: RegExpExecArray | null;
@@ -333,14 +359,53 @@ export function plistLabel(text: string): string | undefined {
   return v?.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 }
 
-/** The image of each FROM line of a Dockerfile (the CLI's dockerfile_images): FROM after optional whitespace, then
+/** The logical lines of a Dockerfile as BuildKit's parser joins them (the CLI's dockerfile_lines): lines end at LF (a CR
+ *  before it removed); the escape character is "\\" or the one of a leading "# escape=" parser directive ("`"); a line
+ *  that ends with it (spaces / tabs after it allowed) continues on the next line, joined without a separator after the
+ *  escape character is removed; inside a continuation, comment lines (# after optional whitespace) and lines of only
+ *  whitespace are skipped. Outside one, comment lines and empty lines give nothing, and leading whitespace is removed. */
+export function dockerfileLines(text: string): string[] {
+  const out: string[] = [];
+  let esc = '\\';
+  let directives = true;
+  let cur: string | null = null;
+  const ws = (c: string) => c === ' ' || c === '\t';
+  const cont = (l: string): string | null => {
+    let e = l.length;
+    while (e > 0 && ws(l[e - 1]!)) e--;
+    return e > 0 && l[e - 1] === esc ? l.slice(0, e - 1) : null;
+  };
+  for (const raw of text.split('\n')) {
+    const l = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+    if (directives) {
+      const d = /^#[ \t]*([A-Za-z][A-Za-z0-9]*)[ \t]*=[ \t]*(.*?)[ \t]*$/.exec(l);
+      if (d) { if (d[1]!.toLowerCase() === 'escape' && (d[2] === '`' || d[2] === '\\')) esc = d[2]; continue; }
+      directives = false;
+    }
+    const t = l.replace(/^[ \t\v\f\r]+/, '');
+    if (cur === null) {
+      if (t.startsWith('#') || t === '') continue;
+      const c = cont(t);
+      if (c === null) { out.push(t); continue; }
+      cur = c;
+      continue;
+    }
+    if (t.startsWith('#') || t.replace(/[ \t\v\f\r]+/g, '') === '') continue;
+    const c = cont(l);
+    if (c === null) { out.push(cur + l); cur = null; } else cur += c;
+  }
+  if (cur !== null) out.push(cur);
+  return out;
+}
+
+/** The image of each FROM line of a Dockerfile (the CLI's dockerfile_images), on its logical lines (dockerfileLines): FROM after optional whitespace, then
  *  whitespace; the words after it split on ASCII whitespace (space, tab, VT, FF, CR: [[:space:]], not NBSP or other
  *  Unicode spaces), flags such as --platform=linux/amd64 skipped, the first other word is the image. A FROM line without
  *  one gives nothing (never an empty image). NUL becomes U+0001, as in the CLI. */
 export function fromImages(text: string): string[] {
   const out: string[] = [];
-  for (const raw of text.split('\n')) {
-    const l = raw.replace(/\r$/, '').replace(/\0/g, '\u0001');
+  for (const raw of dockerfileLines(text)) {
+    const l = raw.replace(/\0/g, '\u0001');
     const m = /^[\t\v\f\r ]*FROM[\t\v\f\r ]+/i.exec(l);
     if (!m) continue;
     const img = l.slice(m[0].length).split(/[\t\v\f\r ]+/).find((w) => w !== '' && !w.startsWith('--'));
@@ -384,8 +449,8 @@ export function homeRules(ctx: RuleCtx): void {
   }
   const text = (rel: string) => at(rel)?.text ?? '';
   const rc = HOME_RC_FILES.map(text).join('\n');
-  if (!/^[\t\v\f\r ]*ignore-scripts[\t\v\f\r ]*=[\t\v\f\r ]*true/m.test(text('.npmrc'))) push(ctx, { level: 'MEDIUM', module: '§12', campaign: null, path: `${prefix}.npmrc`, code: 's12.npm_ignore_scripts', ruleId: 's12-vaccines:npm' });
+  if (!IGNORE_SCRIPTS.test(text('.npmrc'))) push(ctx, { level: 'MEDIUM', module: '§12', campaign: null, path: `${prefix}.npmrc`, code: 's12.npm_ignore_scripts', ruleId: 's12-vaccines:npm' });
   if (!/PYTHONNOUSERSITE=1/.test(rc)) push(ctx, { level: 'MEDIUM', module: '§12', campaign: null, path: null, code: 's12.pythonnousersite', ruleId: 's12-vaccines:pythonnousersite' });
-  const pipConf = ['.config/pip/pip.conf', '.pip/pip.conf', 'Library/Application Support/pip/pip.conf'].some((p) => /^[\t\v\f\r ]*require-virtualenv[\t\v\f\r ]*=[\t\v\f\r ]*(true|1)/m.test(text(p)));
+  const pipConf = ['.config/pip/pip.conf', '.pip/pip.conf', 'Library/Application Support/pip/pip.conf'].some((p) => REQUIRE_VENV.test(text(p)));
   if (!/PIP_REQUIRE_VIRTUALENV=(true|1)/.test(rc) && !pipConf) push(ctx, { level: 'MEDIUM', module: '§12', campaign: null, path: null, code: 's12.pip_require_virtualenv', ruleId: 's12-vaccines:pip' });
 }

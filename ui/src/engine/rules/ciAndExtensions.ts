@@ -1,7 +1,7 @@
 // §21 / §22 / §38 GitHub Actions, §24 / §42 browser extensions
 import { pathMatch, push, readable, type RuleCtx } from '../context';
 import type { UsesRef } from '../types';
-import { asciiLower, clip, dirname } from '../util';
+import { asciiLower, clip, dirname, lf } from '../util';
 
 const lead = (x: string) => (/^[ \t]*/.exec(x)?.[0] ?? '').length;
 /** Removes node properties (anchors &x, tags !!str / !tag) from the start (same as props in CLI yaml_flatten) */
@@ -36,6 +36,11 @@ function yamlNoComment(x: string): string {
  * including multi-line ones) into block sequences with one element per line. Aliases (*x / <<: *x) are not resolved; a "#ZES-YAML-ALIAS" line is emitted.
  * The content of block scalars (run: | etc.) are passed through as is.
  */
+// line-based like the CLI's grep (lf: lines end at LF only)
+const SECRETS_EXPR = lf(/\$\{\{([^}\n]*[^A-Za-z0-9_.\n])?secrets([\][.\t\v\f\r )]|$)/im);
+const WRITE_ALL = lf(/^[\t\v\f\r ]*permissions:[\t\v\f\r ]*write-all/m);
+const TRIVY_0694 = lf(/(trivy-version|version):[\t\v\f\r ]*["']?v?0\.69\.4["']?[\t\v\f\r ]*$/m);
+
 export function yamlFlatten(yaml: string): string[] {
   const src = yaml.split('\n').map((l) => l.replace(/\r$/, ''));
   if (src.length && src[src.length - 1] === '') src.pop();
@@ -209,7 +214,7 @@ export function actionsRules(ctx: RuleCtx): void {
     const isWorkflow = /\.github\/workflows\//.test(f.relPath);
     const prTarget = /(^|[^A-Za-z0-9_])pull_request_target([^A-Za-z0-9_]|$)/.test(y);
     // Expression context names are case-insensitive (${{ SECRETS.X }} / ${{ toJSON(secrets) }} / secrets['X'] are also secrets references)
-    if (isWorkflow && prTarget && /actions\/checkout@/i.test(y) && /\$\{\{([^}\n]*[^A-Za-z0-9_.\n])?secrets([\][.\t\v\f\r )]|$)/im.test(y)) {
+    if (isWorkflow && prTarget && /actions\/checkout@/i.test(y) && SECRETS_EXPR.test(y)) {
       const refs = checkoutRefs(y);
       if (refs.includes('prhead')) {
         push(ctx, { level: 'CRITICAL', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.pwn_request', ruleId: 's21-prtarget:prhead', evidenceSha: f.sha256, kind: 'gha.pwn_request' });
@@ -224,7 +229,7 @@ export function actionsRules(ctx: RuleCtx): void {
     if (/key:.*github\.event\.pull_request\.number/.test(y)) {
       push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.cache_pr_key', ruleId: 's21-cache', evidenceSha: f.sha256 });
     }
-    if (/^[\t\v\f\r ]*permissions:[\t\v\f\r ]*write-all/m.test(y)) {
+    if (WRITE_ALL.test(y)) {
       push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.write_all', ruleId: 's21-writeall', evidenceSha: f.sha256 });
     }
     if (isWorkflow && yamlHasAlias(y)) ctx.errors.push({ module: '§21', reason: `yaml_alias_unresolved:${f.relPath}` });
@@ -258,7 +263,7 @@ export function actionsRules(ctx: RuleCtx): void {
         push(ctx, { level: org ? 'CRITICAL' : 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, code: org ? 's22.risky_publisher_tag' : 's22.unpinned', params: { ref }, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
       }
     }
-    if (/(trivy-version|version):[\t\v\f\r ]*["']?v?0\.69\.4["']?[\t\v\f\r ]*$/m.test(y) && /trivy/.test(y)) {
+    if (TRIVY_0694.test(y) && /trivy/.test(y)) {
       push(ctx, { level: 'CRITICAL', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's22.trivy_version', ruleId: 's22-trivy-binary', evidenceSha: f.sha256 });
     }
     if (isWorkflow) ctx.viewers.actions.push({ path: f.relPath, uses, prTarget });
@@ -274,11 +279,13 @@ function strings(v: unknown): string[] {
 export function extensionRules(ctx: RuleCtx): void {
   ctx.checks.add('s24-update-url').add('s24-permissions').add('s42-known').add('s42-escalation');
   const be = ctx.ioc.browser_extensions;
-  const manifests = readable(ctx).filter((x) => x.name === 'manifest.json' && (/(^|\/)Extensions\//.test(x.relPath) || /"manifest_version"[\t\v\f\r ]*:/.test(x.text)));
+  // a manifest.json under Extensions/, or one whose parsed document has manifest_version (decoded keys, not the raw text)
+  const manifests = readable(ctx).filter((x) => x.name === 'manifest.json');
   const parsed: { path: string; perms: string[] }[] = [];
   for (const f of manifests) {
     let m: Manifest;
     try { m = JSON.parse(f.text) as Manifest; } catch { continue; }
+    if (!/(^|\/)Extensions\//.test(f.relPath) && !(m && typeof m === 'object' && !Array.isArray(m) && Object.prototype.hasOwnProperty.call(m, 'manifest_version'))) continue;
     const cs = Array.isArray(m.content_scripts) ? (m.content_scripts as { matches?: unknown }[]).flatMap((c) => strings(c.matches)) : [];
     const perms = [...strings(m.permissions), ...strings(m.optional_permissions), ...strings(m.host_permissions), ...cs];
     const dangerous = be.dangerous_permissions.filter((p) => perms.includes(p));
