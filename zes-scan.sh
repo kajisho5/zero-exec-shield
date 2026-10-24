@@ -4295,7 +4295,7 @@ SP_ANALYZE='
 ] else [] end) as $div |
 (try sp_authors catch []) as $authors |
 { vstatus: $vs, cv: (if ($cv | type) == "string" then $cv elif $cv == null then null else ($cv | tojson) end),
-  name: (try (.skill.name | strings) catch null), sver: (try (.skill.version | strings) catch null),
+  name: (try ([.skill.name | strings][0]) catch null), sver: (try ([.skill.version | strings][0]) catch null),
   errors: $errors, permsok: $permsok, declared: $declared,
   signed: (try (((.integrity.signatures // []) | type) == "array" and ((.integrity.signatures // []) | length) > 0) catch false),
   authors: $authors, author: ($authors[0] // null),
@@ -4324,20 +4324,137 @@ end end
 '
 
 # Output one I-JSON (spec §4.1) issue (outputs nothing if there is none)
+#   One pass over the bytes, the same rules as ijsonProblem of the browser engine (no jq: jq 1.7 accepts NaN, Infinity, 01, +1,
+#   .5, 1. and several concatenated documents, and stops at 256 levels):
+#   - the text must be exactly one RFC 8259 JSON value (a leading UTF-8 BOM is ignored; whitespace is space, tab, LF, CR);
+#     a \uD800-\uDBFF escape not followed by a \uDC00-\uDFFF escape is also "not valid JSON" (as in jq)
+#   - then, in this fixed order: top-level value not an object, duplicate member name (names compared after decoding escapes
+#     and replacing invalid UTF-8 by U+FFFD as the WHATWG decoder does), a value nested deeper than 64 (the top-level value
+#     is depth 1), a number whose exact decimal value is outside ±(2^53-1) (the literal is compared digit by digit: no
+#     rounding, 9007199254740991.4 and 1e400 are outside, 1e-400 is inside), U+FFFD in a string or name (invalid UTF-8, a
+#     lone \uDC00-\uDFFF escape, � or a literal U+FFFD)
+#   An unreadable file is "not valid JSON"
 sp_ijson_problem() {
-  local f="$1" a b
-  if ! jq empty "$f" >/dev/null 2>&1; then echo "not valid JSON (or lone surrogate)"; return 0; fi
-  jq -e 'type == "object"' "$f" >/dev/null 2>&1 || { echo "top-level value is not an object"; return 0; }
-  a="$(jq -c --stream 'select(length == 2)' "$f" 2>/dev/null | wc -l | tr -d ' ')"
-  b="$(jq -c 'tostream | select(length == 2)' "$f" 2>/dev/null | wc -l | tr -d ' ')"
-  [ "$a" = "$b" ] || { echo "duplicate member name"; return 0; }
-  jq -e '([paths | length] | max // 0) > 63' "$f" >/dev/null 2>&1 && { echo "nesting deeper than 64"; return 0; }
-  jq -n -e --stream 'any(inputs; length == 2 and (.[1] | type) == "number" and ((.[1] | isinfinite) or (.[1] | isnan) or ((.[1] | if . < 0 then -. else . end) > 9007199254740991)))' "$f" >/dev/null 2>&1 \
-    && { echo "number outside ±(2^53-1)"; return 0; }
-  jq -e '[.. | strings, (objects | keys[])] | any(.[]; contains("\ufffd"))' "$f" >/dev/null 2>&1 && { echo "invalid UTF-8 or lone surrogate"; return 0; }
+  local out
+  out="$(awk "$ZES_AWK_LIB"'
+    BEGIN { for (k = 1; k < 256; k++) ORD[sprintf("%c", k)] = k; FFFD = "\357\277\275"; NUL = "\300\200"
+      E["\""] = "\""; E["\\"] = "\\"; E["/"] = "/"; E["b"] = sprintf("%c", 8); E["f"] = sprintf("%c", 12); E["n"] = "\n"; E["r"] = "\r"; E["t"] = "\t" }
+    function bad() { print "not valid JSON (or lone surrogate)"; exit }
+    function ws(   c) { while (i <= n) { c = substr(S, i, 1); if (c == " " || c == "\t" || c == "\n" || c == "\r") i++; else break } }
+    function hex4(h) { return h ~ /^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$/ }
+    function hexval(h,   k, v) { v = 0; for (k = 1; k <= 4; k++) v = v * 16 + index("0123456789abcdef", tolower(substr(h, k, 1))) - 1; return v }
+    function utf8(cp) {
+      if (cp == 0) return NUL
+      if (cp < 128) return sprintf("%c", cp)
+      if (cp < 2048) return sprintf("%c%c", 192 + int(cp / 64), 128 + cp % 64)
+      if (cp < 65536) return sprintf("%c%c%c", 224 + int(cp / 4096), 128 + int(cp / 64) % 64, 128 + cp % 64)
+      return sprintf("%c%c%c%c", 240 + int(cp / 262144), 128 + int(cp / 4096) % 64, 128 + int(cp / 64) % 64, 128 + cp % 64) }
+    function raw(s) { if (i > s) SP[++sn] = substr(S, s, i - s) }
+    # A string (i is on the opening quote): its decoded value, as UTF-8 bytes
+    function str(   s, c, b, need, lo, hi, q, h, cp, lw, cur) {
+      i++; sn = 0; s = i; need = 0
+      while (1) {
+        if (i > n) bad()
+        c = substr(S, i, 1); b = ORD[c] + 0
+        if (need > 0) {
+          if (b >= lo && b <= hi) { need--; lo = 128; hi = 191; i++; if (need == 0 && substr(S, q, i - q) == FFFD) FFD = 1; continue }
+          # an incomplete sequence is one U+FFFD; the byte that ended it is read again
+          cur = i; i = q; raw(s); SP[++sn] = FFFD; FFD = 1; i = cur; s = cur; need = 0
+          continue }
+        if (b < 128) {
+          if (c == "\"") { raw(s); i++; return zes_join(SP, sn) }
+          if (b < 32) bad()
+          if (c == "\\") {
+            raw(s); c = substr(S, i + 1, 1)
+            if (c in E) { SP[++sn] = E[c]; i += 2; s = i; continue }
+            if (c != "u") bad()
+            h = substr(S, i + 2, 4); if (!hex4(h)) bad(); cp = hexval(h); i += 6
+            if (cp >= 55296 && cp <= 56319) {
+              lw = substr(S, i + 2, 4)
+              if (substr(S, i, 2) != "\\u" || !hex4(lw) || hexval(lw) < 56320 || hexval(lw) > 57343) bad()
+              cp = 65536 + (cp - 55296) * 1024 + (hexval(lw) - 56320); i += 6 }
+            else if (cp >= 56320 && cp <= 57343) { cp = 65533 }
+            if (cp == 65533) FFD = 1
+            SP[++sn] = utf8(cp); s = i; continue }
+          i++; continue }
+        q = i
+        if (b >= 194 && b <= 223) { need = 1; lo = 128; hi = 191 }
+        else if (b == 224) { need = 2; lo = 160; hi = 191 }
+        else if (b == 237) { need = 2; lo = 128; hi = 159 }
+        else if (b >= 225 && b <= 239) { need = 2; lo = 128; hi = 191 }
+        else if (b == 240) { need = 3; lo = 144; hi = 191 }
+        else if (b == 244) { need = 3; lo = 128; hi = 143 }
+        else if (b >= 241 && b <= 243) { need = 3; lo = 128; hi = 191 }
+        else { raw(s); SP[++sn] = FFFD; FFD = 1; i++; s = i; continue }
+        i++ } }
+    # A digit run starting at j: the index after it
+    function digits(j) { while (j <= n && index("0123456789", substr(S, j, 1)) && substr(S, j, 1) != "") j++; return j }
+    # Is the exact value of the number literal x outside ±(2^53-1)?
+    function outside(x,   m, p, f, e, d, k, L, t) {
+      sub(/^-/, "", x); e = 0
+      if ((p = index(tolower(x), "e")) > 0) { t = substr(x, p + 1); x = substr(x, 1, p - 1); m = (t ~ /^-/); sub(/^[-+]/, "", t); sub(/^0+/, "", t)
+        if (length(t) > 9) return m ? 0 : (x ~ /[1-9]/); e = (m ? -1 : 1) * t }
+      if ((p = index(x, ".")) > 0) { f = substr(x, p + 1); x = substr(x, 1, p - 1) } else f = ""
+      d = x f; e -= length(f); sub(/^0+/, "", d)
+      if (d == "") return 0
+      for (k = length(d); substr(d, k, 1) == "0"; k--) e++
+      d = substr(d, 1, k)
+      L = length(d) + e
+      if (L != 16) return L > 16
+      if (e >= 0) { for (k = 0; k < e; k++) d = d "0"; return d > "9007199254740991" }
+      return substr(d, 1, 16) >= "9007199254740991" }
+    { P[++np] = $0 "\n" }
+    END {
+      S = zes_join(P, np); n = length(S); i = 1
+      if (substr(S, 1, 3) == "\357\273\277") i = 4
+      d = 0; need = "v"; top = ""
+      while (1) {
+        ws(); if (i > n) break
+        c = substr(S, i, 1)
+        if (need == "v" || need == "v0") {
+          if (need == "v0" && c == "]") { d--; need = "a"; i++; continue }
+          if (d + 1 > 64) DEEP = 1
+          if (top == "") top = c
+          if (c == "{") { d++; T[d] = "o"; KN[d] = 0; need = "k0"; i++ }
+          else if (c == "[") { d++; T[d] = "a"; need = "v0"; i++ }
+          else if (c == "\"") { str(); need = "a" }
+          else if (c == "-" || index("0123456789", c)) {
+            j = i; if (c == "-") j++
+            if (substr(S, j, 1) == "0") j++; else { if (!index("123456789", substr(S, j, 1)) || substr(S, j, 1) == "") bad(); j = digits(j) }
+            if (substr(S, j, 1) == ".") { k = digits(j + 1); if (k == j + 1) bad(); j = k }
+            if (substr(S, j, 1) == "e" || substr(S, j, 1) == "E") { j++; if (substr(S, j, 1) == "+" || substr(S, j, 1) == "-") j++; k = digits(j); if (k == j) bad(); j = k }
+            if (outside(substr(S, i, j - i))) BIG = 1
+            i = j; need = "a" }
+          else if (substr(S, i, 4) == "true" || substr(S, i, 4) == "null") { i += 4; need = "a" }
+          else if (substr(S, i, 5) == "false") { i += 5; need = "a" }
+          else bad()
+          continue }
+        if (need == "k0" || need == "k") {
+          if (need == "k0" && c == "}") { for (k = 1; k <= KN[d]; k++) delete KEYS[d, KL[d, k]]; d--; need = "a"; i++; continue }
+          if (c != "\"") bad()
+          key = str(); if ((d, key) in KEYS) DUP = 1; else { KEYS[d, key] = 1; KL[d, ++KN[d]] = key }
+          need = ":"; continue }
+        if (need == ":") { if (c != ":") bad(); i++; need = "v"; continue }
+        # need == "a": after a value
+        if (d == 0) bad()
+        if (c == ",") { i++; need = (T[d] == "o") ? "k" : "v"; continue }
+        if (c == "}" && T[d] == "o") { for (k = 1; k <= KN[d]; k++) delete KEYS[d, KL[d, k]]; d--; need = "a"; i++; continue }
+        if (c == "]" && T[d] == "a") { d--; need = "a"; i++; continue }
+        bad() }
+      if (need != "a" || d != 0) bad()
+      if (top != "{") print "top-level value is not an object"
+      else if (DUP) print "duplicate member name"
+      else if (DEEP) print "nesting deeper than 64"
+      else if (BIG) print "number outside ±(2^53-1)"
+      else if (FFD) print "invalid UTF-8 or lone surrogate"
+      else print "ok" }' "$1" 2>/dev/null)" || out=""
+  case "$out" in
+    ok) ;;
+    "") echo "not valid JSON (or lone surrogate)" ;;
+    *) printf '%s\n' "$out" ;;
+  esac
   return 0
 }
-
 # name from the SKILL.md frontmatter
 sp_fm_name() {
   awk 'NR == 1 { sub(/^\357\273\277/, "") } { sub(/\r$/, "") }

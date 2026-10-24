@@ -844,6 +844,17 @@ jq -e '.status == "partial" and ([.errors[] | select(.module == "§17")] == []) 
   && jq -e '[.errors[] | select(.reason | startswith("codex_toml_unparsed:parse_error:nesting_too_deep:"))] | length == 1' "$TMP/r5-deep-200.json" >/dev/null 2>&1 \
   && ok "TOML の入れ子 81 段以上は parse_error:nesting_too_deep（errors[]・partial）、80 段は読める" || ng "深い入れ子の TOML の扱いが違う"
 
+# CLI-3 / CLI-4 / UI 7: exactly one RFC 8259 document, numbers compared on their exact decimal value; the shared vectors
+#   (tests/ijson-cases.json, also checked against ijsonProblem by ui/tests/unit/r5.test.ts) give the same problem
+ij_bad=""
+while IFS=$'\037' read -r nm hx want; do
+  # shellcheck disable=SC2059
+  printf "$(printf '%s' "$hx" | sed 's/../\\x&/g')" >"$TMP/ij.json"
+  got="$(bash -c 'eval "$(sed -n "/^ZES_AWK_LIB=/,/^'"'"'\$/p; /^sp_ijson_problem() {/,/^}/p" "$1")"; sp_ijson_problem "$2"' _ "$SCAN" "$TMP/ij.json")"
+  [ "$got" = "$want" ] || ij_bad="$ij_bad $nm(${got:-none})"
+done < <(jq -r '.cases[] | [.name, .hex, (.problem // "")] | join("\u001f")' "$TESTS_DIR/ijson-cases.json")
+[ -z "$ij_bad" ] && ok "tests/ijson-cases.json の I-JSON 判定を sp_ijson_problem で再現（RFC 8259 のみ・数値は厳密な 10 進比較）" || ng "I-JSON 判定が tests/ijson-cases.json と不一致:$ij_bad"
+
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]
