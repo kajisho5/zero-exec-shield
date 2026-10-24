@@ -3,13 +3,15 @@
   "incident_bundle": "ZES-2026-OCT-EMERGENCY-V5.2",
   "meta": {
     "generated_from": "ZES v5.2 Master Specification §3",
-    "updated_at": "2026-10-22",
+    "updated_at": "2026-10-24",
     "defang_rule": "ネットワークIoC（ドメイン/IP/URL）は [.] 形式で無害化して格納する。スキャナは照合時に [.] を . に戻す（§13）",
     "verification": "本ファイルの値は仕様書からの転記。一次情報との照合結果は docs/ioc-verification.md を参照"
   },
   "packages": [
     { "campaign": "litellm-oct2026", "eco": "pypi", "name": "litellm", "match": "versions", "bad_versions": ["1.107.0"], "safe_version": "1.106.2", "note": "cook.pth/cook.py/sitecustomize.py" },
     { "campaign": "emudhra-ca-oct2026", "eco": "pypi", "name": "certifi", "match": "vulnerable_versions", "bad_versions": [">=2019.3.9 <2026.10.19"], "safe_version": "2026.10.19", "note": "GHSA-6q48-6c7w-9gw2。emSign ECC Root CA G3 を削除（eMudhra 事案）。LiteLLM とは無関係" },
+    { "campaign": "brotli-http2shell-oct2026", "eco": "pypi", "name": "Brotli", "match": "vulnerable_versions", "bad_versions": [">=1.0.3 <1.2.1"], "safe_version": "1.2.1", "note": "CVE-2026-111497（GHSA-9v8h-qqgm-4m35。Node2Shell / HTTP2Shell）。Brotli デコーダの境界外書込、CVSS 4.0 9.2。信頼できない相手の Brotli（Content-Encoding: br）を展開する経路で RCE の可能性" },
+    { "campaign": "brotli-http2shell-oct2026", "eco": "pypi", "name": "brotlicffi", "match": "vulnerable_versions", "bad_versions": [">=1.0.3 <1.2.1.0"], "safe_version": "1.2.1.0", "note": "CVE-2026-111497（GHSA-9v8h-qqgm-4m35）。影響を受ける Brotli デコーダを同梱" },
     { "campaign": "teampcp-mini-shai-hulud", "eco": "npm", "name": "@tanstack/*", "match": "unknown_versions", "bad_versions": [], "safe_version": null, "note": "42pkg/84ver。router_init.js/tanstack_runner.js/vite_setup.mjs" },
     { "campaign": "teampcp-mini-shai-hulud", "eco": "pypi", "name": "mistralai", "match": "versions", "bad_versions": ["2.4.6"], "safe_version": "2.4.5", "note": "" },
     { "campaign": "teampcp-mini-shai-hulud", "eco": "pypi", "name": "guardrails-ai", "match": "versions", "bad_versions": ["0.10.1"], "safe_version": "0.10.0", "note": "" },
@@ -431,7 +433,7 @@
       "generic": true,
       "image_patterns": ["(^|[[:space:]/\"=])node"],
       "cves": [
-        {"id": "CVE-2026-111497", "cvss": null, "title": "Node.js Brotli デコーダの境界外書込（RCE の可能性）", "fixed": ["22.23.4", "24.22.1", "26.12.1"], "severity": "HIGH", "verification": "confirmed", "note": "ベンダー表記 high。2026-10-22 時点で NVD 未登録のため CVSS null。同リリースで CVE-2026-105482/105483/106069 (high) も修正。eMudhra 中間 CA 失効対応も含む。", "source": "https://nodejs.org/en/blog/vulnerability/october-2026-security-releases"},
+        {"id": "CVE-2026-111497", "cvss": 9.2, "title": "Node.js Brotli デコーダの境界外書込（RCE の可能性）", "fixed": ["22.23.4", "24.22.1", "26.12.1"], "severity": "HIGH", "verification": "confirmed", "note": "ベンダー表記 high。CVSS は CNA（Google）の CVSS 4.0 9.2（CVE レコード 2026-10-22 公開）。Brotli 1.0.3〜1.2.0 の脆弱性で、Node.js 同梱版の修正。同リリースで CVE-2026-105482/105483/106069 (high) も修正。eMudhra 中間 CA 失効対応も含む。", "source": "https://nodejs.org/en/blog/vulnerability/october-2026-security-releases"},
         {"id": "CVE-2026-56848", "cvss": 7.5, "title": "Node.js HTTP/2 nghttp2 再入呼び出しによるヒープ UAF", "fixed": ["22.23.2", "24.18.1", "26.5.1"], "severity": "HIGH", "verification": "confirmed", "note": "修正版は nodejs/security-wg の patched 範囲より。NVD の affected は 26.5.0/24.18.0/22.23.1 の単一版のみ列挙で不完全。同リリースの CVE-2026-56846 は 22.x/24.x のみ。", "source": "https://nodejs.org/en/blog/vulnerability/july-2026-security-releases"}
       ]
     },

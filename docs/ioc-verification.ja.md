@@ -473,3 +473,15 @@
 - **arrayref 0.3.10 のハッシュ:** 二次情報と Wiz で不一致。Wiz の値を採用。
 - **Superior（ブラウザ拡張）の ID:** THN の 31 文字表記ではなく Socket の 32 文字表記を採用。
 - **PamStealer（Wavel 亜種）と MacSync 新版:** インフラ・LaunchAgent・文字列が一致（同一ファミリーの別名の可能性）。両方を別キャンペーンとして収録。
+
+## ZES 0.5.2 で追加（2026-10-24）: CVE-2026-111497（Node2Shell / HTTP2Shell）
+
+Brotli デコーダ（`c/dec/decode.c`）の境界外書込（CWE-787 / CWE-252）。CNA は Google、CVSS 4.0 9.2（`AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H`）、2026-10-22 公開。影響: Brotli 1.0.3 以上 1.0.10 未満、1.1.0 以上 1.1.1 未満、1.2.0 以上 1.2.1 未満。信頼できない相手の Brotli を展開する経路（リクエスト本文の `Content-Encoding: br`、自分が管理しないサーバーからの応答）があるときに影響します。最初は Node.js の問題（「Node2Shell」）として報じられ、Aikido がデコーダを使う他のもの（Python のパッケージ、プロキシ、HTTP クライアント）も影響を受けると示して「HTTP2Shell」と呼び直しました。同じ CVE です。
+
+| 対象 | `rules/ioc.json` の値 | 判定 | 一次情報 |
+|---|---|---|---|
+| PyPI `Brotli` | `vulnerable_versions` `>=1.0.3 <1.2.1`、修正版 1.2.1（HIGH、`s15.pkg_vulnerable_fixed`） | 一致 | GHSA-9v8h-qqgm-4m35 https://github.com/advisories/GHSA-9v8h-qqgm-4m35 |
+| PyPI `brotlicffi` | `vulnerable_versions` `>=1.0.3 <1.2.1.0`、修正版 1.2.1.0（HIGH） | 一致 | GHSA-9v8h-qqgm-4m35 |
+| Node.js（同梱の Brotli） | 修正版 22.23.4 / 24.22.1 / 26.12.1（5.2.2 から登録済み）。`cvss` を `null` から CNA の 9.2 に更新。重大度はベンダー評価 high に合わせ HIGH のまま | 一致 | CVE レコード https://cveawg.mitre.org/api/cve/CVE-2026-111497 、https://nodejs.org/en/blog/vulnerability/october-2026-security-releases |
+
+取り込まなかったもの（2026-10-24 時点で一次情報を確認できず、https://www.aikido.dev/blog/python-packages-vulnerable-node2shell-brotli-cve-2026-111497 だけが報告）: Bun 1.4.4、Envoy 1.40.0 / 1.39.3 / 1.38.6 / 1.37.8、Istio 1.29.9 / 1.30.6 / 1.31.2、curl/libcurl と OS の `libbrotli` パッケージ（ディストリビューションは上流の版番号を変えずにバックポートするため、版番号の比較は誤判定になる）。これらは各ベンダーで確認してください。Node.js 20 以前には修正がありません。修正がない場合の緩和策（同じ Aikido の記事より）: プロキシで `Content-Encoding: br` を拒否し、クライアントで Brotli の展開を止める。`Accept-Encoding` から `br` を外すだけでは足りません。
