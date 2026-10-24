@@ -54,12 +54,14 @@ zes_lang_of_locale() {  # zes_lang_of_locale VALUE → ZES_LANG_RESOLVED
       esac ;;
   esac
 }
-ZES_LANG_ARG=""; ZES_LANG_ARG_SET=0
+ZES_LANG_ARG=""; ZES_LANG_ARG_BAD=0
 _zes_a=("$@"); _zes_i=0
 while [ "$_zes_i" -lt "${#_zes_a[@]}" ]; do
   case "${_zes_a[_zes_i]}" in
     --root|--url|--skillpact-cache) _zes_i=$((_zes_i + 1)) ;;
-    --lang) ZES_LANG_ARG_SET=1; ZES_LANG_ARG="${_zes_a[_zes_i + 1]-}"; _zes_i=$((_zes_i + 1)) ;;
+    # every --lang value is checked (not only the last one, which decides the language)
+    --lang) ZES_LANG_ARG="${_zes_a[_zes_i + 1]-}"; _zes_i=$((_zes_i + 1))
+            case "$ZES_LANG_ARG" in en|ja) ;; *) ZES_LANG_ARG_BAD=1 ;; esac ;;
   esac
   _zes_i=$((_zes_i + 1))
 done
@@ -281,9 +283,7 @@ set_mode() {
 }
 
 # --lang was read before parsing (so argument errors use it); a missing or invalid value is an argument error
-if [ "$ZES_LANG_ARG_SET" -eq 1 ]; then
-  case "$ZES_LANG_ARG" in en|ja) ;; *) arg_error cli.arg.lang ;; esac
-fi
+[ "$ZES_LANG_ARG_BAD" -eq 0 ] || arg_error cli.arg.lang
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -333,44 +333,62 @@ if [ -n "$TARGET_URL" ]; then
   esac
 fi
 
-# Message catalog (i18n/en.json and, for a Japanese terminal, i18n/ja.json): read once, by one awk run, into
-#   MSG_EN (findings.json: detail is always English) and MSG_LANG (the terminal). No jq: a run without jq must give the
-#   same detail and id. The files are flat JSON, one "key": "value" per line, with only \" and \\ escapes
+# Message catalog (i18n/en.json and i18n/ja.json): read once, by one awk run, into MSG_EN (findings.json: detail is
+#   always English) and MSG_LANG (the terminal). No jq: a run without jq must give the same detail and id. The files are
+#   flat JSON, one "key": "value" per line, with only \" and \\ escapes. Fail-closed (exit 64): each file must be complete
+#   ("{" first, "}" last, a comma after every entry but the last, no duplicate key), both files must have the same key
+#   set, and the cli.* / f.* / log.* keys must be exactly the ones this script was released with (ZES_CATALOG_KEYS_SHA256,
+#   the SHA-256 of those keys in C-locale order, one per line; tests/run-tests.sh checks it against i18n/en.json).
+#   A file is told apart by its name (an empty file has no line 1, so counting files by FNR would be wrong)
+ZES_CATALOG_KEYS_SHA256="f27b8c68b014fb8003d203da2222d5664ec9cd0002ec40bea0241a66794fd8d4"
 I18N_DIR="${ZES_I18N_DIR:-$SCRIPT_DIR/i18n}"
 declare -A MSG_EN=() MSG_LANG=()
 ZES_CATALOG_AWK='
-  FNR == 1 { fi++ }
+  function fail() { bad = 1; exit }
+  FNR == 1 { t = (FILENAME == ENVIRON["ZES_CAT_EN"]) ? "E" : (FILENAME == ENVIRON["ZES_CAT_JA"]) ? "J" : ""
+             if (t == "" || (t in opened)) fail() }
   { line = $0 }
-  line == "{" || line == "}" { next }
+  FNR == 1 { if (line != "{") fail(); opened[t] = 1; next }
+  (t in closed) { fail() }
+  line == "}" { if (comma[t] || !cnt[t]) fail(); closed[t] = 1; next }
   {
-    if (substr(line, 1, 1) != "\"") { bad = 1; exit }
+    if ((t in comma) && !comma[t]) fail()
+    if (substr(line, 1, 1) != "\"") fail()
     i = index(substr(line, 2), "\""); key = substr(line, 2, i - 1)
-    if (key !~ /^[a-z0-9_.]+$/ || substr(line, i + 2, 3) != ": \"") { bad = 1; exit }
+    if (key !~ /^[a-z0-9_.]+$/ || substr(line, i + 2, 3) != ": \"") fail()
     r = substr(line, i + 5); v = ""; n = length(r); done = 0
     for (k = 1; k <= n; k++) {
       c = substr(r, k, 1)
-      if (c == "\\") { k++; c = substr(r, k, 1); if (c != "\"" && c != "\\") { bad = 1; exit } v = v c; continue }
+      if (c == "\\") { k++; c = substr(r, k, 1); if (c != "\"" && c != "\\") fail(); v = v c; continue }
       if (c == "\"") { done = 1; break }
       v = v c }
     rest = substr(r, k + 1)
-    if (!done || (rest != "" && rest != ",")) { bad = 1; exit }
-    printf "%s\037%s\037%s\n", (fi == 1 ? "E" : "J"), key, v; nk++ }
-  END { if (!bad && nk > 0) print "OK" }'
+    if (!done || (rest != "" && rest != ",")) fail()
+    if ((t SUBSEP key) in seen) fail()
+    seen[t, key] = 1; comma[t] = (rest == ","); cnt[t]++
+    printf "%s\037%s\037%s\n", t, key, v }
+  END {
+    if (bad || !("E" in closed) || !("J" in closed) || cnt["E"] != cnt["J"]) exit
+    for (x in seen) { split(x, p, SUBSEP); if (!(((p[1] == "E" ? "J" : "E") SUBSEP p[2]) in seen)) exit }
+    print "OK" }'
 zes_load_catalog() {
-  local en="$I18N_DIR/en.json" ja="$I18N_DIR/ja.json" f line t k ok=0
-  local -a files=("$en")
-  [ "$ZES_LANG_RESOLVED" = ja ] && files+=("$ja")
-  for f in "${files[@]}"; do { [ -f "$f" ] && [ -r "$f" ]; } || cli_fail cli.err.catalog path="$f"; done
+  local en="$I18N_DIR/en.json" ja="$I18N_DIR/ja.json" f line t k ok=0 sum
+  for f in "$en" "$ja"; do { [ -f "$f" ] && [ -r "$f" ]; } || cli_fail cli.err.catalog path="$f"; done
   local -a lines=()
-  mapfile -t lines < <(awk "$ZES_CATALOG_AWK" "${files[@]}" 2>/dev/null)
+  mapfile -t lines < <(ZES_CAT_EN="$en" ZES_CAT_JA="$ja" awk "$ZES_CATALOG_AWK" "$en" "$ja" 2>/dev/null)
   for line in "${lines[@]}"; do
     case "$line" in
       OK) ok=1 ;;
-      E"$US_CHAR"*) line="${line#E"$US_CHAR"}"; k="${line%%"$US_CHAR"*}"; t="${line#*"$US_CHAR"}"; MSG_EN["$k"]="$t"; MSG_LANG["$k"]="$t" ;;
-      J"$US_CHAR"*) line="${line#J"$US_CHAR"}"; k="${line%%"$US_CHAR"*}"; t="${line#*"$US_CHAR"}"; MSG_LANG["$k"]="$t" ;;
+      E"$US_CHAR"*) line="${line#E"$US_CHAR"}"; k="${line%%"$US_CHAR"*}"; t="${line#*"$US_CHAR"}"; MSG_EN["$k"]="$t"
+                    [ "$ZES_LANG_RESOLVED" = ja ] || MSG_LANG["$k"]="$t" ;;
+      J"$US_CHAR"*) line="${line#J"$US_CHAR"}"; k="${line%%"$US_CHAR"*}"; t="${line#*"$US_CHAR"}"
+                    [ "$ZES_LANG_RESOLVED" = ja ] && MSG_LANG["$k"]="$t" ;;
     esac
   done
-  [ "$ok" -eq 1 ] || cli_fail cli.err.catalog path="${files[*]}"
+  [ "$ok" -eq 1 ] || cli_fail cli.err.catalog path="$en $ja"
+  sum="$(for k in "${!MSG_EN[@]}"; do case "$k" in cli.*|f.*|log.*) printf '%s\n' "$k" ;; esac; done | sort \
+    | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; } 2>/dev/null)"
+  [ "${sum%% *}" = "$ZES_CATALOG_KEYS_SHA256" ] || cli_fail cli.err.catalog path="$en $ja"
 }
 US_CHAR=$'\037'
 zes_load_catalog

@@ -585,7 +585,8 @@ env -u LC_ALL LANG=C "$SCAN" --bogus >/dev/null 2>"$TMP/lang-arg.err"; rc=$?
 ZES_I18N_DIR="$TMP/no-catalog" run_scan "$FIX/chaindrop" quick "$FIX/_home" >/dev/null; rc=$?
 { [ "$rc" = 64 ] && grep -q -F "ZES: Cannot read the message catalog: $TMP/no-catalog/en.json" "$TMP/stderr.txt"; } \
   && ok "メッセージカタログを読めない場合は exit 64" || ng "読めないメッセージカタログで exit 64 にならない（rc=$rc）"
-mkdir -p "$TMP/bad-catalog" && printf '{\n"f.x": "a\\u0041"\n}\n' >"$TMP/bad-catalog/en.json"
+# (a well-formed ja.json beside it, so that only the escape makes it fail)
+mkdir -p "$TMP/bad-catalog" && cp "$REPO/i18n/ja.json" "$TMP/bad-catalog/" && sed '2s/": "/": "\\u0041/' "$REPO/i18n/en.json" >"$TMP/bad-catalog/en.json"
 ZES_I18N_DIR="$TMP/bad-catalog" run_scan "$FIX/chaindrop" quick "$FIX/_home" >/dev/null; rc=$?
 [ "$rc" = 64 ] && ok "形式の不正なメッセージカタログ（\\u エスケープ）は exit 64" || ng "形式の不正なカタログを受理（rc=$rc）"
 
