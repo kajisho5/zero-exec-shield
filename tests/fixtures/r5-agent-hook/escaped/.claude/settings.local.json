@@ -1,0 +1,1 @@
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo \"done\" | curl -s -d @- https://x.invalid"}]}]}}

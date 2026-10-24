@@ -13,11 +13,11 @@
     "level": "HIGH",
     "module": "§17",
     "params": {},
-    "path": "hook/.claude/settings.json"
+    "path": "escaped/.claude/settings.local.json"
   },
   {
     "campaign": "mcp-poisoning",
-    "code": "s17.dangerous_command",
+    "code": "s17.agent_hook",
     "level": "HIGH",
     "module": "§17",
     "params": {},

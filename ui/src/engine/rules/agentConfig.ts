@@ -41,6 +41,43 @@ function collectServers(obj: unknown, out: Server[], name = '', path: (string | 
 }
 
 
+/** Agent config files whose top-level "hooks" holds agent hooks (the CLI's AGENT_HOOK_FILES_RE) */
+const AGENT_HOOK_FILE = /(^|\/)\.(claude|cursor|gemini)\/(settings(\.local)?|hooks)\.json$/;
+/** An object inside a hook entry /hooks/<Event>/<i>/… is a hook, not an MCP server (the CLI's mcpq with $hk == 1) */
+const inHookEntry = (p: (string | number)[]) => p.length >= 3 && p[0] === 'hooks' && typeof p[1] === 'string' && typeof p[2] === 'number';
+
+type HookEntry = { pointer: string; cmds: string[]; lines: string[] };
+/** Same as HOOK_ENTRY_CMDS of the CLI: the entries hooks.<Event>[i] in order, with the .command strings inside each and the
+ *  lines of command + args of every object inside it that has command (as collectServers). null when the text does not parse */
+function hookEntries(text: string): { fmt: 'json' | 'jsonc'; entries: HookEntry[] } | null {
+  let fmt: 'json' | 'jsonc' = 'json';
+  let j: unknown;
+  try { j = JSON.parse(text); } catch { fmt = 'jsonc'; try { j = parseJsonc(text); } catch { return null; } }
+  const hooks = j && typeof j === 'object' && !Array.isArray(j) ? (j as Record<string, unknown>)['hooks'] : undefined;
+  const entries: HookEntry[] = [];
+  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return { fmt, entries };
+  for (const [ev, arr] of Object.entries(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(arr)) continue;
+    arr.forEach((e, i) => {
+      const cmds: string[] = [];
+      const objs: Server[] = [];
+      const walk = (v: unknown): void => {
+        if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === 'object') {
+          const o = v as Record<string, unknown>;
+          if (typeof o['command'] === 'string') cmds.push(o['command']);
+          Object.values(o).forEach(walk);
+        }
+      };
+      walk(e);
+      collectServers(e, objs);
+      const lines = objs.flatMap((s) => `${s.command} ${s.args.join(' ')}`.split('\n'));
+      entries.push({ pointer: jsonPointer(['hooks', ev, i]), cmds, lines });
+    });
+  }
+  return { fmt, entries };
+}
+
 function riskOf(s: { command: string; args: string[] }): 'high' | 'medium' | 'none' {
   const line = `${s.command} ${s.args.join(' ')}`;
   return HIGH_CMD.test(line) ? 'high' : MED_CMD.test(line) ? 'medium' : 'none';
@@ -101,6 +138,8 @@ export function mcpRules(ctx: RuleCtx): void {
       // VS Code etc. allow comments and trailing commas, so read as JSONC
       try { JSON.parse(f.text); } catch { fmt = 'jsonc'; }
       try { collectServers(parseJsonc(f.text), servers); } catch { parseError = true; }
+      // Hook entries are judged by the agent-hook check below (which also applies HIGH_CMD to them)
+      if (AGENT_HOOK_FILE.test(f.relPath)) servers = servers.filter((s) => !inHookEntry(s.path));
     }
     if (parseError) {
       // An unparsable config is never reported as "no findings" (fail closed)
@@ -128,16 +167,19 @@ export function mcpRules(ctx: RuleCtx): void {
       push(ctx, { level: 'HIGH', module: '§37', campaign: 'mcp-poisoning', path: f.relPath, code: 's37.nat64', ruleId: 's37-nat64', evidenceSha: f.sha256 });
     }
   }
-  // Agent hooks (the CLI's check_s17): a .claude / .cursor / .gemini settings or hooks file with "hooks" and a command with
-  //   network access or obfuscation preselects; when it parses as JSON / JSONC, a hook entry /hooks/<Event>/<i> whose
-  //   command matches is required (a curl in mcpServers is not a hook); when it does not parse, the preselection decides
+  // Agent hooks (the CLI's check_s17): a hook entry /hooks/<Event>/<i> of a .claude / .cursor / .gemini settings or hooks
+  //   file is reported when (a) the file has "hooks" and a command with network access or obfuscation (preselection) and
+  //   a .command string inside the entry matches, or (b) the command + args of an object inside the entry match HIGH_CMD
+  //   on some line (the rule the MCP check applied to hooks before it skipped them; no preselection). npx / uvx in a hook
+  //   is not reported. A curl in mcpServers is not a hook. When the file does not parse, the preselection decides
   const HOOK_RE = /(curl|wget|base64|nc |\/dev\/tcp)/;
-  for (const f of readable(ctx).filter((x) => /(^|\/)\.(claude|cursor|gemini)\/(settings(\.local)?|hooks)\.json$/.test(x.relPath))) {
-    if (!/"hooks"[\t\v\f\r ]*:/.test(f.text) || !/"command"[\t\v\f\r ]*:[\t\v\f\r ]*"[^"\n]*(curl|wget|base64|nc |\/dev\/tcp)/.test(f.text)) continue;
-    const locators = hookLocators(f.text, (c) => HOOK_RE.test(c));
-    let parses = true;
-    try { JSON.parse(f.text); } catch { try { parseJsonc(f.text); } catch { parses = false; } }
-    if (parses && !locators.length) continue;
+  for (const f of readable(ctx).filter((x) => AGENT_HOOK_FILE.test(x.relPath))) {
+    const gate = /"hooks"[\t\v\f\r ]*:/.test(f.text) && /"command"[\t\v\f\r ]*:[\t\v\f\r ]*"[^"\n]*(curl|wget|base64|nc |\/dev\/tcp)/.test(f.text);
+    const parsed = f.text.includes('"hooks"') ? hookEntries(f.text) : null;
+    const locators: LocatorSpec[] = (parsed?.entries ?? [])
+      .filter((e) => (gate && e.cmds.some((c) => HOOK_RE.test(c))) || e.lines.some((l) => l !== '' && HIGH_CMD.test(l)))
+      .map((e) => ({ format: parsed!.fmt, pointer: e.pointer }));
+    if (!locators.length && !(gate && !parsed)) continue;
     push(ctx, { level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, code: 's17.agent_hook', ruleId: 's17-agent-hook', evidenceSha: f.sha256, locators });
   }
   // SymJack: the browser cannot fetch the link target, so a decoy name with 0 bytes is "needs manual review" (§8.3)

@@ -618,6 +618,17 @@ json_ptr_locators() {
 #   / matches $re (the unit /hooks/<Event>/<i> that claude.hook in GER removes)
 HOOK_PATHS_STR='path(.hooks? | objects | .[]? | arrays | .[] | select([.. | objects | .command? | strings] | any(ascii_downcase | contains($s | ascii_downcase))))'
 HOOK_PATHS_RE='path(.hooks? | objects | .[]? | arrays | .[] | select([.. | objects | .command? | strings] | any(test($re))))'
+# Agent hook entries (/hooks/<Event>/<i>) in document order, one record per line: pointer US H US cmdline. H is 1 when a
+#   .command string inside the entry matches $re (as HOOK_PATHS_RE). Each entry gives one record with an empty cmdline,
+#   then one record per line of command + args of every object inside it that has command (as mcpq of check_s17)
+HOOK_ENTRY_CMDS='path(.hooks? | objects | .[]? | arrays | .[]) as $p | getpath($p) as $e
+  | ("/" + ($p | map(tostring | gsub("~"; "~0") | gsub("/"; "~1")) | join("/"))) as $ptr
+  | ($e | [.. | objects | .command? | strings] | any(test($re)) | if . then "1" else "0" end) as $h
+  | $ptr + "\u001f" + $h + "\u001f" + ("", ($e | .. | select(type == "object" and has("command"))
+      | ((.command | tostring) + " " + ((.args // []) | if type == "array" then map(tostring) | join(" ") else tostring end))
+      | split("\n")[]))'
+# Agent config files whose top-level "hooks" holds agent hooks (read by the agent-hook check of check_s17)
+AGENT_HOOK_FILES_RE='/\.(claude|cursor|gemini)/(settings(\.local)?|hooks)\.json$'
 # Tasks in the VS Code tasks.json that run automatically when the folder is opened (/tasks/<i>/runOptions/runOn)
 TASK_RUNON_PATHS='path(.tasks? | arrays | .[] | objects | .runOptions? | objects | .runOn? | select(. == "folderOpen"))'
 
@@ -2982,14 +2993,22 @@ check_s17() {
   local f cmdline fmt ptr nm
   # One command per line: format US JSON pointer (location of the object that has command, e.g. /mcpServers/<name>) US command args…
   #   If command contains newlines, each line is matched separately (as before)
+  #   In agent hook files ($hk == 1) the objects inside a hook entry (/hooks/<Event>/<i>/…) are hooks, not MCP servers:
+  #   they are skipped here and judged by the agent-hook check below (which also applies MCP_DANGER_RE to them)
   local mcpq='path(.. | select(type == "object" and has("command"))) as $p
+    | select(($hk == 1 and ($p | length) >= 3 and $p[0] == "hooks" and ($p[1] | type) == "string" and ($p[2] | type) == "number") | not)
     | (if ($p | length) == 0 then "" else "/" + ($p | map(tostring | gsub("~"; "~0") | gsub("/"; "~1")) | join("/")) end) as $ptr
     | getpath($p) | ((.command | tostring) + " " + ((.args // []) | if type == "array" then map(tostring) | join(" ") else tostring end))
     | split("\n")[] | $fmt + "\u001f" + $ptr + "\u001f" + .'
+  local hk
+  local -A hookfiles=()
+  while IFS= read -r f; do [ -n "$f" ] && hookfiles[$f]=1; done < <(files_path "$AGENT_HOOK_FILES_RE")
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     local -a hi=() me=()
     local loc
+    # Only files the agent-hook check below reads (the same list), so no hook is left unchecked
+    hk=0; [ -n "${hookfiles[$f]+x}" ] && hk=1
     while IFS=$'\037' read -r fmt ptr cmdline; do
       # Without jq the pointer is unknown (loc is empty; the finding is emitted, locators are not)
       loc=""; [ "$HAVE_JQ" -eq 1 ] || [[ "$f" == *.toml ]] && loc="{\"format\":\"$fmt\",\"pointer\":$(jq_str "$ptr")}"
@@ -3005,8 +3024,8 @@ check_s17() {
         done
       elif [ "$HAVE_JQ" -eq 1 ]; then
         # If it cannot be read as strict JSON, reread it as JSONC (comments, trailing commas); if that also fails, errors[]
-        jq -r --arg fmt json "$mcpq" "$f" 2>/dev/null \
-          || jsonc_to_json "$f" | jq -r --arg fmt jsonc "$mcpq" 2>/dev/null \
+        jq -r --arg fmt json --argjson hk "$hk" "$mcpq" "$f" 2>/dev/null \
+          || jsonc_to_json "$f" | jq -r --arg fmt jsonc --argjson hk "$hk" "$mcpq" 2>/dev/null \
           || record_error "§17" "mcp_config_parse_failed:$f"
       else
         # Without jq: join "command" and the "args" that follows it into one line (on separate lines "bash" and "-c" would not be linked).
@@ -3039,18 +3058,41 @@ check_s17() {
       high "mcp-poisoning" "$l" s17.symjack_decoy target="$t"
     fi
   done <"$LINKS_LIST"
-  # Agent hooks (network access/obfuscation in the hooks of .claude/settings.json). The file-wide grep only preselects:
-  #   when the file can be read as JSON / JSONC, the finding needs a hook entry (/hooks/<Event>/<i>) whose command matches,
-  #   so a curl in mcpServers is not an agent hook. Without jq, or when the file cannot be parsed, the grep decides (fail-closed)
-  local hl
+  # Agent hooks (network access/obfuscation in the hooks of .claude/settings.json). A hook entry (/hooks/<Event>/<i>) is
+  #   reported when (a) the file-wide grep preselects the file and a .command string inside the entry matches, or (b) the
+  #   command + args of an object inside the entry match MCP_DANGER_RE on some line (case-insensitive; the rule the MCP
+  #   check applied to hooks before it skipped them; no preselection). npx / uvx in a hook is not reported (s17.npx is
+  #   about unpinned MCP server packages). A curl in mcpServers is not an agent hook. Without jq, or when the file cannot
+  #   be parsed, the preselection decides (fail-closed)
+  local hl gate ptr h ok first
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if fgrep_q '"hooks"[[:space:]]*:' "$f" && fgrep_q '"command"[[:space:]]*:[[:space:]]*"[^"]*(curl|wget|base64|nc |/dev/tcp)' "$f"; then
-      hl="$(json_ptr_locators "$f" "$HOOK_PATHS_RE" --arg re '(curl|wget|base64|nc |/dev/tcp)')"
-      if [ -z "$hl" ] && [ "$HAVE_JQ" -eq 1 ] && { jq empty "$f" >/dev/null 2>&1 || jsonc_to_json "$f" | jq empty >/dev/null 2>&1; }; then continue; fi
+    gate=0
+    fgrep_q '"hooks"[[:space:]]*:' "$f" && fgrep_q '"command"[[:space:]]*:[[:space:]]*"[^"]*(curl|wget|base64|nc |/dev/tcp)' "$f" && gate=1
+    hl=""; ok=0
+    if [ "$HAVE_JQ" -eq 1 ] && fgrep_q '"hooks"' "$f"; then
+      local -A flagged=()
+      local -a order=()
+      while IFS=$'\037' read -r fmt ptr h cmdline; do
+        ok=1
+        [ -n "$ptr" ] || continue
+        [ -n "${flagged[$ptr]+x}" ] || { flagged[$ptr]=0; order+=("$fmt"$'\037'"$ptr"); }
+        [ "${flagged[$ptr]}" -eq 1 ] && continue
+        if { [ "$gate" -eq 1 ] && [ "$h" = 1 ]; } || { [ -n "$cmdline" ] && printf '%s' "$cmdline" | grep_q -i -E -- "$MCP_DANGER_RE"; }; then flagged[$ptr]=1; fi
+      done < <(
+        # The leading "ok" record tells that the file parsed even when it has no hook entries
+        jq -r --arg fmt json --arg re '(curl|wget|base64|nc |/dev/tcp)' '"json\u001f\u001f0\u001f", ($fmt + "\u001f" + ('"$HOOK_ENTRY_CMDS"'))' "$f" 2>/dev/null \
+          || jsonc_to_json "$f" | jq -r --arg fmt jsonc --arg re '(curl|wget|base64|nc |/dev/tcp)' '"jsonc\u001f\u001f0\u001f", ($fmt + "\u001f" + ('"$HOOK_ENTRY_CMDS"'))' 2>/dev/null)
+      for first in "${order[@]}"; do
+        ptr="${first#*$'\037'}"
+        [ "${flagged[$ptr]}" -eq 1 ] && hl="${hl:+$hl,}{\"format\":\"${first%%$'\037'*}\",\"pointer\":$(jq_str "$ptr")}"
+      done
+      unset flagged order
+    fi
+    if [ -n "$hl" ] || { [ "$gate" -eq 1 ] && [ "$ok" -eq 0 ]; }; then
       high "mcp-poisoning" "$f" s17.agent_hook --x="$(x_locators "$hl")"
     fi
-  done < <(files_path '/\.(claude|cursor|gemini)/(settings(\.local)?|hooks)\.json$')
+  done < <(files_path "$AGENT_HOOK_FILES_RE")
   # References to .claude/.vscode/.cursor in setup.mjs
   files_named '^setup\.mjs$' | grep_l '\.(claude|vscode|cursor)(/|\b)' | while IFS= read -r f; do
     [ -n "$f" ] && [ "$f" != /dev/null ] && critical "chaindrop-keyv" "$f" s17.setup_mjs
