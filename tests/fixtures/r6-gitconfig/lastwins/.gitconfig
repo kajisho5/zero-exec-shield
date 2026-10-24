@@ -1,0 +1,3 @@
+[core]
+	fsmonitor = false
+	fsmonitor = "touch fsmonitor.ran; false"

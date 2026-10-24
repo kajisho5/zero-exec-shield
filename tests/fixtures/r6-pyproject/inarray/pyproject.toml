@@ -1,0 +1,7 @@
+[build-system]
+requires = ["setuptools"]
+x = [
+  [1],
+]
+build-backend = "evil_backend"
+backend-path = ["."]

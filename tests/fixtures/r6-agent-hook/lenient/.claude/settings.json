@@ -1,0 +1,1 @@
+{"x":01,"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"bash -c \"echo hi\""}]}]}}

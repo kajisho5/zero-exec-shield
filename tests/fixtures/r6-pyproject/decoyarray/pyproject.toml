@@ -1,0 +1,9 @@
+[tool.x]
+y = [
+  ["build-system"],
+]
+build-backend = "setuptools.build_meta"
+
+[build-system]
+requires = ["evil-backend-pkg"]
+build-backend = "evil_backend"

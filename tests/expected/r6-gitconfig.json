@@ -1,0 +1,118 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "CRITICAL",
+      "locators": [
+        {
+          "format": "text",
+          "line": 2,
+          "line_sha256": "sha256:cfe645a540a870bb4cb71bdabec4e917f38ba89e5582f135f7f2c467c18fd383"
+        }
+      ],
+      "module": "§26",
+      "path": "case/.gitconfig"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "CRITICAL",
+      "locators": [
+        {
+          "format": "text",
+          "line": 2,
+          "line_sha256": "sha256:ca5f1bfbe2656cbe1a5390fe3408d0cfa494fb0adceb589122483332cdd7a8e8"
+        }
+      ],
+      "module": "§26",
+      "path": "cont/.gitconfig"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "CRITICAL",
+      "locators": [
+        {
+          "format": "text",
+          "line": 2,
+          "line_sha256": "sha256:78b922628d7918111e5473e84b24cc419bb4c76874cc62b0750cff02a99bdf4a"
+        }
+      ],
+      "module": "§26",
+      "path": "crlf/.gitconfig"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "CRITICAL",
+      "locators": [
+        {
+          "format": "text",
+          "line": 1,
+          "line_sha256": "sha256:69817c34b1a6316daa9d27f904a02dbb251be492254ed7aa86f9cc22b8231b1d"
+        }
+      ],
+      "module": "§26",
+      "path": "header/.gitconfig"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "CRITICAL",
+      "locators": [
+        {
+          "format": "text",
+          "line": 3,
+          "line_sha256": "sha256:d1fc5a0b2a1235b4708a99d4e9bf5d0fa00a66fcfec135b9588a66f579a2f855"
+        }
+      ],
+      "module": "§26",
+      "path": "lastwins/.gitconfig"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "text",
+          "line": 1,
+          "line_sha256": "sha256:a2202e5ef0d36a1c14f7d576eb823ed5f4eb6374aadf6a65df0fe752384a7035"
+        }
+      ],
+      "module": "§26",
+      "path": "headerssh/.gitconfig"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "locators": [
+        {
+          "format": "text",
+          "line": 1,
+          "line_sha256": "sha256:9017c70122dba45f7e65f6eb266f72705ad11bc436980670a2e9a592be40f5bd"
+        }
+      ],
+      "module": "§26",
+      "path": "hookspath/.gitconfig"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

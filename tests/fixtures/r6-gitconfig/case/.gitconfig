@@ -1,0 +1,2 @@
+[CORE]
+	FsMonitor = touch fsmonitor.ran; false

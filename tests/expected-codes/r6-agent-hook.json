@@ -1,0 +1,58 @@
+[
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.agent_hook",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "cursor/.cursor/hooks.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "deep/.mcp.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.agent_hook",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "esc/.claude/settings.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.agent_hook",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "lenient/.claude/settings.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "nan/.mcp.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "nl/.mcp.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s7.folder_open",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": "tasks/.vscode/tasks.json"
+  }
+]

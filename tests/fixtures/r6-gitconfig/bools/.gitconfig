@@ -1,0 +1,5 @@
+[core]
+	fsmonitor
+	fsmonitor = yes
+	fsmonitor = 0
+	fsmonitor =
