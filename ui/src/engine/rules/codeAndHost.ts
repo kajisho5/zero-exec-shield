@@ -61,9 +61,18 @@ export function modelSupplyRules(ctx: RuleCtx): void {
 
 export function persistenceRules(ctx: RuleCtx): void {
   ctx.checks.add('s10-rc').add('s26-gitconfig').add('s26-envrc').add('s30-launchagent').add('s31-ldpreload').add('s31-autostart').add('s33-prompt').add('s35-history');
-  // ctx.vcs: the root .git/config, which the CLI reads for §26 although it does not walk the root .git
-  const rootGitConfig = ctx.vcs.filter((x): x is typeof x & { text: string } => x.text !== null && x.name === 'config');
-  for (const f of [...readable(ctx), ...rootGitConfig]) {
+  // §26 Git configs (the CLI's check_s26): ~/.gitconfig and ~/.config/git/config of a home folder, every .gitconfig, and
+  //   the configs gitDiscover found (config / config.worktree of every gitdir and commondir, include targets)
+  const home = homeLike(ctx);
+  const gitConfigs = [...new Set([...readable(ctx).filter((f) => f.name === '.gitconfig' || (home && rootRel(ctx, f) === '.config/git/config')), ...ctx.git.configs])]
+    .filter((f): f is typeof f & { text: string } => f.text !== null);
+  for (const f of gitConfigs) {
+    const p = f.relPath;
+    if (/^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=/im.test(f.text) && !/^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=[\t\v\f\r ]*(true|false)[\t\v\f\r ]*$/im.test(f.text)) push(ctx, { level: 'CRITICAL', module: '§26', campaign: null, path: p, code: 's26.fsmonitor', ruleId: 's26-gitconfig:fsmonitor', evidenceSha: f.sha256, locators: textLocators(f.text, /^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=/i, /^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=[\t\v\f\r ]*(true|false)[\t\v\f\r ]*$/i) });
+    if (/^[\t\v\f\r ]*sshCommand[\t\v\f\r ]*=/im.test(f.text)) push(ctx, { level: 'HIGH', module: '§26', campaign: null, path: p, code: 's26.ssh_command', ruleId: 's26-gitconfig:ssh', evidenceSha: f.sha256, locators: textLocators(f.text, /^[\t\v\f\r ]*sshCommand[\t\v\f\r ]*=/i) });
+    if (/^[\t\v\f\r ]*hooksPath[\t\v\f\r ]*=/im.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§26', campaign: null, path: p, code: 's26.hooks_path', ruleId: 's26-gitconfig:hooks', evidenceSha: f.sha256, locators: textLocators(f.text, /^[\t\v\f\r ]*hooksPath[\t\v\f\r ]*=/i) });
+  }
+  for (const f of readable(ctx)) {
     const p = f.relPath;
     if (RC.test(p)) {
       if (/(curl|wget)[^|#\n]*\|[\t\v\f\r ]*(ba|z)?sh/.test(f.text)) push(ctx, { level: 'HIGH', module: '§10', campaign: null, path: p, code: 's10.curl_sh', ruleId: 's10-rc:curlsh', evidenceSha: f.sha256, locators: textLocators(f.text, /(curl|wget)[^|#]*\|[\t\v\f\r ]*(ba|z)?sh/) });
@@ -78,11 +87,6 @@ export function persistenceRules(ctx: RuleCtx): void {
     }
     if (f.name === 'ld.so.preload' && f.text.split(/\r?\n/).some((l) => asciiTrim(l) !== '' && !asciiTrim(l).startsWith('#'))) {
       push(ctx, { level: 'CRITICAL', module: '§31', campaign: 'ebpf-rootkit', path: p, code: 's31.ld_so_preload', ruleId: 's31-ldpreload:file', evidenceSha: f.sha256, locators: textLocators(f.text, /.*/, /^[\t\v\f\r ]*(#|$)/) });
-    }
-    if (/(^|\/)(\.gitconfig|\.git\/config)$/.test(p) || /(^|\/)\.config\/git\/config$/.test(p)) {
-      if (/^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=/im.test(f.text) && !/^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=[\t\v\f\r ]*(true|false)[\t\v\f\r ]*$/im.test(f.text)) push(ctx, { level: 'CRITICAL', module: '§26', campaign: null, path: p, code: 's26.fsmonitor', ruleId: 's26-gitconfig:fsmonitor', evidenceSha: f.sha256, locators: textLocators(f.text, /^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=/i, /^[\t\v\f\r ]*fsmonitor[\t\v\f\r ]*=[\t\v\f\r ]*(true|false)[\t\v\f\r ]*$/i) });
-      if (/^[\t\v\f\r ]*sshCommand[\t\v\f\r ]*=/im.test(f.text)) push(ctx, { level: 'HIGH', module: '§26', campaign: null, path: p, code: 's26.ssh_command', ruleId: 's26-gitconfig:ssh', evidenceSha: f.sha256, locators: textLocators(f.text, /^[\t\v\f\r ]*sshCommand[\t\v\f\r ]*=/i) });
-      if (/^[\t\v\f\r ]*hooksPath[\t\v\f\r ]*=/im.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§26', campaign: null, path: p, code: 's26.hooks_path', ruleId: 's26-gitconfig:hooks', evidenceSha: f.sha256, locators: textLocators(f.text, /^[\t\v\f\r ]*hooksPath[\t\v\f\r ]*=/i) });
     }
     if (f.name === '.envrc' && /(curl|wget)[^|#\n]*\|[\t\v\f\r ]*(ba|z)?sh|eval[\t\v\f\r ]+"?\$\((curl|wget)/.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§26', campaign: null, path: p, code: 's26.envrc_remote', ruleId: 's26-envrc', evidenceSha: f.sha256, locators: textLocators(f.text, /(curl|wget)[^|#]*\|[\t\v\f\r ]*(ba|z)?sh|eval[\t\v\f\r ]+\"?\$\((curl|wget)/) });

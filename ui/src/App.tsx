@@ -7,7 +7,7 @@ import { Header } from './components/layout/Header';
 import { TabBar } from './components/layout/TabBar';
 import { tabCounts } from './components/layout/tabCounts';
 import { FindingList, FindingsTable } from './components/overview/Findings';
-import { BlastRadius, CliOnlyNotice, PasteCheck, Undetermined } from './components/overview/Margin';
+import { BlastRadius, CliOnlyNotice, GitOutside, PasteCheck, Undetermined } from './components/overview/Margin';
 import { Intake, SpecimenForm, type SpecimenStatus } from './components/overview/SpecimenForm';
 import { Tally } from './components/overview/Tally';
 import { SkillPactTab } from './components/skillpact/SkillPactTab';
@@ -228,6 +228,7 @@ function Scanner() {
                     {tab.id === 'overview' && !mobile && <PasteCheck onPaste={paste} />}
                     <BlastRadius items={r?.blastRadius ?? []} />
                     <CliOnlyNotice />
+                    <GitOutside paths={r?.gitOutside ?? []} />
                     <Undetermined skippedSize={r?.stats.skippedSize ?? 0} skippedBinary={r?.stats.skippedBinary ?? 0} decoys={r?.stats.zeroByteDecoys ?? 0} errors={r?.stats.errors ?? 0} />
                   </aside>
                 </div>

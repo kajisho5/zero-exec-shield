@@ -368,7 +368,7 @@ fi
 #   against i18n/en.json). So a catalog cannot drop or rename the {ref} of a detail, and every catalog text printed to the
 #   terminal is encoded (zes_enc) like other untrusted text.
 #   A file is told apart by its name (an empty file has no line 1, so counting files by FNR would be wrong)
-ZES_CATALOG_KEYS_SHA256="c2d43bd0032b08715c2a787f3cfdaa17bac827ffc97b4f5ae69843ca23e3471b"
+ZES_CATALOG_KEYS_SHA256="f5a3ccdefe7941f629ecf88df771c82a6b33a1c56a7cf50b850a2f5cba8e6e45"
 I18N_DIR="${ZES_I18N_DIR:-$SCRIPT_DIR/i18n}"
 case "$I18N_DIR" in /*) ;; *) I18N_DIR="./$I18N_DIR" ;; esac  # see IOC_FILE
 declare -A MSG_EN=() MSG_LANG=()

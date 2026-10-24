@@ -1,6 +1,6 @@
 // §7 / §17 / §20 / §37: MCP and agent configs, SymJack, IDE hooks, injection words in tool definitions
 import { push, readable, rootRel, type RuleCtx } from '../context';
-import type { McpServerView } from '../types';
+import type { FileInput, McpServerView } from '../types';
 import { parseCodexToml } from '../toml';
 import { asciiLower, clip, jsonPointer, parseJsonc, versionCmp, type LocatorSpec } from '../util';
 import { INVISIBLE_CLASS } from '../hiddenChars';
@@ -182,13 +182,27 @@ const INVISIBLE_7 = new RegExp(`[${INVISIBLE_CLASS}]|[\\u{FE00}-\\u{FE0F}]{2}`, 
 /** §7 Invisible characters, BiDi control characters and homoglyphs in AI instruction files; Git hooks. */
 export function aiAssistantRules(ctx: RuleCtx): void {
   ctx.checks.add('s7-invisible').add('s7-homoglyph').add('s7-git-hook');
-  // Git hooks (CLI check_s7): every non-sample file directly in the hooks directory of the root .git and of nested .git
-  // directories (the CLI's "$hookdir"/* glob: no dot files). gitdir: files and the commondir of a worktree are not
-  // resolved in the browser
-  for (const f of [...ctx.vcs, ...ctx.files].filter((x) => /(^|\/)\.git\/hooks\/[^/.][^/]*$/.test(x.relPath) && !x.name.endsWith('.sample'))) {
-    const bad = f.text !== null && /(curl|wget|base64|nc |\/dev\/tcp|python[0-9.]* -c|node -e)/.test(f.text);
+  // Git hooks (CLI check_s7): every non-sample file directly in a hook directory found by gitDiscover (the root .git,
+  // nested .git directories, gitdir: files, the commondir of a worktree; the CLI's "$hookdir"/* glob: no dot files).
+  // A hook the browser could not read (over 2 MiB, read error) is HIGH s7.git_hook_unread: the CLI reads it and would
+  // report HIGH if it is malicious, so it is not shown as a plain MEDIUM hook (and it counts as not scanned)
+  const hookFile = (x: FileInput) => ctx.git.hookDirs.includes(x.relPath.slice(0, x.relPath.lastIndexOf('/'))) && !x.name.startsWith('.') && !x.name.endsWith('.sample');
+  for (const f of [...ctx.vcs, ...ctx.files].filter(hookFile)) {
+    if (f.text === null) {
+      push(ctx, { level: 'HIGH', module: '§7', campaign: null, path: f.relPath, code: 's7.git_hook_unread', ruleId: 's7-git-hook' });
+      continue;
+    }
+    const bad = /(curl|wget|base64|nc |\/dev\/tcp|python[0-9.]* -c|node -e)/.test(f.text);
     push(ctx, { level: bad ? 'HIGH' : 'MEDIUM', module: '§7', campaign: null, path: f.relPath, code: bad ? 's7.git_hook_suspicious' : 's7.git_hook', ruleId: 's7-git-hook', evidenceSha: f.sha256 });
   }
+  // §41 (the CLI's check_s41): AI instruction files together with a Git hook (any non-sample file under a hook directory,
+  //   dot files and subdirectories included, as the CLI's find) or an agent hook config ("hooks" in a .claude / .cursor /
+  //   .gemini settings or hooks file) in the same tree: HIGH on the folder itself
+  ctx.checks.add('s41-instructions-hooks');
+  const hasInstr = ctx.files.some(isAiInstruction);
+  const hasHook = [...ctx.vcs, ...ctx.files].some((x) => ctx.git.hookDirs.some((d) => x.relPath.startsWith(d + '/')) && !x.name.endsWith('.sample'));
+  const hasAgentHook = readable(ctx).some((x) => /(^|\/)\.(claude|cursor|gemini)\/(settings(\.local)?|hooks)\.json$/.test(x.relPath) && x.text.includes('"hooks"'));
+  if (hasInstr && (hasHook || hasAgentHook)) push(ctx, { level: 'HIGH', module: '§41', campaign: null, path: ctx.root || null, code: 's41.instructions_and_hooks', ruleId: 's41-instructions-hooks' });
   const targets = readable(ctx).filter(isAiInstruction);
   for (const f of targets) {
     // Embedding with variation selectors (U+FE00–FE0D, U+E0100–E01EF, 2 or more consecutive U+FE00–FE0F) is covered too (same as CLI §7)
