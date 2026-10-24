@@ -143,11 +143,12 @@
   },
   {
     "campaign": null,
-    "code": "intel.infra_vulnerable",
+    "code": "intel.infra_vulnerable_cvss",
     "level": "HIGH",
     "module": "§16",
     "params": {
       "cve": "CVE-2026-111497",
+      "cvss": "9.2",
       "fixed": "22.23.4 24.22.1 26.12.1",
       "product": "nodejs",
       "version": "22.20.0"

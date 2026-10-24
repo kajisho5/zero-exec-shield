@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.2 — 2026-10-24
+
+Intelligence update for CVE-2026-111497 ("Node2Shell", renamed "HTTP2Shell" by Aikido on 2026-10-23): an out-of-bounds write in the Brotli decoder (CVSS 4.0 9.2, CNA Google) that can lead to remote code execution where Brotli from an untrusted peer is decoded. ZES already reported vulnerable Node.js runtimes; it now also reports the Python packages that bundle the decoder.
+
+- **New**: PyPI `Brotli` `>=1.0.3 <1.2.1` (fixed 1.2.1) and `brotlicffi` `>=1.0.3 <1.2.1.0` (fixed 1.2.1.0), from GHSA-9v8h-qqgm-4m35, are HIGH `s15.pkg_vulnerable_fixed` in lockfiles, requirements files and installed `*.dist-info` (campaign `brotli-http2shell-oct2026`). The CLI and the browser engine read the same `rules/ioc.json`.
+- **Changed**: the Node.js entry for CVE-2026-111497 now carries the CNA's CVSS 9.2 (it was `null` before the CVE record was published). A Node.js image finding for this CVE is therefore `intel.infra_vulnerable_cvss` (with `cvss`) instead of `intel.infra_vulnerable`, so its id changes once. The level stays HIGH (the Node.js rating is high).
+- **Not added**: Bun, Envoy, Istio, curl/libcurl and OS `libbrotli` fixed versions could not be confirmed from a primary source yet (only one secondary report), and distribution backports keep the upstream version number. `docs/ioc-verification.md` lists them with the mitigation: reject `Content-Encoding: br` at the proxy and stop decoding Brotli in clients until patched.
+- **Tests**: new fixture `brotli-http2shell` (vulnerable and fixed pins).
+
+### 日本語
+
+CVE-2026-111497（「Node2Shell」。2026-10-23 に Aikido が「HTTP2Shell」と呼び直し）の情報を更新しました。Brotli デコーダの境界外書込（CVSS 4.0 9.2、CNA は Google）で、信頼できない相手の Brotli を展開する経路があるとリモートからコードを実行される可能性があります。ZES は脆弱な Node.js をすでに報告していましたが、デコーダを同梱する Python のパッケージも報告するようにしました。
+
+- **追加**: PyPI の `Brotli` `>=1.0.3 <1.2.1`（修正版 1.2.1）と `brotlicffi` `>=1.0.3 <1.2.1.0`（修正版 1.2.1.0）を、GHSA-9v8h-qqgm-4m35 に基づき、ロックファイル・requirements・インストール済みの `*.dist-info` で HIGH の `s15.pkg_vulnerable_fixed` として報告します（キャンペーン `brotli-http2shell-oct2026`）。CLI とブラウザのエンジンは同じ `rules/ioc.json` を読みます
+- **変更**: Node.js の CVE-2026-111497 に CNA の CVSS 9.2 を入れました（CVE レコードの公開前は `null`）。このため Node.js イメージのこの CVE の finding は `intel.infra_vulnerable` ではなく `intel.infra_vulnerable_cvss`（`cvss` 付き）になり、id が 1 回だけ変わります。レベルは HIGH のまま（Node.js の評価は high）です
+- **追加しなかったもの**: Bun・Envoy・Istio・curl/libcurl・OS の `libbrotli` の修正版は、まだ一次情報で確認できません（二次情報 1 件のみ）。またディストリビューションは上流の版番号のままバックポートします。`docs/ioc-verification.md` に、修正までの緩和策（プロキシで `Content-Encoding: br` を拒否し、クライアントで Brotli を展開しない）とあわせて載せました
+- **テスト**: 新しいフィクスチャ `brotli-http2shell`（脆弱な版と修正版）
+
 ## 0.5.1 — 2026-10-24
 
 Fixes from the fourth bug hunt. The browser engine now checks Git hooks and `.python-version` and handles the root `.git` / `.hg` / `.svn` like the CLI, both sides agree on the inputs where they used to differ, a damaged message catalog stops the CLI, and a crafted file name can no longer hide a finding behind another one's id. The findings.json format stays 1.2.

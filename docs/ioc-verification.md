@@ -473,3 +473,15 @@ Import policy:
 - **Hash of arrayref 0.3.10:** secondary sources and Wiz disagree. Wiz's value was adopted.
 - **ID of Superior (browser extension):** Socket's 32-character form was adopted rather than THN's 31-character form.
 - **PamStealer (Wavel variant) and the new MacSync version:** infrastructure, LaunchAgent and strings match (possibly aliases of the same family). Both are recorded as separate campaigns.
+
+## Added in ZES 0.5.2 (2026-10-24): CVE-2026-111497 (Node2Shell / HTTP2Shell)
+
+An out-of-bounds write in the Brotli decoder (`c/dec/decode.c`, CWE-787 / CWE-252). CNA: Google; CVSS 4.0 9.2 (`AV:N/AC:L/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H`); published 2026-10-22. Affected: Brotli 1.0.3 to before 1.0.10, 1.1.0 to before 1.1.1, 1.2.0 to before 1.2.1. Exposure needs a path that decodes Brotli from an untrusted peer (`Content-Encoding: br` in a request body, or a response from a server you do not control). Researchers first reported it for Node.js ("Node2Shell"); Aikido later showed that other users of the decoder (Python packages, proxies, HTTP clients) are affected and renamed it "HTTP2Shell". It is the same CVE.
+
+| Target | Value in `rules/ioc.json` | Verdict | Primary source |
+|---|---|---|---|
+| PyPI `Brotli` | `vulnerable_versions` `>=1.0.3 <1.2.1`, fixed 1.2.1 (HIGH, `s15.pkg_vulnerable_fixed`) | Match | GHSA-9v8h-qqgm-4m35 https://github.com/advisories/GHSA-9v8h-qqgm-4m35 |
+| PyPI `brotlicffi` | `vulnerable_versions` `>=1.0.3 <1.2.1.0`, fixed 1.2.1.0 (HIGH) | Match | GHSA-9v8h-qqgm-4m35 |
+| Node.js (bundled Brotli) | fixed 22.23.4 / 24.22.1 / 26.12.1 (already present since 5.2.2); `cvss` set from `null` to the CNA's 9.2. Severity stays HIGH (vendor rating high) | Match | CVE record https://cveawg.mitre.org/api/cve/CVE-2026-111497 , https://nodejs.org/en/blog/vulnerability/october-2026-security-releases |
+
+Not imported (could not be confirmed from a primary source on 2026-10-24; reported only by https://www.aikido.dev/blog/python-packages-vulnerable-node2shell-brotli-cve-2026-111497): Bun 1.4.4, Envoy 1.40.0 / 1.39.3 / 1.38.6 / 1.37.8, Istio 1.29.9 / 1.30.6 / 1.31.2, curl/libcurl and OS `libbrotli` packages (distributions backport without changing the upstream version, so a version check would mislead). Check these with your vendor. Node.js 20 and older get no fix. Mitigation where no fix exists (from the same Aikido post): reject `Content-Encoding: br` at the proxy and stop decoding Brotli in clients; removing `br` from `Accept-Encoding` alone is not enough.
