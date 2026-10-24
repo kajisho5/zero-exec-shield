@@ -909,6 +909,28 @@ run_scan "$TMP/r5-u8" standard "$FIX/_home" | jq -e '([.findings[] | select(.cod
     and ([.errors[] | select(.reason | startswith("duplicate_finding_id:"))] | length == 0)' >/dev/null 2>&1 \
   && ok "不正バイト 0xff と文字列 \\xff の §22 が別 id の 2 件になる" || ng "不正バイトと \\xff の finding が 1 件にまとめられた"
 
+# UI 8: §7 reports every Default_Ignorable_Code_Point of tests/hidden-chars.json (both ends of every range, U+FE0F aside; the UI checks
+#   the same list in r5.test.ts), but not a lone U+FE0F after an emoji, and two variation selectors in a row count
+if python3 -I -c 'pass' 2>/dev/null; then
+  H8="$TMP/r5-hidden"; mkdir -p "$H8"
+  python3 -I - "$TESTS_DIR/hidden-chars.json" "$H8" <<'PY'
+import json, os, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+for a, b in d["ranges"]:
+    for cp in sorted({int(a, 16), int(b, 16)} - {0xFE0E, 0xFE0F}):  # a lone U+FE0E / FE0F is a presentation selector
+        os.makedirs(f"{sys.argv[2]}/h{cp:05x}", exist_ok=True)
+        open(f"{sys.argv[2]}/h{cp:05x}/CLAUDE.md", "w", encoding="utf-8").write(f"be helpful a{chr(cp)}b\n")
+for n, t in {"ok-emoji": "love ❤️\n", "two-vs": "a️️b\n"}.items():
+    os.makedirs(f"{sys.argv[2]}/{n}", exist_ok=True)
+    open(f"{sys.argv[2]}/{n}/CLAUDE.md", "w", encoding="utf-8").write(t)
+PY
+  got="$(run_scan "$H8" standard "$FIX/_home" | jq -r --arg r "$H8/" '[.findings[] | select(.code == "s7.invisible_chars") | .path | ltrimstr($r) | split("/")[0]] | sort | join(" ")')"
+  want="$(cd "$H8" && find . -mindepth 1 -maxdepth 1 -type d -name 'h*' | sed 's#^\./##' | sort | tr '\n' ' ')two-vs"
+  [ "$got" = "$want" ] && ok "§7 は Default_Ignorable_Code_Point をすべて報告（tests/hidden-chars.json、絵文字の後の U+FE0F は除く）" || ng "§7 の隠し文字の範囲が tests/hidden-chars.json と違う" "got:  $got"$'\n'"want: $want"
+else
+  printf '  SKIP §7 の隠し文字の範囲（python3 が無い）\n'
+fi
+
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

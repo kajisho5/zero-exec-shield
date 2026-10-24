@@ -2465,14 +2465,19 @@ ai_instruction_files() {
 check_s7() {
   log_section "§7"
   local f
-  # Invisible characters: embedding strings with U+200B-200F, U+202A-202E, U+2066-2069, tag characters (U+E0000-E007F), variation selectors (U+FE00-FE0D,
-  # U+E0100-E01EF, 2 or more consecutive U+FE00-FE0F. A lone U+FE0E/FE0F used for emoji presentation is not applicable)
-  local inv=$'\xe2\x80[\x8b-\x8f\xaa-\xae]|\xe2\x81[\xa0-\xa4\xa6-\xa9]|\xf3\xa0[\x80-\x81][\x80-\xbf]|\xef\xb8[\x80-\x8d]|\xf3\xa0[\x84-\x87][\x80-\xbf]|\xef\xb8[\x80-\x8f]\xef\xb8[\x80-\x8f]'
+  # Hidden characters: every Default_Ignorable_Code_Point (tests/hidden-chars.json, the same list as HIDDEN_RANGES of the
+  #   browser engine): U+00AD, U+034F, U+061C, U+115F-1160, U+17B4-17B5, U+180B-180F, U+200B-200F, U+202A-202E,
+  #   U+2060-206F, U+3164, U+FE00-FE0D, U+FEFF, U+FFA0, U+FFF0-FFF8, U+1BCA0-1BCA3, U+1D173-1D17A, U+E0000-E0FFF, and two or
+  #   more consecutive U+FE00-FE0F. A lone U+FE0E / FE0F (text / emoji presentation) is not one. A leading BOM is no text
+  local inv=$'\xc2\xad|\xcd\x8f|\xd8\x9c|\xe1\x85[\x9f\xa0]|\xe1\x9e[\xb4\xb5]|\xe1\xa0[\x8b-\x8f]|\xe2\x80[\x8b-\x8f\xaa-\xae]|\xe2\x81[\xa0-\xaf]'
+  inv+=$'|\xe3\x85\xa4|\xef\xb8[\x80-\x8d]|\xef\xbb\xbf|\xef\xbe\xa0|\xef\xbf[\xb0-\xb8]|\xf0\x9b\xb2[\xa0-\xa3]|\xf0\x9d\x85[\xb3-\xba]|\xf3\xa0[\x80-\xbf][\x80-\xbf]'
+  inv+=$'|\xef\xb8[\x80-\x8f]\xef\xb8[\x80-\x8f]'
   local cyr=$'[A-Za-z][\xd0\xd1][\x80-\xbf]|[\xd0\xd1][\x80-\xbf][A-Za-z]|[A-Za-z]\xce[\x91-\xbf]|\xce[\x91-\xbf][A-Za-z]'
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -q -a -E -- "$inv" "$f" 2>/dev/null && high "" "$f" s7.invisible_chars
-    grep -q -a -E -- "$cyr" "$f" 2>/dev/null && medium "" "$f" s7.homoglyph
+    zes_src "$f"
+    grep -q -a -E -- "$inv" "$SRC" 2>/dev/null && high "" "$f" s7.invisible_chars
+    grep -q -a -E -- "$cyr" "$SRC" 2>/dev/null && medium "" "$f" s7.homoglyph
   done < <(ai_instruction_files)
   # Git hooks (non-sample files in the hooks of the .git directly under the scan root and nested ones [including gitdir: files and the shared side of worktrees])
   local hookdir

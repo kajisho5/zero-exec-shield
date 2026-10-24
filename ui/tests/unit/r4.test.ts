@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { analyzeFiles } from '../../src/engine';
-import { INVISIBLE_CLASS } from '../../src/engine/hiddenChars';
+import { HIDDEN_CLASS } from '../../src/engine/hiddenChars';
 import type { FileInput } from '../../src/engine/types';
 import { findingId, idEsc } from '../../src/engine/util';
 import { findingText } from '../../src/i18n';
@@ -106,7 +106,7 @@ describe('⟨U+XXXX⟩ markers for zero-width and format characters (UI 12)', ()
     expect(visiblePath('a\u200d💻')).toBe('a⟨U+200D⟩💻');
   });
   it('the §7 check and the markers share one definition', async () => {
-    const inv = new RegExp(`[${INVISIBLE_CLASS}]`, 'u');
+    const inv = new RegExp(`[${HIDDEN_CLASS}]`, 'u');
     for (const c of ['\u200b', '\u2063', '\u2066', String.fromCodePoint(0xe007f), '\ufe0d', String.fromCodePoint(0xe01ef)]) {
       expect(inv.test(c)).toBe(true);
       expect(visiblePath(c)).toMatch(/^⟨U\+[0-9A-F]{4,5}⟩$/);

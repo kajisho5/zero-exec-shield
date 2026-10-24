@@ -3,7 +3,7 @@ import { push, readable, rootRel, type RuleCtx } from '../context';
 import type { FileInput, McpServerView } from '../types';
 import { parseCodexToml } from '../toml';
 import { asciiLower, clip, jsonPointer, parseJsonc, versionCmp, type LocatorSpec } from '../util';
-import { INVISIBLE_CLASS } from '../hiddenChars';
+import { INVISIBLE_7 } from '../hiddenChars';
 import { collectDeps } from './supplyChain';
 
 export { parseCodexToml };
@@ -177,7 +177,6 @@ export const isAiInstruction = (f: { name: string; relPath: string }) =>
   /^(\.cursorrules|CLAUDE\.md|CLAUDE\.local\.md|AGENTS\.md|GEMINI\.md|copilot-instructions\.md|\.windsurfrules|\.clinerules)$/.test(f.name)
   || /(^|\/)\.cursor\/rules\/[^/]+$|(^|\/)\.clinerules\/.+|(^|\/)\.github\/instructions\/.+|(^|\/)\.claude\/(.+\/)?[^/]+\.md$/.test(f.relPath);
 
-const INVISIBLE_7 = new RegExp(`[${INVISIBLE_CLASS}]|[\\u{FE00}-\\u{FE0F}]{2}`, 'u');
 
 /** §7 Invisible characters, BiDi control characters and homoglyphs in AI instruction files; Git hooks. */
 export function aiAssistantRules(ctx: RuleCtx): void {
