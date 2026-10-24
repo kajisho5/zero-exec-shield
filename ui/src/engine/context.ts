@@ -1,3 +1,4 @@
+import type { GitDiscovery } from './git';
 import type { IocDb } from './ioc';
 import type { BlastRadiusItem, ExtensionView, FileInput, McpConfigView, ScanError, WorkflowView } from './types';
 import type { FindingSpec } from './util';
@@ -14,9 +15,11 @@ export interface RuleCtx {
   checks: Set<string>;
   /** Top-level directory of the loaded folder (first element of webkitRelativePath; '' if none) */
   root: string;
-  /** Files of the root .git that the CLI reads although it prunes $ROOT/.git, .hg and .svn from its inventory:
-   *  .git/config (§26) and .git/hooks/* (§7). They are not in files, so no other rule sees them */
+  /** Files of the root .git, which the CLI prunes from its inventory but reads statically through git_discover (configs
+   *  for §26, hooks for §7 / §41). They are not in files, so no other rule sees them */
   vcs: FileInput[];
+  /** Git directories, configs and hook directories found like the CLI's git_discover (see git.ts) */
+  git: GitDiscovery;
   /** Result of homeLike() (fixed on the first call) */
   home?: boolean;
 }

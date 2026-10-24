@@ -1,0 +1,42 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "text",
+          "line": 2,
+          "line_sha256": "sha256:7c11042c4cde7ab6864b937b78e5dc08c8889281602dd0762041b44362688027"
+        }
+      ],
+      "module": "§26",
+      "path": "e/.gitconfig"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
+      "level": "HIGH",
+      "module": "§5",
+      "path": "a/.python-version"
+    },
+    {
+      "campaign": "emudhra-ca-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
+      "level": "HIGH",
+      "module": "§6",
+      "path": "c/.nvmrc"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

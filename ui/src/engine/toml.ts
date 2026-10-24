@@ -17,9 +17,14 @@ type Rec = { t: 's' | 'a' | 't' | 'o'; p: string[]; v: string };
 
 class TomlError extends Error {}
 
+/** Maximum nesting of arrays and inline tables. Codex CLI reads its config with the Rust toml crate (0.9), whose parser stops
+ *  at a depth above 80 ("cannot recurse further; max recursion depth met": toml_parser RecursionGuard, LIMIT = 80). The CLI
+ *  (codex_toml_mcp_commands) uses the same limit. */
+export const TOML_MAX_DEPTH = 80;
+
 function tokenize(src: string, recs: Rec[]): void {
   // Equivalent of text_lines: drop a leading BOM and the CR at the end of each line
-  const S = src.replace(/^﻿/, '').replace(/\r(?=\n|$)/g, '');
+  const S = src.replace(/\r(?=\n|$)/g, '');
   const n = S.length;
   let i = 0;
   let line = 1;
@@ -125,26 +130,30 @@ function tokenize(src: string, recs: Rec[]): void {
     }
   };
   const rec = (t: Rec['t'], p: string[], v: string) => { recs.push({ t, p, v }); };
+  // Arrays and inline tables nest at most TOML_MAX_DEPTH deep (the limit of the TOML parser of Codex CLI); deeper is a parse
+  // error, as in the CLI
+  let depth = 0;
   const value = (p: string[]): void => {
     const c = ch();
+    if ((c === '[' || c === '{') && ++depth > TOML_MAX_DEPTH) perr('nesting_too_deep');
     if (c === '"') { rec('s', p, ch(1) === '"' && ch(2) === '"' ? mlstr('"') : bstr()); return; }
     if (c === "'") { rec('s', p, ch(1) === "'" && ch(2) === "'" ? mlstr("'") : lstr()); return; }
     if (c === '[') {
       i++; let idx = 0; rec('a', p, '');
       for (;;) {
         skipWsNl(); if (i >= n) perr('unterminated_array');
-        if (ch() === ']') { i++; return; }
+        if (ch() === ']') { i++; depth--; return; }
         value([...p, String(idx)]); idx++;
         skipWsNl();
         const d = ch();
         if (d === ',') { i++; continue; }
-        if (d === ']') { i++; return; }
+        if (d === ']') { i++; depth--; return; }
         perr('bad_array');
       }
     }
     if (c === '{') {
       i++; rec('t', p, ''); skipWsNl();
-      if (ch() === '}') { i++; return; }
+      if (ch() === '}') { i++; depth--; return; }
       for (;;) {
         skipWsNl();
         const kp = [...p, ...key()];
@@ -152,7 +161,7 @@ function tokenize(src: string, recs: Rec[]): void {
         value(kp); skipWsNl();
         const d = ch();
         if (d === ',') { i++; continue; }
-        if (d === '}') { i++; return; }
+        if (d === '}') { i++; depth--; return; }
         perr('bad_inline_table');
       }
     }
@@ -199,6 +208,7 @@ export function parseCodexToml(text: string): CodexTomlResult {
     problems.push(e.message);
   }
   const order: string[] = [];
+  const seen = new Set<string>();
   const cmd = new Map<string, string>();
   const args = new Map<string, string[]>();
   const bad = new Map<string, string>();
@@ -207,12 +217,12 @@ export function parseCodexToml(text: string): CodexTomlResult {
     if (p[0] !== 'mcp_servers') continue;
     if (p.length === 1) { if (t !== 't') problems.push('unexpected_value:mcp_servers'); continue; }
     const nm = p[1]!;
-    if (!order.includes(nm)) order.push(nm);
+    if (!seen.has(nm)) { seen.add(nm); order.push(nm); }
     if (p.length === 2) { if (t !== 't') problems.push(`unexpected_value:${nm}`); continue; }
     if (p[2] === 'command' && p.length === 3) { if (t === 's') cmd.set(nm, v); else bad.set(nm, 'unparsed_command'); continue; }
     if (p[2] === 'args') {
       // args accepts both an array (per element) and a string (one argument)
-      if (t === 's' && (p.length === 3 || p.length === 4)) args.set(nm, [...(args.get(nm) ?? []), v]);
+      if (t === 's' && (p.length === 3 || p.length === 4)) { const a = args.get(nm); if (a) a.push(v); else args.set(nm, [v]); }
       else if (!(p.length === 3 && t === 'a')) bad.set(nm, 'unparsed_args');
       continue;
     }

@@ -1,0 +1,9 @@
+[project]
+name = "x"
+description = """
+build-backend = "setuptools.build_meta"
+"""
+
+[build-system]
+requires = []
+build-backend = "evil_backend"

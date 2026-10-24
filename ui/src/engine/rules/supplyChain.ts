@@ -1,7 +1,7 @@
 // §2 / §15 / §25 / §36 / §41: matching of file names, hashes, package.json and lockfiles
-import { atRoot, push, readable, type RuleCtx } from '../context';
+import { atRoot, push, readable, rootRel, type RuleCtx } from '../context';
 import type { IocPackage } from '../ioc';
-import { basename, dirname, parseJsonc, versionMatches } from '../util';
+import { asciiLower, asciiTrim, basename, dirname, parseJsonc, versionMatches } from '../util';
 import type { FindingRelated } from '../types';
 
 export function filenameRules(ctx: RuleCtx): void {
@@ -36,7 +36,7 @@ export function filenameRules(ctx: RuleCtx): void {
     if (n === 'transformers.pyz') {
       push(ctx, { level: 'CRITICAL', module: '§36', campaign: 'hf-supply-chain', path: f.relPath, code: 's36.transformers_pyz', ruleId: 's36-pyz', evidenceSha: f.sha256 });
     }
-    if (n.toLowerCase() === 'git.exe' && atRoot(ctx, f)) {
+    if (asciiLower(n) === 'git.exe' && atRoot(ctx, f)) {
       push(ctx, { level: 'CRITICAL', module: '§41', campaign: null, path: f.relPath, code: 's41.git_exe', ruleId: 's41-gitexe', evidenceSha: f.sha256 });
     }
   }
@@ -44,17 +44,17 @@ export function filenameRules(ctx: RuleCtx): void {
 
 /** Standard import lines in .pth (same as CLI PTH_SAFE_RE; only those matching the whole line are allowed) */
 const PTH_SAFE = [
-  /^\s*import\s+_virtualenv\s*$/,
+  /^[\t\v\f\r ]*import[\t\v\f\r ]+_virtualenv[\t\v\f\r ]*$/,
   /^import os; var = 'SETUPTOOLS_USE_DISTUTILS'; enabled = os\.environ\.get\(var, '(local|stdlib)'\) == 'local'; enabled and __import__\('_distutils_hack'\)\.add_shim\(\); *$/,
-  /^\s*import\s+(__editable___[A-Za-z0-9_]+_finder|_editable_impl_[A-Za-z0-9_]+)\s*(;\s*(__editable___[A-Za-z0-9_]+_finder|_editable_impl_[A-Za-z0-9_]+)\.install\([^()]*\)\s*)?$/,
+  /^[\t\v\f\r ]*import[\t\v\f\r ]+(__editable___[A-Za-z0-9_]+_finder|_editable_impl_[A-Za-z0-9_]+)[\t\v\f\r ]*(;[\t\v\f\r ]*(__editable___[A-Za-z0-9_]+_finder|_editable_impl_[A-Za-z0-9_]+)\.install\([^()]*\)[\t\v\f\r ]*)?$/,
 ];
-const PTH_DANGER = /(^|[^A-Za-z0-9_])(exec|eval|compile|getattr|popen|system|__import__)\s*\(|b64decode|subprocess|urllib|socket|fromhex|marshal|zlib|codecs|pickle|ctypes|requests/;
+const PTH_DANGER = /(^|[^A-Za-z0-9_])(exec|eval|compile|getattr|popen|system|__import__)[\t\v\f\r ]*\(|b64decode|subprocess|urllib|socket|fromhex|marshal|zlib|codecs|pickle|ctypes|requests/;
 
 /** §2 Import lines in .pth (exec-ed on every Python start; same as CLI check_s2). Non-standard forms are MEDIUM, those involving execution or network access HIGH */
 export function pthRules(ctx: RuleCtx): void {
   ctx.checks.add('s2-pth');
   for (const f of readable(ctx).filter((x) => x.name.endsWith('.pth'))) {
-    const imports = f.text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => /^\s*import\s/.test(l) && !PTH_SAFE.some((r) => r.test(l)));
+    const imports = f.text.split(/\r?\n/).filter((l) => /^[\t\v\f\r ]*import[\t\v\f\r ]/.test(l) && !PTH_SAFE.some((r) => r.test(l)));
     if (!imports.length) continue;
     const bad = imports.some((l) => PTH_DANGER.test(l));
     push(ctx, {
@@ -68,11 +68,10 @@ export function pthRules(ctx: RuleCtx): void {
 export type Dep = { eco: 'npm' | 'pypi' | 'cargo' | 'packagist' | 'gem' | 'go'; name: string; version: string; path: string; sha: string | null };
 
 function normPypi(n: string): string {
-  return n.toLowerCase().replace(/[-_.]+/g, '-'); // PEP 503
+  return asciiLower(n).replace(/[-_.]+/g, '-'); // PEP 503
 }
 
-const noBom = (t: string) => (t.charCodeAt(0) === 0xfeff ? t.slice(1) : t);
-const lines = (t: string) => noBom(t).split(/\r?\n/);
+const lines = (t: string) => t.split(/\r?\n/);
 
 /** packages of package-lock v2/v3 and the nested dependencies of v1 (same as the jq of CLI build_deps). */
 function npmLockDeps(j: unknown, path: string, sha: string | null, out: Dep[]): void {
@@ -109,7 +108,7 @@ function yarnSpecName(spec: string): string {
   if (range.startsWith('npm:')) {
     const target = range.slice(4);
     const t = nameEnd(target);
-    if (t > 0 && /^(@[^/@]+\/[^/@]+|[^@/\s]+)$/.test(target.slice(0, t))) return target.slice(0, t);
+    if (t > 0 && /^(@[^/@]+\/[^/@]+|[^@/\t\n\v\f\r ]+)$/.test(target.slice(0, t))) return target.slice(0, t);
   }
   return spec.slice(0, at);
 }
@@ -131,8 +130,8 @@ export function yarnLockDeps(text: string): { name: string; version: string }[] 
     }
     if (!n) continue;
     const v = /^ {2}version:? +(.*)$/.exec(l);
-    if (v && ver === null) { ver = (v[1] ?? '').replace(/"/g, '').trim(); continue; }
-    const r = /^ {2}resolution:? +"?([^"]*)"?\s*$/.exec(l);
+    if (v && ver === null) { ver = asciiTrim((v[1] ?? '').replace(/"/g, '')); continue; }
+    const r = /^ {2}resolution:? +"?([^"]*)"?[\t\v\f\r ]*$/.exec(l);
     if (r) { const at = nameEnd(r[1] ?? ''); if (at > 0) res = (r[1] ?? '').slice(0, at); }
   }
   flush();
@@ -144,7 +143,7 @@ export function yarnLockDeps(text: string): { name: string; version: string }[] 
 export function pnpmLockDeps(text: string): { name: string; version: string }[] {
   const out: { name: string; version: string }[] = [];
   for (const l of lines(text)) {
-    const k = /^ {2}(['"]?)(\/?[^ '"].*?)\1:(\s.*)?$/.exec(l);
+    const k = /^ {2}(['"]?)(\/?[^ '"].*?)\1:([\t\v\f\r ].*)?$/.exec(l);
     if (!k?.[2]) continue;
     const s = k[2].replace(/^\//, '');
     const m = /^(@[^/@]+\/[^/@]+|[^/@]+)@([0-9].*)$/.exec(s) ?? /^(@[^/@]+\/[^/@]+|[^/@]+)\/([0-9].*)$/.exec(s);
@@ -191,38 +190,38 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
   for (const f of readable(ctx)) {
     const add = (eco: Dep['eco'], xs: { name: string; version: string }[]) => { for (const x of xs) out.push({ eco, name: x.name, version: x.version, path: f.relPath, sha: f.sha256 }); };
     if (f.name === 'package-lock.json' || f.name === 'npm-shrinkwrap.json') {
-      try { npmLockDeps(JSON.parse(noBom(f.text)), f.relPath, f.sha256, out); } catch { parseFailed(f.relPath); }
+      try { npmLockDeps(JSON.parse(f.text), f.relPath, f.sha256, out); } catch { parseFailed(f.relPath); }
     } else if (f.name === 'yarn.lock') {
       add('npm', yarnLockDeps(f.text));
     } else if (f.name === 'pnpm-lock.yaml') {
       add('npm', pnpmLockDeps(f.text));
-    } else if (f.name === 'package.json' && /\/node_modules\/(@[^/]+\/)?[^/]+\/package\.json$/.test('/' + f.relPath)) {
+    } else if (f.name === 'package.json' && /\/node_modules\/(@[^/]+\/)?[^/]+\/package\.json$/.test('/' + rootRel(ctx, f))) {
       // As in the CLI, the name comes from the path (after the last node_modules/) and the version from the top-level "version" (empty if none; used for any_version etc.)
-      const name = /.*\/node_modules\/((@[^/]+\/)?[^/]+)\/package\.json$/.exec('/' + f.relPath)?.[1] ?? '';
+      const name = /.*\/node_modules\/((@[^/]+\/)?[^/]+)\/package\.json$/.exec('/' + rootRel(ctx, f))?.[1] ?? '';
       let version = '';
       try {
-        const j = JSON.parse(noBom(f.text)) as unknown;
+        const j = JSON.parse(f.text) as unknown;
         const v = j && typeof j === 'object' && !Array.isArray(j) ? (j as Record<string, unknown>)['version'] : undefined;
         if (typeof v === 'string') version = v.replace(/[\t\r\n]/g, '');
       } catch { parseFailed(f.relPath); }
       out.push({ eco: 'npm', name, version, path: f.relPath, sha: f.sha256 });
     } else if (f.name === 'Cargo.lock') {
       // name / version of [[package]] blocks (same as CLI build_deps)
-      for (const b of noBom(f.text).split(/^\[\[package\]\]\s*$/m).slice(1)) {
-        const n = /^name\s*=\s*"([^"]+)"/m.exec(b)?.[1];
-        const v = /^version\s*=\s*"([^"]+)"/m.exec(b)?.[1];
+      for (const b of f.text.split(/^\[\[package\]\][\t\v\f\r ]*$/m).slice(1)) {
+        const n = /^name[\t\v\f\r ]*=[\t\v\f\r ]*"([^"]+)"/m.exec(b)?.[1];
+        const v = /^version[\t\v\f\r ]*=[\t\v\f\r ]*"([^"]+)"/m.exec(b)?.[1];
         if (n && v) out.push({ eco: 'cargo', name: n, version: v, path: f.relPath, sha: f.sha256 });
       }
     } else if (f.name === 'composer.lock') {
       try {
-        const j = JSON.parse(noBom(f.text)) as { packages?: { name?: unknown; version?: unknown }[]; 'packages-dev'?: { name?: unknown; version?: unknown }[] };
+        const j = JSON.parse(f.text) as { packages?: { name?: unknown; version?: unknown }[]; 'packages-dev'?: { name?: unknown; version?: unknown }[] };
         for (const p of [...(Array.isArray(j.packages) ? j.packages : []), ...(Array.isArray(j['packages-dev']) ? j['packages-dev'] : [])]) {
           if (p && typeof p.name === 'string' && typeof p.version === 'string') out.push({ eco: 'packagist', name: p.name, version: p.version.replace(/^v/, ''), path: f.relPath, sha: f.sha256 });
         }
       } catch { /* noop */ }
     } else if (f.name === 'go.sum') {
       for (const line of lines(f.text)) {
-        const [mod, ver] = line.split(/\s+/);
+        const [mod, ver] = line.split(/[\t\v\f\r ]+/);
         if (mod && ver) out.push({ eco: 'go', name: mod, version: ver.replace(/\/go\.mod$/, ''), path: f.relPath, sha: f.sha256 });
       }
     } else if (f.name === 'Gemfile.lock') {
@@ -232,7 +231,7 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
       }
     } else if (/^(requirements|constraints).*\.txt$/.test(f.name)) {
       for (const line of lines(f.text)) {
-        const m = /^\s*([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?\s*===?\s*([^\s;,#]+)/.exec(line);
+        const m = /^[\t\v\f\r ]*([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?[\t\v\f\r ]*===?[\t\v\f\r ]*([^\t\n\v\f\r ;,#]+)/.exec(line);
         if (m?.[1] && m[3]) out.push({ eco: 'pypi', name: normPypi(m[1]), version: m[3], path: f.relPath, sha: f.sha256 });
       }
     } else if (f.name === 'poetry.lock' || f.name === 'uv.lock' || f.name === 'pdm.lock') {
@@ -253,7 +252,7 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
     } else if (f.name === 'deno.lock') {
       // deno.lock (v3: packages.npm, v4 and later: npm. Keys are "<name>@<version>"; from "_" on is the peer suffix)
       try {
-        const j = JSON.parse(noBom(f.text)) as { npm?: unknown; packages?: { npm?: unknown } };
+        const j = JSON.parse(f.text) as { npm?: unknown; packages?: { npm?: unknown } };
         const secs = [j?.npm, j?.packages && typeof j.packages === 'object' ? j.packages.npm : undefined];
         for (const sec of secs) {
           if (!sec || typeof sec !== 'object' || Array.isArray(sec)) continue;
@@ -267,7 +266,7 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
       ctx.errors.push({ module: '§15', reason: `lockfile_unparsed:${f.relPath}` });
     } else if (f.name === 'Pipfile.lock') {
       try {
-        const j = JSON.parse(noBom(f.text)) as Record<string, unknown>;
+        const j = JSON.parse(f.text) as Record<string, unknown>;
         const sec = (k: string) => (j[k] && typeof j[k] === 'object' && !Array.isArray(j[k]) ? (j[k] as Record<string, unknown>) : {});
         for (const [k, v] of Object.entries({ ...sec('default'), ...sec('develop') })) {
           const ver = v && typeof v === 'object' ? (v as Record<string, unknown>)['version'] : undefined;
@@ -313,12 +312,12 @@ export function packageRules(ctx: RuleCtx): void {
         ? Object.entries(sc as Record<string, unknown>).filter(([k]) => HOOK.test(k)).map(([, v]) => (typeof v === 'string' ? v : JSON.stringify(v)))
         : [];
     } catch {
-      hooks = f.text.split(/\r?\n/).filter((l) => /"(pre|post)?(install|prepare)"\s*:/.test(l));
+      hooks = f.text.split(/\r?\n/).filter((l) => /"(pre|post)?(install|prepare)"[\t\v\f\r ]*:/.test(l));
     }
     if (hooks.length) {
       if (hooks.some((h) => /(curl|wget|bash|sh -c|base64|eval|node -e|\.mjs|https?:\/\/)/.test(h))) {
         push(ctx, { level: 'HIGH', module: '§2', campaign: null, path: f.relPath, code: 's2.lifecycle_suspicious', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
-      } else if (!f.relPath.includes('node_modules/')) {
+      } else if (!/(^|\/)node_modules\//.test(rootRel(ctx, f))) {
         push(ctx, { level: 'MEDIUM', module: '§2', campaign: null, path: f.relPath, code: 's2.lifecycle_defined', ruleId: 's2-install-scripts', evidenceSha: f.sha256 });
       }
     }
@@ -341,7 +340,8 @@ export function packageRules(ctx: RuleCtx): void {
   }
 }
 
-/** Same as pkg_kind of the CLI: what is actually installed is pkg.compromised; lockfiles and dependency declarations are pkg.lockfile_compromised */
+/** Same as pkg_kind of the CLI: what is actually installed is pkg.compromised; lockfiles and dependency declarations are pkg.lockfile_compromised.
+ *  path is relative to the dropped folder (rootRel), as the CLI tests the path relative to the scan root */
 function pkgKind(path: string): string {
   return /\/node_modules\/.+\/package\.json$/.test('/' + path) || /\.(dist-info|egg-info)$/.test(path) ? 'pkg.compromised' : 'pkg.lockfile_compromised';
 }
@@ -360,7 +360,7 @@ function emitPackage(ctx: RuleCtx, p: IocPackage, d: Dep): void {
   const safe = p.safe_version || null;
   const x = match === 'vulnerable_versions'
     ? { kind: 'pkg.vulnerable', subject: { ecosystem: d.eco, package: d.name, version: d.version || null, safe_version: safe, fixed_versions: safe ? [safe] : [] } }
-    : { kind: pkgKind(d.path), subject: { ecosystem: d.eco, package: d.name, version: d.version || null, safe_version: safe, fixed_versions: [] } };
+    : { kind: pkgKind(rootRel(ctx, { relPath: d.path })), subject: { ecosystem: d.eco, package: d.name, version: d.version || null, safe_version: safe, fixed_versions: [] } };
   const related = pkgRelated(ctx, d.eco, d.name, d.path);
   const base = { ...x, ...(related ? { related } : {}), directory: /\.(dist-info|egg-info)$/.test(d.path) && !ctx.byPath.has(d.path) };
   const pk = { ecosystem: d.eco, package: d.name, version: d.version || '?' };

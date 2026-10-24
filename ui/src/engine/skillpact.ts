@@ -8,7 +8,7 @@ import { push, type RuleCtx } from './context';
 import type { DiffAnomaly, Effect, FileInput, RuleResult, Severity, SkillPactAnalysis, SkillPactDivergence, SkillPactFindingField } from './types';
 import { SEVERITY_RANK } from './types';
 import type { MsgKey } from '../i18n';
-import { basename, dirname, ere, type FCode } from './util';
+import { asciiLower, basename, dirname, ere, type FCode } from './util';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -19,88 +19,151 @@ const HIGH_EFFECTS: Effect[] = ['exec', 'network', 'spend', 'send'];
 const CONTRACT = 'skill.contract.json';
 
 // ---------------------------------------------------------------- I-JSON (spec §4.1)
-/** Detects duplicate keys, depth over 64, numbers outside ±(2^53−1), lone surrogates and invalid UTF-8 (U+FFFD). null if there is no problem.
- *  Reports one problem in the fixed priority order of the CLI's sp_ijson_problem (not the first one in the document):
- *  not JSON → not an object → duplicate member → depth → number → U+FFFD. As jq 1.7 does, a high-surrogate escape that is
- *  not followed by a low-surrogate escape is not JSON, and a lone low-surrogate escape becomes U+FFFD. */
-export function ijsonProblem(text: string): string | null {
-  const s = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-  let value: unknown;
-  try {
-    value = JSON.parse(s);
-  } catch {
-    return 'not valid JSON (or lone surrogate)';
-  }
+/** One problem of the contract / policy text, or null. The same one-pass rules as the CLI's sp_ijson_problem:
+ *  - the text must be exactly one RFC 8259 JSON value (whitespace is space, tab, LF, CR; no NaN / Infinity, leading zeros,
+ *    "+", ".5", "1." or a second document). A \uD800-\uDBFF escape not followed by a \uDC00-\uDFFF escape is also
+ *    "not valid JSON". The text is what the browser decoded (TextDecoder already removed one leading BOM, as the CLI does)
+ *  - then, in this fixed order (not the first one in the document): top-level value not an object, duplicate member name
+ *    (names compared after decoding escapes), a value nested deeper than 64 (top level = depth 1), a number whose exact
+ *    decimal value is outside ±(2^53-1) (numberOutsideSafe: the literal is compared digit by digit, no rounding), U+FFFD in
+ *    a string or name (invalid UTF-8, a lone \uDC00-\uDFFF escape, � or a literal U+FFFD; a lone surrogate code unit
+ *    counts as U+FFFD). Iterative, so any nesting depth is checked without recursion. */
+export function ijsonProblem(s: string): string | null {
+  const BAD = 'not valid JSON (or lone surrogate)';
+  const n = s.length;
   let i = 0;
-  const found = new Set<string>();
-  const ws = () => { while (i < s.length && ' \t\r\n'.includes(s[i]!)) i++; };
+  let fffd = false;
+  let dup = false;
+  let deep = false;
+  let big = false;
+  const hex4 = (h: string) => /^[0-9A-Fa-f]{4}$/.test(h);
+  class Bad extends Error {}
+  const bad = (): never => { throw new Bad(); };
+  const ws = () => { while (i < n) { const c = s.charCodeAt(i); if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) i++; else break; } };
   const str = (): string => {
-    let out = '';
-    i++; // "
-    while (i < s.length && s[i] !== '"') {
-      if (s[i] === '\\') {
-        const c = s[i + 1];
-        if (c === 'u') {
-          const u = parseInt(s.slice(i + 2, i + 6), 16);
-          if (u >= 0xd800 && u <= 0xdbff) {
-            const m = /^\\u([dD][c-fC-F][0-9a-fA-F]{2})/.exec(s.slice(i + 6, i + 12));
-            if (!m) { found.add('not valid JSON (or lone surrogate)'); out += '\ufffd'; i += 6; continue; }
-            out += String.fromCharCode(u, parseInt(m[1]!, 16)); i += 12; continue;
-          }
-          out += u >= 0xdc00 && u <= 0xdfff ? '\ufffd' : String.fromCharCode(u); i += 6; continue;
-        }
-        out += c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c === 'b' ? '\b' : c === 'f' ? '\f' : c;
-        i += 2;
-      } else out += s[i++];
-    }
     i++;
-    if (/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|\uFFFD/.test(out)) found.add('invalid UTF-8 or lone surrogate');
-    return out;
-  };
-  const val = (depth: number): void => {
-    if (depth > 64) found.add('nesting deeper than 64');
-    ws();
-    const c = s[i];
-    if (c === '{') {
-      i++; ws();
-      const seen = new Set<string>();
-      if (s[i] === '}') { i++; return; }
-      for (;;) {
-        ws();
-        const k = str();
-        if (seen.has(k)) found.add('duplicate member name');
-        seen.add(k);
-        ws(); i++; // :
-        val(depth + 1);
-        ws();
-        if (s[i] === ',') { i++; continue; }
-        i++; return;
+    const parts: string[] = [];
+    let st = i;
+    for (;;) {
+      if (i >= n) bad();
+      const c = s.charCodeAt(i);
+      if (c === 0x22) { parts.push(s.slice(st, i)); i++; return parts.join(''); }
+      if (c < 0x20) bad();
+      if (c === 0x5c) {
+        parts.push(s.slice(st, i));
+        const e = s[i + 1] ?? '';
+        const simple: Record<string, string> = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
+        if (e in simple) { parts.push(simple[e]!); i += 2; st = i; continue; }
+        if (e !== 'u') bad();
+        const h = s.slice(i + 2, i + 6);
+        if (!hex4(h)) bad();
+        let cp = parseInt(h, 16);
+        i += 6;
+        if (cp >= 0xd800 && cp <= 0xdbff) {
+          const lw = s.slice(i + 2, i + 6);
+          if (s.slice(i, i + 2) !== '\\u' || !hex4(lw) || parseInt(lw, 16) < 0xdc00 || parseInt(lw, 16) > 0xdfff) bad();
+          cp = 0x10000 + (cp - 0xd800) * 1024 + (parseInt(lw, 16) - 0xdc00);
+          i += 6;
+        } else if (cp >= 0xdc00 && cp <= 0xdfff) cp = 0xfffd;
+        if (cp === 0xfffd) fffd = true;
+        parts.push(String.fromCodePoint(cp)); st = i; continue;
       }
-    } else if (c === '[') {
-      i++; ws();
-      if (s[i] === ']') { i++; return; }
-      for (;;) {
-        val(depth + 1); ws();
-        if (s[i] === ',') { i++; continue; }
-        i++; return;
+      if (c === 0xfffd) fffd = true;
+      else if (c >= 0xd800 && c <= 0xdfff) {
+        // a surrogate pair is one character; a lone surrogate code unit is what TextDecoder would have made U+FFFD
+        const d = s.charCodeAt(i + 1);
+        if (c <= 0xdbff && d >= 0xdc00 && d <= 0xdfff) { i += 2; continue; }
+        parts.push(s.slice(st, i), '�'); fffd = true; i++; st = i; continue;
       }
-    } else if (c === '"') {
-      str();
-    } else {
-      const m = /^-?\d+(\.\d+)?([eE][+-]?\d+)?|^(true|false|null)/.exec(s.slice(i, i + 400));
-      const tok = m?.[0] ?? '';
-      i += tok.length || 1;
-      if (/^-?\d/.test(tok)) {
-        const n = Number(tok);
-        if (!Number.isFinite(n) || Math.abs(n) > Number.MAX_SAFE_INTEGER) found.add('number outside ±(2^53-1)');
-      }
+      i++;
     }
   };
-  val(1);
-  if (!found.has(IJSON_ORDER[0]!) && !isObj(value)) return 'top-level value is not an object';
-  return IJSON_ORDER.find((p) => found.has(p)) ?? null;
+  const NUM = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+  const types: ('o' | 'a')[] = [];
+  const keys: Set<string>[] = [];
+  let need: 'v' | 'v0' | 'k' | 'k0' | ':' | 'a' = 'v';
+  let top = '';
+  try {
+    for (;;) {
+      ws();
+      if (i >= n) break;
+      const c = s[i]!;
+      const d = types.length;
+      if (need === 'v' || need === 'v0') {
+        if (need === 'v0' && c === ']') { types.pop(); need = 'a'; i++; continue; }
+        if (d + 1 > 64) deep = true;
+        if (top === '') top = c;
+        if (c === '{') { types.push('o'); keys.push(new Set()); need = 'k0'; i++; }
+        else if (c === '[') { types.push('a'); keys.push(new Set()); need = 'v0'; i++; }
+        else if (c === '"') { str(); need = 'a'; }
+        else if (c === '-' || (c >= '0' && c <= '9')) {
+          NUM.lastIndex = i;
+          const m = NUM.exec(s);
+          if (!m) bad();
+          if (numberOutsideSafe(m![0])) big = true;
+          i += m![0].length; need = 'a';
+        } else if (s.startsWith('true', i) || s.startsWith('null', i)) { i += 4; need = 'a'; }
+        else if (s.startsWith('false', i)) { i += 5; need = 'a'; }
+        else bad();
+        continue;
+      }
+      if (need === 'k0' || need === 'k') {
+        if (need === 'k0' && c === '}') { types.pop(); keys.pop(); need = 'a'; i++; continue; }
+        if (c !== '"') bad();
+        const k = str();
+        const seen = keys[d - 1]!;
+        if (seen.has(k)) dup = true; else seen.add(k);
+        need = ':'; continue;
+      }
+      if (need === ':') { if (c !== ':') bad(); i++; need = 'v'; continue; }
+      if (d === 0) bad();
+      if (c === ',') { i++; need = types[d - 1] === 'o' ? 'k' : 'v'; continue; }
+      if (c === '}' && types[d - 1] === 'o') { types.pop(); keys.pop(); need = 'a'; i++; continue; }
+      if (c === ']' && types[d - 1] === 'a') { types.pop(); keys.pop(); need = 'a'; i++; continue; }
+      bad();
+    }
+    if (need !== 'a' || types.length !== 0) bad();
+  } catch (e) {
+    if (e instanceof Bad) return BAD;
+    throw e;
+  }
+  if (top !== '{') return 'top-level value is not an object';
+  if (dup) return 'duplicate member name';
+  if (deep) return 'nesting deeper than 64';
+  if (big) return 'number outside ±(2^53-1)';
+  if (fffd) return 'invalid UTF-8 or lone surrogate';
+  return null;
 }
-const IJSON_ORDER = ['not valid JSON (or lone surrogate)', 'duplicate member name', 'nesting deeper than 64', 'number outside ±(2^53-1)', 'invalid UTF-8 or lone surrogate'];
+
+/** Is the exact decimal value of a JSON number literal outside ±(2^53-1) (9007199254740991)? Compared on the digits, without
+ *  converting to a double (Number('9007199254740991.4') rounds to 2^53-1). Same rule as outside() in the CLI's sp_ijson_problem. */
+export function numberOutsideSafe(lit: string): boolean {
+  let x = lit.replace(/^-/, '');
+  let e = 0;
+  const p = x.search(/[eE]/);
+  if (p >= 0) {
+    let t = x.slice(p + 1);
+    x = x.slice(0, p);
+    const neg = t.startsWith('-');
+    t = t.replace(/^[-+]/, '').replace(/^0+/, '');
+    if (t.length > 9) return neg ? false : /[1-9]/.test(x);
+    e = (neg ? -1 : 1) * Number(t || '0');
+  }
+  const dot = x.indexOf('.');
+  const f = dot >= 0 ? x.slice(dot + 1) : '';
+  if (dot >= 0) x = x.slice(0, dot);
+  let d = (x + f).replace(/^0+/, '');
+  e -= f.length;
+  if (d === '') return false;
+  let j = d.length;
+  while (d.charCodeAt(j - 1) === 48) j--;
+  e += d.length - j;
+  d = d.slice(0, j);
+  const L = d.length + e;
+  if (L !== 16) return L > 16;
+  if (e >= 0) return d + '0'.repeat(e) > '9007199254740991';
+  return d.slice(0, 16) >= '9007199254740991';
+}
 
 // ---------------------------------------------------------------- globs (spec §6.1; same as core._glob_re of the reference implementation)
 const reEsc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -123,8 +186,8 @@ export function globRe(p: string): RegExp {
 const gmatch = (s: string, p: string) => globRe(p).test(s);
 function hostMatch(h0: string, p0: string): boolean {
   if (p0 === '@local') return h0 === '@local';
-  const h = h0.toLowerCase().replace(/\.$/, '');
-  const p = p0.toLowerCase().replace(/\.$/, '');
+  const h = asciiLower(h0).replace(/\.$/, '');
+  const p = asciiLower(p0).replace(/\.$/, '');
   if (p === '*') return true;
   const hl = h.split('.');
   const pl = p.split('.');
@@ -280,7 +343,7 @@ function analyze(c: Obj, R: RuleCtx['ioc']['skillpact'], files: string[], hashes
         const prot = [...R.integrity.protected, ...R.integrity.code_extensions.map((e) => `**/*.${e}`)];
         const toks = [...capsA.flatMap(cliTokens), ...(arr(tests['cases']) as Obj[]).flatMap((t) => (Array.isArray(t['run']) ? strs(t['run']) : strs([t['run']]))),
           ...arr(tests['setup']).flatMap((s) => (Array.isArray(s) ? strs(s) : strs([s])))];
-        const must = toks.flatMap((t) => [...t.matchAll(/\$SKILL_DIR\/([^\s'"]+)/g)].map((m) => m[1]!));
+        const must = toks.flatMap((t) => [...t.matchAll(/\$SKILL_DIR\/([^\t\n\v\f\r '"]+)/g)].map((m) => m[1]!));
         for (const rel of files) {
           if (rel === CONTRACT || rel in F) continue;
           const isProt = prot.some((p) => gmatch(rel, p)) || must.includes(rel);
@@ -319,13 +382,13 @@ function analyze(c: Obj, R: RuleCtx['ioc']['skillpact'], files: string[], hashes
 
 // ---------------------------------------------------------------- static analysis (same as CLI sp_extract / sp_observed)
 function frontmatterName(text: string): string {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/);
-  if (!/^---\s*$/.test(lines[0] ?? '')) return '';
+  const lines = text.split(/\r?\n/);
+  if (!/^---[\t\v\f\r ]*$/.test(lines[0] ?? '')) return '';
   for (let i = 1; i < lines.length; i++) {
     const l = lines[i]!;
-    if (/^---\s*$/.test(l)) return '';
+    if (/^---[\t\v\f\r ]*$/.test(l)) return '';
     if (l.startsWith('name:')) {
-      const v = l.replace(/^name:\s*/, '').replace(/\s+$/, '');
+      const v = l.replace(/^name:[\t\v\f\r ]*/, '').replace(/[\t\v\f\r ]+$/, '');
       return /^".*"$|^'.*'$/.test(v) ? v.slice(1, -1) : v;
     }
   }
@@ -337,14 +400,14 @@ function mustRefs(text: string | null | undefined): Set<string> {
   const out = new Set<string>();
   if (!text) return out;
   let c: unknown;
-  try { c = JSON.parse(text.replace(/^\uFEFF/, '')); } catch { return out; }
+  try { c = JSON.parse(text); } catch { return out; }
   if (!isObj(c)) return out;
   const toks: unknown[] = [];
   for (const cap of arr(c['capabilities'])) { const cli = isObj(cap) && isObj(cap['entry']) ? cap['entry']['cli'] : undefined; if (Array.isArray(cli)) toks.push(...cli); }
   const t = isObj(c['tests']) ? c['tests'] : {};
   for (const tc of arr(t['cases'])) { const r = isObj(tc) ? tc['run'] : undefined; if (Array.isArray(r)) toks.push(...r); else toks.push(r); }
   for (const st of arr(t['setup'])) { if (Array.isArray(st)) toks.push(...st); else toks.push(st); }
-  for (const tok of toks.filter(isStr)) for (const m of tok.matchAll(/\$SKILL_DIR\/([^\s'"]+)/g)) out.add(m[1]!);
+  for (const tok of toks.filter(isStr)) for (const m of tok.matchAll(/\$SKILL_DIR\/([^\t\n\v\f\r '"]+)/g)) out.add(m[1]!);
   return out;
 }
 
@@ -358,16 +421,16 @@ function observe(ctx: RuleCtx, files: FileInput[], policyPaths: Set<string>, pre
     if (f.name.endsWith('.md')) {
       const lines = f.text.split('\n');
       let i = 0;
-      if (/^---\s*$/.test(lines[0] ?? '')) {
+      if (/^---[\t\v\f\r ]*$/.test(lines[0] ?? '')) {
         i = 1;
-        while (i < lines.length && !/^---\s*$/.test(lines[i]!)) { const l = lines[i]!; if (l.startsWith('allowed-tools:')) tools += l + '\n'; code += l + '\n'; i++; }
+        while (i < lines.length && !/^---[\t\v\f\r ]*$/.test(lines[i]!)) { const l = lines[i]!; if (l.startsWith('allowed-tools:')) tools += l + '\n'; code += l + '\n'; i++; }
         i++;
       }
       let infence = false;
       for (; i < lines.length; i++) {
         const l = lines[i]!;
-        if (/^\s*(```|~~~)/.test(l)) {
-          if (!infence) { const lang = l.replace(/^\s*(```|~~~)\s*/, '').replace(/[\s{].*$/, '').toLowerCase(); if (R.shell_fence_langs.includes(lang)) shell = true; }
+        if (/^[\t\v\f\r ]*(```|~~~)/.test(l)) {
+          if (!infence) { const lang = asciiLower(l.replace(/^[\t\v\f\r ]*(```|~~~)[\t\v\f\r ]*/, '').replace(/[\t\v\f\r {].*$/, '')); if (R.shell_fence_langs.includes(lang)) shell = true; }
           infence = !infence;
           continue;
         }
@@ -388,11 +451,11 @@ function observe(ctx: RuleCtx, files: FileInput[], policyPaths: Set<string>, pre
   const o: Observed = {
     exec: !!pat('exec')?.test(code) || shell || /(^|[^A-Za-z])Bash([^A-Za-z]|$)/m.test(tools),
     network: !!pat('network')?.test(code) || /(WebFetch|WebSearch)/.test(tools),
-    write: !!pat('write')?.test(code.replace(/[0-9&]?>>?\s*\/dev\/null/g, '')) || /(^|[^A-Za-z])(Write|Edit|MultiEdit|NotebookEdit)([^A-Za-z]|$)/m.test(tools),
+    write: !!pat('write')?.test(code.replace(/[0-9&]?>>?[\t\v\f\r ]*\/dev\/null/g, '')) || /(^|[^A-Za-z])(Write|Edit|MultiEdit|NotebookEdit)([^A-Za-z]|$)/m.test(tools),
     spend: !!pat('spend')?.test(code), send: !!pat('send')?.test(code),
     read: !!ere(R.sensitive_read_patterns.join('|'), 'm')?.test(code), durable: false,
   };
-  const persist = R.persistence_markers.map((m) => (m === 'registry run' ? /registry\s+run|CurrentVersion\\Run|reg\s+add[^\n]*\\Run/i : ere(reEsc(m).replace(/ /g, '\\s+'), 'i')));
+  const persist = R.persistence_markers.map((m) => (m === 'registry run' ? /registry[\t\v\f\r ]+run|CurrentVersion\\Run|reg[\t\v\f\r ]+add[^\n]*\\Run/i : ere(reEsc(m).replace(/ /g, '[\\t\\v\\f\\r ]+'), 'i')));
   if (persist.some((r) => r?.test(code))) { o.durable = true; o.write = true; }
   return o;
 }
@@ -450,7 +513,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
   for (const f of ctx.files) {
     if (!f.name.endsWith('.json') || f.name === CONTRACT || f.text == null || !f.text.includes('"policy_version"')) continue;
     let p: unknown;
-    try { p = JSON.parse(f.text.replace(/^﻿/, '')); } catch { continue; }
+    try { p = JSON.parse(f.text); } catch { continue; }
     if (!isObj(p) || !('policy_version' in p) || !('defaults' in p)) continue;
     policyPaths.add(f.relPath);
     const prob = ijsonProblem(f.text);
@@ -508,7 +571,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
         hits.push({ level: 'MEDIUM', campaign: 'skillpact-invalid', path: cfile.relPath, ruleId: 's49-contract-json', code: 's49.contract_unparseable', params: { problem: prob } });
         ctx.errors.push({ module: '§49', reason: `contract_unparseable:${cfile.relPath}` });
       } else {
-        const c = JSON.parse(cfile.text!.replace(/^﻿/, '')) as Obj;
+        const c = JSON.parse(cfile.text!) as Obj;
         const files = all.map((f) => f.relPath.slice(prefix.length));
         const hashes = new Map(all.map((f) => [f.relPath.slice(prefix.length), f.sha256] as const));
         const md = ctx.byPath.get(prefix + 'SKILL.md');

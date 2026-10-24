@@ -58,7 +58,7 @@ export function debVersionCmp(a: string, b: string): number {
 /** Extracts the PHP packages used for serving (php*-fpm / -cgi / -cli, libapache2-mod-php*) from the paragraphs of dpkg status. */
 export function dpkgPhpPackages(text: string): { pkg: string; ver: string; src: string }[] {
   const out: { pkg: string; ver: string; src: string }[] = [];
-  const paras = text.replace(/^﻿/, '').replace(/\r(?=\n|$)/g, '').split(/\n{2,}/);
+  const paras = text.replace(/\r(?=\n|$)/g, '').split(/\n{2,}/);
   for (const para of paras) {
     let p = ''; let v = ''; let s = ''; let st = '';
     for (const l of para.split('\n')) {
@@ -95,7 +95,7 @@ export function phpRules(ctx: RuleCtx): void {
 
   // Container image tags (CLI detect_service_version '(^|[[:space:]/"=])php'; floating tags such as latest are handled by the FROM check)
   for (const f of readable(ctx).filter((x) => IMAGE_FILES.test(x.name))) {
-    for (const m of f.text.matchAll(/(^|[\s/"=])php:[A-Za-z0-9._-]+/gm)) {
+    for (const m of f.text.matchAll(/(^|[\t\v\f\r /"=])php:[A-Za-z0-9._-]+/gm)) {
       const tag = m[0].slice(m[0].lastIndexOf(':') + 1);
       const v = (tag.split('-')[0] ?? '').replace(/^[^0-9]*/, '');
       if (v) judge(v, f.relPath, f.sha256, 'image');
@@ -103,13 +103,13 @@ export function phpRules(ctx: RuleCtx): void {
   }
   // .tool-versions of asdf / mise (the leading "php <version>" line)
   for (const f of readable(ctx).filter((x) => x.name === '.tool-versions')) {
-    const line = f.text.split(/\r?\n/).find((l) => /^php\s+[0-9]/.test(l));
-    const v = line?.split(/\s+/)[1];
+    const line = f.text.split(/\r?\n/).find((l) => /^php[\t\v\f\r ]+[0-9]/.test(l));
+    const v = line?.split(/[\t\v\f\r ]+/)[1];
     if (v) judge(v, f.relPath, f.sha256, 'tool-versions');
   }
   // Dockerfile FROM php (floating tags are MEDIUM, otherwise reference INFO)
   for (const f of readable(ctx).filter((x) => /^(Dockerfile.*|.*\.dockerfile)$/.test(x.name))) {
-    for (const m of f.text.matchAll(/^[ \t]*FROM[ \t]+([^ \n]*\/)?php(:[^ \n]+)?/gim)) {
+    for (const m of f.text.matchAll(/^[\t\v\f\r ]*FROM[\t\v\f\r ]+([^ \n]*\/)?php(:[^ \n]+)?/gim)) {
       const line = m[0].replace(/\r$/, '');
       if (/php:.*latest/.test(line) || line.endsWith('php')) {
         push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, code: 's4.php_image_floating', ruleId: 's4-php-image:floating', evidenceSha: f.sha256 });
@@ -121,7 +121,7 @@ export function phpRules(ctx: RuleCtx): void {
   }
   // php*.ini
   for (const f of readable(ctx).filter((x) => /^php.*\.ini$/.test(x.name))) {
-    if (/^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\s;]/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§4', campaign: null, path: f.relPath, code: 's4.auto_prepend', ruleId: 's4-php-ini:auto_prepend', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\s;]/) });
+    if (/^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\t\n\v\f\r ;]/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§4', campaign: null, path: f.relPath, code: 's4.auto_prepend', ruleId: 's4-php-ini:auto_prepend', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\t\n\v\f\r ;]/) });
     if (/^[ \t]*disable_functions[ \t]*=[ \t]*\r?$/m.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, code: 's4.disable_functions_empty', ruleId: 's4-php-ini:disable_functions', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*disable_functions[ \t]*=[ \t]*$/) });
   }
   // The dpkg package DB (vendor fixed-version table; the OS from etc/os-release / usr/lib/os-release in the same root)

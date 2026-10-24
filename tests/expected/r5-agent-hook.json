@@ -1,0 +1,74 @@
+{
+  "findings": [
+    {
+      "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§17",
+      "path": "broken/.cursor/hooks.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/hooks/Stop/0"
+        }
+      ],
+      "module": "§17",
+      "path": "escaped/.claude/settings.local.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/hooks/PreToolUse/0"
+        },
+        {
+          "format": "json",
+          "pointer": "/hooks/PostToolUse/0"
+        }
+      ],
+      "module": "§17",
+      "path": "hook/.claude/settings.json"
+    },
+    {
+      "campaign": "mcp-poisoning",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "mcp.dangerous_command",
+      "level": "HIGH",
+      "locators": [
+        {
+          "format": "json",
+          "pointer": "/mcpServers/evil"
+        }
+      ],
+      "module": "§17",
+      "path": "mcp-only/.claude/settings.json"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "detail"
+      },
+      "level": "HIGH",
+      "module": "§41",
+      "path": "."
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

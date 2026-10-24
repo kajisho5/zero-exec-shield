@@ -1,0 +1,5 @@
+[project]
+readme = '''
+[build-system]
+build-backend = "evil.decoy"
+'''

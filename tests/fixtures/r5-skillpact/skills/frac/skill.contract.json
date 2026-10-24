@@ -1,0 +1,1 @@
+{"contract_version":"0.8","kind":"tool","skill":{"name":"frac","version":"1.0.0"},"permissions":{"read":{"level":"none"},"write":{"level":"none"},"network":{"level":"none"},"exec":{"level":"none"},"spend":{"level":"none"},"send":{"level":"none"}},"capabilities":[{"id":"run","summary":"x","effects":[]}],"x":{"n":9007199254740991.4}}

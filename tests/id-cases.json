@@ -1,5 +1,5 @@
 {
-  "description": "id v2 vectors (findings 1.2, ZES 0.5.1): sha256 of \"zes-id-v2|\" module \"|\" campaign \"|\" path \"|\" code \"|\" canon, each component and param value escaped (\\\\ -> \\\\\\\\, | -> \\\\|, U+001F -> \\\\u001f), canon = key=value in C-locale key order joined by U+001F. Checked by tests/run-tests.sh and ui/tests/unit/r4.test.ts.",
+  "description": "id v2 vectors (findings 1.2): sha256 of \"zes-id-v2|\" module \"|\" campaign \"|\" path \"|\" code \"|\" canon, each component and param value escaped on its original bytes (\\\\ -> \\\\\\\\, | -> \\\\|, U+001F -> \\\\u001f, since 0.5.3 a byte that is not valid UTF-8 -> \\\\xHH), canon = key=value in C-locale key order joined by U+001F. Cases with path_hex / params_hex give the bytes in hex (cli_only: they cannot occur in the browser). Checked by tests/run-tests.sh and ui/tests/unit/r4.test.ts.",
   "cases": [
     {
       "name": "plain",
@@ -84,6 +84,66 @@
       "code": "s12.pythonnousersite",
       "params": {},
       "id": "sha256:179fc032eae75aa95693a1a77d93198dcd6457bbc7890cfc171def763576853d"
+    },
+    {
+      "name": "invalid byte in a param (R5 CLI-6)",
+      "module": "§22",
+      "campaign": null,
+      "path_hex": "2f722f2e6769746875622f776f726b666c6f77732f772e796d6c",
+      "code": "s22.unpinned",
+      "params_hex": {
+        "ref": "6576696c2f61407631ff"
+      },
+      "id": "sha256:bf4bd3e02a605b35c361618366edecd6173bd03bf8ad604b9c52deca4a74f121",
+      "cli_only": "bytes that are not valid UTF-8 never reach the browser engine (TextDecoder and file names give U+FFFD)"
+    },
+    {
+      "name": "the text \\xff in a param (R5 CLI-6, must differ from the invalid byte)",
+      "module": "§22",
+      "campaign": null,
+      "path_hex": "2f722f2e6769746875622f776f726b666c6f77732f772e796d6c",
+      "code": "s22.unpinned",
+      "params_hex": {
+        "ref": "6576696c2f614076315c786666"
+      },
+      "id": "sha256:02284513748a4fb9abcfe318ac4b62494412a3bfad6d42a705c99f8748e03b50",
+      "cli_only": "bytes that are not valid UTF-8 never reach the browser engine (TextDecoder and file names give U+FFFD)"
+    },
+    {
+      "name": "invalid byte in the path",
+      "module": "§22",
+      "campaign": null,
+      "path_hex": "2f722f2e6769746875622f776f726b666c6f77732f77fe2e796d6c",
+      "code": "s22.unpinned",
+      "params_hex": {
+        "ref": "6576696c2f61407631"
+      },
+      "id": "sha256:09feebcf61e732c22e5793eb36e64639770114da0c2e5a953297d6b934ba96a0",
+      "cli_only": "bytes that are not valid UTF-8 never reach the browser engine (TextDecoder and file names give U+FFFD)"
+    },
+    {
+      "name": "the text \\xfe in the path",
+      "module": "§22",
+      "campaign": null,
+      "path_hex": "2f722f2e6769746875622f776f726b666c6f77732f775c7866652e796d6c",
+      "code": "s22.unpinned",
+      "params_hex": {
+        "ref": "6576696c2f61407631"
+      },
+      "id": "sha256:a16309611dc81fe17b055132beef3151ac88f97ecc4fdbad7ca05309c31f939a",
+      "cli_only": "bytes that are not valid UTF-8 never reach the browser engine (TextDecoder and file names give U+FFFD)"
+    },
+    {
+      "name": "truncated sequence and a CESU surrogate",
+      "module": "§22",
+      "campaign": null,
+      "path_hex": "2f722f61",
+      "code": "s22.unpinned",
+      "params_hex": {
+        "ref": "e2827ceda080"
+      },
+      "id": "sha256:0b355f755bf09541aee386ad395af467e0dd2e7c1dcc75554dc594ec960a9c12",
+      "cli_only": "bytes that are not valid UTF-8 never reach the browser engine (TextDecoder and file names give U+FFFD)"
     }
   ]
 }

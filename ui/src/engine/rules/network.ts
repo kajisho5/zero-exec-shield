@@ -1,7 +1,7 @@
 // §18 Network IoCs (file content, pasted text)
 import { push, readable, type RuleCtx } from '../context';
 import type { IocDb } from '../ioc';
-import { refang, type FCode } from '../util';
+import { asciiLower, refang, type FCode } from '../util';
 
 /** malicious = attacker infrastructure (CRITICAL) / legit = legitimate infrastructure abused in an attack (MEDIUM; beware of false positives) */
 export interface NetIoc { value: string; campaign: string; kind: 'malicious' | 'legit' }
@@ -23,12 +23,12 @@ export function networkIocs(ioc: IocDb): NetIoc[] {
   ];
   // When the same value is listed in several campaigns, the first one (campaign-specific worm_iocs take precedence)
   const seen = new Set<string>();
-  return all.filter((i) => { const k = i.value.toLowerCase(); return seen.has(k) ? false : (seen.add(k), true); });
+  return all.filter((i) => { const k = asciiLower(i.value); return seen.has(k) ? false : (seen.add(k), true); });
 }
 
 /** The last n commands of a shell history. zsh extended history (": <start time>:<elapsed seconds>;<command>") merges multi-line entries into one and strips the prefix. */
 export function lastHistoryEntries(text: string, n: number): string[] {
-  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+  const lines = text.split(/\r?\n/);
   while (lines.length && lines[lines.length - 1] === '') lines.pop();
   const ext = /^: \d+:\d+;/;
   const zsh = lines.some((x) => ext.test(x));
@@ -48,21 +48,21 @@ const HISTORY = /(^|\/)\.(bash|zsh)_history$/;
 function matched(low: string, hits: NetIoc[], all: NetIoc[]): { iocs: string; campaign: string | null } | null {
   if (!hits.length) return null;
   const occ: [number, number][] = [];
-  for (const v of new Set(hits.map((h) => h.value.toLowerCase()))) for (let i = low.indexOf(v); i >= 0; i = low.indexOf(v, i + 1)) occ.push([i, v.length]);
+  for (const v of new Set(hits.map((h) => asciiLower(h.value)))) for (let i = low.indexOf(v); i >= 0; i = low.indexOf(v, i + 1)) occ.push([i, v.length]);
   occ.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
   const found = new Set<string>();
   let end = 0;
   for (const [s, n] of occ) { if (s < end) continue; found.add(low.slice(s, s + n)); end = s + n; }
   const vals = [...found].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).slice(0, 3);
   const first = vals[0]!;
-  return { iocs: vals.join(' '), campaign: all.find((i) => i.value.toLowerCase().includes(first))?.campaign ?? hits[0]?.campaign ?? null };
+  return { iocs: vals.join(' '), campaign: all.find((i) => asciiLower(i.value).includes(first))?.campaign ?? hits[0]?.campaign ?? null };
 }
 
 export function networkRules(ctx: RuleCtx): void {
   ctx.checks.add('s18-netioc').add('s18-history-curlsh');
   // CLI check_s18: execution in curl|sh form among the last 5 shell history entries
   for (const f of readable(ctx).filter((x) => HISTORY.test(x.relPath))) {
-    if (lastHistoryEntries(f.text, 5).some((e) => /(curl|wget)[^|]*\|\s*(ba|z)?sh/.test(e))) {
+    if (lastHistoryEntries(f.text, 5).some((e) => /(curl|wget)[^|]*\|[\t\v\f\r ]*(ba|z)?sh/.test(e))) {
       push(ctx, { level: 'HIGH', module: '§18', campaign: null, path: f.relPath, code: 's18.history_curl_sh', ruleId: 's18-history-curlsh', evidenceSha: f.sha256 });
     }
   }
@@ -71,18 +71,18 @@ export function networkRules(ctx: RuleCtx): void {
   ctx.checks.add('s34-hosts');
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   for (const f of readable(ctx).filter((x) => x.name === 'hosts')) {
-    const body = f.text.split(/\r?\n/).filter((l) => !/^\s*#/.test(l)).join('\n');
+    const body = f.text.split(/\r?\n/).filter((l) => !/^[\t\v\f\r ]*#/.test(l)).join('\n');
     for (const h of ctx.ioc.protected_hosts ?? []) {
       if (new RegExp(`[ \\t]${esc(h)}([ \\t]|$)`, 'im').test(body)) push(ctx, { level: 'HIGH', module: '§34', campaign: null, path: f.relPath, code: 's34.hosts_override', params: { host: h }, ruleId: `s34-hosts:${h}`, evidenceSha: f.sha256 });
     }
-    const low = body.toLowerCase();
+    const low = asciiLower(body);
     for (const i of iocs.filter((x) => x.kind === 'malicious' && !/^[0-9.]+$/.test(x.value))) {
-      if (low.includes(i.value.toLowerCase())) push(ctx, { level: 'CRITICAL', module: '§34', campaign: null, path: f.relPath, code: 's34.hosts_c2', params: { host: i.value }, ruleId: `s34-hosts-c2:${i.value}`, evidenceSha: f.sha256 });
+      if (low.includes(asciiLower(i.value))) push(ctx, { level: 'CRITICAL', module: '§34', campaign: null, path: f.relPath, code: 's34.hosts_c2', params: { host: i.value }, ruleId: `s34-hosts-c2:${i.value}`, evidenceSha: f.sha256 });
     }
   }
   for (const f of readable(ctx)) {
-    const low = f.text.toLowerCase();
-    const hits = iocs.filter((i) => low.includes(i.value.toLowerCase()));
+    const low = asciiLower(f.text);
+    const hits = iocs.filter((i) => low.includes(asciiLower(i.value)));
     // CLI check_s18: shell history is not a network IoC file; a C2 domain / IP in it is s18.history_c2 (no campaign)
     if (HISTORY.test(f.relPath)) {
       if (hits.some((h) => h.kind === 'malicious')) push(ctx, { level: 'CRITICAL', module: '§18', campaign: null, path: f.relPath, code: 's18.history_c2', ruleId: 's18-netioc', evidenceSha: f.sha256 });
@@ -97,21 +97,21 @@ export function networkRules(ctx: RuleCtx): void {
 
 /** Rule definitions for paste evaluation. Only rules and counts are displayed (the pasted content is never redisplayed). */
 export const PASTE_RULES: { id: string; code: FCode; re: RegExp }[] = [
-  { id: 'paste-base64', code: 'paste.base64', re: /[A-Za-z0-9+/]{40,}={0,2}|base64\s+(-d|--decode)/g },
-  { id: 'paste-exec', code: 'paste.exec', re: /\b(exec|eval)\s*\(/g },
+  { id: 'paste-base64', code: 'paste.base64', re: /[A-Za-z0-9+/]{40,}={0,2}|base64[\t\v\f\r ]+(-d|--decode)/g },
+  { id: 'paste-exec', code: 'paste.exec', re: /\b(exec|eval)[\t\v\f\r ]*\(/g },
   { id: 'paste-curl', code: 'paste.curl', re: /\b(curl|wget)\b/g },
-  { id: 'paste-pipe-shell', code: 'paste.pipe_shell', re: /\|\s*(ba|z)?sh\b/g },
+  { id: 'paste-pipe-shell', code: 'paste.pipe_shell', re: /\|[\t\v\f\r ]*(ba|z)?sh\b/g },
 ];
 
 export interface PasteHit { ruleId: string; code: FCode; params: Record<string, string | number>; level: 'CRITICAL' | 'HIGH' | 'MEDIUM'; campaign: string | null }
 
 export function analyzePasteText(text: string, ioc: IocDb): PasteHit[] {
-  const low = text.toLowerCase();
+  const low = asciiLower(text);
   const out: PasteHit[] = [];
   // One finding per kind and campaign with the total count (the matched values are not shown: they are part of the text)
   const byCampaign = new Map<string, PasteHit>();
   for (const i of networkIocs(ioc)) {
-    const v = i.value.toLowerCase();
+    const v = asciiLower(i.value);
     let n = 0;
     for (let p = low.indexOf(v); p >= 0; p = low.indexOf(v, p + v.length)) n++;
     if (!n) continue;

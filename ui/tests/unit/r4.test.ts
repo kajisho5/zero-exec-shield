@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { analyzeFiles } from '../../src/engine';
-import { INVISIBLE_CLASS } from '../../src/engine/hiddenChars';
+import { HIDDEN_CLASS } from '../../src/engine/hiddenChars';
 import type { FileInput } from '../../src/engine/types';
 import { findingId, idEsc } from '../../src/engine/util';
 import { findingText } from '../../src/i18n';
@@ -19,13 +19,14 @@ const rows = async (files: FileInput[]) =>
 
 describe('id v2 escaping (CLI-4)', () => {
   const vectors = JSON.parse(readFileSync(new URL('../../../tests/id-cases.json', import.meta.url), 'utf8')) as {
-    cases: { name: string; module: string; campaign: string | null; path: string | null; code: string; params: Record<string, string>; id: string }[];
+    cases: { name: string; module: string; campaign: string | null; path: string | null; code: string; params: Record<string, string>; id: string; cli_only?: string }[];
   };
   it('escapes \\, | and U+001F', () => {
     expect(idEsc('a\\b|c\u001fd')).toBe('a\\\\b\\|c\\u001fd');
     expect(idEsc('plain')).toBe('plain');
   });
-  for (const c of vectors.cases) {
+  // cli_only vectors hold bytes that are not valid UTF-8, which the browser never sees (TextDecoder gives U+FFFD)
+  for (const c of vectors.cases.filter((x) => !x.cli_only)) {
     it(`shared vector: ${c.name}`, async () => {
       expect(await findingId(c.module, c.campaign, c.path, c.code, c.params)).toBe(c.id);
     });
@@ -105,7 +106,7 @@ describe('⟨U+XXXX⟩ markers for zero-width and format characters (UI 12)', ()
     expect(visiblePath('a\u200d💻')).toBe('a⟨U+200D⟩💻');
   });
   it('the §7 check and the markers share one definition', async () => {
-    const inv = new RegExp(`[${INVISIBLE_CLASS}]`, 'u');
+    const inv = new RegExp(`[${HIDDEN_CLASS}]`, 'u');
     for (const c of ['\u200b', '\u2063', '\u2066', String.fromCodePoint(0xe007f), '\ufe0d', String.fromCodePoint(0xe01ef)]) {
       expect(inv.test(c)).toBe(true);
       expect(visiblePath(c)).toMatch(/^⟨U\+[0-9A-F]{4,5}⟩$/);

@@ -1,0 +1,42 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§30",
+      "path": "a/LaunchAgents/a.plist"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§30",
+      "path": "a/LaunchAgents/a.plist"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§30",
+      "path": "b/LaunchAgents/b.plist"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§30",
+      "path": "d/LaunchDaemons/d.plist"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

@@ -18,7 +18,9 @@ export interface FileInput {
   name: string;
   size: number;
   lastModified: number;
-  /** Contents read as UTF-8. null when over the size limit, binary or unreadable */
+  /** Contents read as UTF-8 (null when over the size limit, binary or unreadable), as fileReader.ts gives it: TextDecoder
+   *  has removed one leading BOM and turned invalid UTF-8 into U+FFFD. The rules remove no further BOM (the CLI ignores
+   *  exactly one leading BOM per file as well). */
   text: string | null;
   /** SHA-256 of the content (hex without "sha256:"). null if it could not be read */
   sha256: string | null;
@@ -144,4 +146,7 @@ export interface EngineResult {
   stats: EngineStats;
   /** IDs of the checks that ran (used to compute SAFE = the number of checks with no match) */
   checksRun: string[];
+  /** Git files the CLI would read but the browser cannot, because they are outside the dropped folder (a gitdir: /
+   *  commondir / include target, as written in the file that points to it). Shown as a CLI-only note */
+  gitOutside: string[];
 }

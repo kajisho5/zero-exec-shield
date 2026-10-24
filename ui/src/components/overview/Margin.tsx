@@ -108,6 +108,26 @@ export function CliOnlyNotice({ note, compact }: { note?: MsgKey; compact?: bool
   );
 }
 
+/** Git files that the dropped folder points to but that lie outside it (gitDiscover): the browser cannot read them, so
+ *  they are a CLI-only check. Shown only when there are some; the paths are as written in the pointing file */
+export function GitOutside({ paths }: { paths: string[] }) {
+  const { t } = useLang();
+  if (!paths.length) return null;
+  return (
+    <Note data-testid="git-outside">
+      <H>{t('ui.git_outside.title')}</H>
+      <p className="mt-2 text-[13px] leading-[1.55] text-muted-foreground">{t('ui.git_outside.body')}</p>
+      <ul className="mt-2 max-h-[160px] overflow-y-auto">
+        {paths.map((p) => (
+          <li key={p} className="border-b border-dotted border-border py-1.5 last:border-0">
+            <bdi dir="ltr" className="block min-w-0 truncate font-mono text-[13px]" title={visiblePath(p)}>{visiblePath(p)}</bdi>
+          </li>
+        ))}
+      </ul>
+    </Note>
+  );
+}
+
 export function Undetermined({ skippedSize, skippedBinary, decoys, errors }: { skippedSize: number; skippedBinary: number; decoys: number; errors: number }) {
   const { t } = useLang();
   const rows: [MsgKey, number][] = [['ui.und.size', skippedSize], ['ui.und.binary', skippedBinary], ['ui.und.decoy', decoys], ['ui.und.errors', errors]];

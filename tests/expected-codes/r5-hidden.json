@@ -1,0 +1,26 @@
+[
+  {
+    "campaign": null,
+    "code": "s7.invisible_chars",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": "emoji/AGENTS.md"
+  },
+  {
+    "campaign": null,
+    "code": "s7.invisible_chars",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": "filler/CLAUDE.md"
+  },
+  {
+    "campaign": null,
+    "code": "s7.invisible_chars",
+    "level": "HIGH",
+    "module": "§7",
+    "params": {},
+    "path": "shy/CLAUDE.md"
+  }
+]

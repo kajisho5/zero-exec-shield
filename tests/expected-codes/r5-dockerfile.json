@@ -1,0 +1,186 @@
+[
+  {
+    "campaign": null,
+    "code": "intel.infra_latest",
+    "level": "MEDIUM",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-111497",
+      "fixed": "22.23.4 24.22.1 26.12.1",
+      "product": "nodejs"
+    },
+    "path": "bom/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_latest",
+    "level": "MEDIUM",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-56848",
+      "fixed": "22.23.2 24.18.1 26.5.1",
+      "product": "nodejs"
+    },
+    "path": "bom/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_latest",
+    "level": "MEDIUM",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-111497",
+      "fixed": "22.23.4 24.22.1 26.12.1",
+      "product": "nodejs"
+    },
+    "path": "platform/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_latest",
+    "level": "MEDIUM",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-56848",
+      "fixed": "22.23.2 24.18.1 26.5.1",
+      "product": "nodejs"
+    },
+    "path": "platform/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_latest",
+    "level": "MEDIUM",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-111497",
+      "fixed": "22.23.4 24.22.1 26.12.1",
+      "product": "nodejs"
+    },
+    "path": "vt/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "intel.infra_latest",
+    "level": "MEDIUM",
+    "module": "§16",
+    "params": {
+      "cve": "CVE-2026-56848",
+      "fixed": "22.23.2 24.18.1 26.5.1",
+      "product": "nodejs"
+    },
+    "path": "vt/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s28.from_digest",
+    "level": "MEDIUM",
+    "module": "§28",
+    "params": {},
+    "path": "bom/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s28.from_digest",
+    "level": "MEDIUM",
+    "module": "§28",
+    "params": {},
+    "path": "cr/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s28.from_digest",
+    "level": "MEDIUM",
+    "module": "§28",
+    "params": {},
+    "path": "platform/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s28.from_digest",
+    "level": "MEDIUM",
+    "module": "§28",
+    "params": {},
+    "path": "vt/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s28.from_digest",
+    "level": "MEDIUM",
+    "module": "§28",
+    "params": {},
+    "path": "wheel/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s8.floating_image",
+    "level": "MEDIUM",
+    "module": "§8",
+    "params": {
+      "image": "node:latest"
+    },
+    "path": "bom/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s8.user_root",
+    "level": "MEDIUM",
+    "module": "§8",
+    "params": {},
+    "path": "bom/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s8.floating_image",
+    "level": "MEDIUM",
+    "module": "§8",
+    "params": {
+      "image": "a"
+    },
+    "path": "cr/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s8.user_root",
+    "level": "MEDIUM",
+    "module": "§8",
+    "params": {},
+    "path": "digest/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s8.floating_image",
+    "level": "MEDIUM",
+    "module": "§8",
+    "params": {
+      "image": "node:latest"
+    },
+    "path": "platform/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s8.user_root",
+    "level": "MEDIUM",
+    "module": "§8",
+    "params": {},
+    "path": "platform/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s8.floating_image",
+    "level": "MEDIUM",
+    "module": "§8",
+    "params": {
+      "image": "node:latest"
+    },
+    "path": "vt/Dockerfile"
+  },
+  {
+    "campaign": null,
+    "code": "s8.user_root",
+    "level": "MEDIUM",
+    "module": "§8",
+    "params": {},
+    "path": "wheel/Dockerfile"
+  }
+]
