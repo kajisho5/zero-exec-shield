@@ -35,6 +35,15 @@
       "level": "HIGH",
       "module": "§30",
       "path": "LaunchAgents/split.plist"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§30",
+      "path": "LaunchAgents/tail.plist"
     }
   ],
   "home": "_home",

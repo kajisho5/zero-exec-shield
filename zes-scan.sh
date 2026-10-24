@@ -1701,7 +1701,7 @@ intel_host_files() {
         ;;
       launch_label)
         while IFS= read -r f; do
-          [ -n "$f" ] && [ "$(plist_label "$f")" = "$val" ] && critical "$camp" "$f" intel.launchd label="$val"
+          [ -n "$f" ] && plist_label "$f" && [ "$PLIST_LABEL" = "$val" ] && critical "$camp" "$f" intel.launchd label="$val"
         done < <(files_path '/LaunchAgents/[^/]+\.plist$|/LaunchDaemons/[^/]+\.plist$'; ls "$HOME_DIR"/Library/LaunchAgents/*.plist 2>/dev/null; host_enabled && ls /Library/LaunchAgents/*.plist /Library/LaunchDaemons/*.plist 2>/dev/null)
         ;;
       systemd_unit)
@@ -3439,21 +3439,22 @@ check_s29() {
 }
 
 # §30 macOS persistence
-# plist_label FILE … the <string> right after <key>Label</key>, with any XML whitespace (blank lines, line breaks) between
-#   them and line breaks inside the value kept, like a plist parser (the browser engine uses the same rule)
+# plist_label FILE → PLIST_LABEL: the <string> right after <key>Label</key>, with any XML whitespace (blank lines, line
+#   breaks) between them and line breaks inside the value kept, like a plist parser (the browser engine uses the same
+#   rule). Returned in a variable: a command substitution would drop a trailing line break of the value
 plist_label() {
   local v
   v="$(awk '{ s = s $0 "\n" } END {
       if (match(s, /<key>Label<\/key>[ \t\r\n]*<string>[^<]*<\/string>/)) {
         m = substr(s, RSTART, RLENGTH); sub(/^<key>Label<\/key>[ \t\r\n]*<string>/, "", m); sub(/<\/string>$/, "", m); printf "%s", m } }' "$1" 2>/dev/null; printf x)"
-  printf '%s' "${v%x}"
+  PLIST_LABEL="${v%x}"
 }
 check_s30() {
   log_section "§30"
   local f lb
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    lb="$(plist_label "$f")"
+    plist_label "$f"; lb="$PLIST_LABEL"
     if [ -n "$lb" ] && ! printf '%s' "$lb" | grep_q '\.'; then
       high "" "$f" s30.random_label label="$lb"
     fi

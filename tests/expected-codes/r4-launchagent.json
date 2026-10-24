@@ -38,5 +38,15 @@
       "label": "x\ny"
     },
     "path": "LaunchAgents/split.plist"
+  },
+  {
+    "campaign": null,
+    "code": "s30.random_label",
+    "level": "HIGH",
+    "module": "§30",
+    "params": {
+      "label": "tail\n"
+    },
+    "path": "LaunchAgents/tail.plist"
   }
 ]
