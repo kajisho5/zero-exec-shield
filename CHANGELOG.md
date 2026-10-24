@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.5.1 — 2026-10-24
+
+Fixes from the fourth bug hunt. The browser engine now checks Git hooks and `.python-version` and handles the root `.git` / `.hg` / `.svn` like the CLI, both sides agree on the inputs where they used to differ, a damaged message catalog stops the CLI, and a crafted file name can no longer hide a finding behind another one's id. The findings.json format stays 1.2.
+
+**Ids change only for findings whose module, campaign, path, code or a param value contains `\`, `|` or U+001F** (see the id escaping below). The GitLab §3 findings of a run without jq also change (to the ids a run with jq already had).
+
+### CLI
+
+- The message catalog is fail-closed: `i18n/en.json` and `i18n/ja.json` are always both read, each must be complete (`{` first, `}` last, a comma after every entry but the last, no duplicate key), both must have the same keys, and the `cli.*` / `f.*` / `log.*` keys must be the ones the script was released with (`ZES_CATALOG_KEYS_SHA256`). Otherwise the run exits 64 with the catalog error. An empty `en.json` used to make `ja.json` load as the English catalog (Japanese `detail` in findings.json with `--lang ja`), and a truncated or partial catalog used to produce `detail` strings such as `f.s22.unpinned` with no error. The files are told apart by name.
+- Every `--lang` value is checked: `--lang xx --lang ja` exits 64 (only the last value was checked).
+- id v2 escapes its preimage: before joining, every component (module, campaign, path, code) and every param value has `\` replaced by `\\`, `|` by `\|` and U+001F by the six characters `\u001f`. A file whose name or `uses:` value contained `|` could give another finding's id, and the second finding was dropped (`duplicate_finding_id`). The browser engine computes ids the same way; `tests/id-cases.json` holds shared test vectors.
+- §3 GitLab: without jq the CVSS is read from `rules/ioc.json` too, so the finding is `s3.gitlab_vulnerable` with its `cvss` param, the same code, detail and id as with jq (it was `s3.gitlab_vulnerable_cvss9`).
+- §8: a CRLF Dockerfile no longer leaves the CR in the image name (`FROM node:latest` was missed and `busybox\r` went into `params.image`).
+- §27: the `build-backend` value is parsed (a quoted string, or the bare word up to a blank, `#` or quote) instead of putting the whole unquoted line into `params.backend`.
+- §30: the launchd `Label` is found when its `<string>` follows after blank lines or line breaks, and a value with a line break is kept (as a plist parser reads it).
+- §32: model file extensions (`.pkl`, `.pickle`, `.pt`, `.bin`) are matched case-insensitively (`model.PKL` was missed).
+
+### Browser UI
+
+- Git hooks (§7 `s7.git_hook` / `s7.git_hook_suspicious`) of the root and nested `.git`, and the Python runtime (§5 `s5.python_old`) from `.python-version` and `FROM python:3.x`, were not checked at all. Same codes, params, levels and paths as the CLI.
+- The root `.git`, `.hg` and `.svn` are no longer walked, as in the CLI; only what the CLI reads there stays checked (`.git/config` for §26, `.git/hooks/*` for §7). Files in them used to give findings the CLI does not have.
+- §49: an unparseable contract reports its problem in the CLI's fixed order (not JSON → not an object → duplicate member → depth → number → invalid UTF-8), and a lone high-surrogate escape is not JSON, as with jq.
+- §8 / §27 / §30 / §32: the same rules as the CLI fixes above (the browser had the other half of each difference). §32 skips `node_modules` and `.git` only as path segments (`x_node_modules/b.pt` was skipped).
+- The detail sheet below 640 px wraps a long unbroken message (it was cut off). The SkillPact rule list fits "Inconclusive" and "Not applicable" in English, and below 640 px puts the level and result under the rule title.
+- A finding with a known `code` whose `params` do not fill its message (for example from another version) shows its own `detail` instead of a raw `{placeholder}`.
+- Zero-width and format characters are shown as `⟨U+XXXX⟩` in untrusted names and values: U+200B–200F, U+2028, U+2029, U+2060–2064, U+FEFF and every character the §7 check reports as hidden (one shared definition). A U+200D that joins two emoji is kept.
+
+### Docs
+
+- `params` were documented as never holding file contents. They are strings taken from the finding and can include text from scanned files (such as a `uses:` reference or a version from a lockfile), so consumers must escape them; file contents beyond that are never included. Corrected in the README, the schema, `docs/skill-contracts` and the 0.5.0 entry below. The data does not change.
+- The id v2 definition (README, schema, `docs/skill-contracts`) describes the escaping.
+
+### Tests
+
+- New fixtures pinned on both sides by `tests/expected-codes/`: `r4-vcs-root`, `r4-python`, `r4-crlf-dockerfile`, `r4-build-backend`, `r4-launchagent`, `r4-pickle`, `r4-skillpact-ijson`.
+- `tests/run-tests.sh` (round 4): broken catalogs exit 64 in both languages, every `--lang` is checked, the colliding id pair gives two findings, `tests/id-cases.json` matches the CLI's escaping, §3 is the same without jq (`ZES_FORCE_NO_JQ=1`), and Git hooks / the root VCS directories give the same rows as the UI test. `ui/tests/unit/r4.test.ts` and `ui/tests/e2e/r4.spec.ts` (320, 360, 768, 1280 and 1440 px, English and Japanese) cover the browser side.
+
+### 日本語
+
+4 回目のバグ探しの修正です。ブラウザのエンジンが Git フックと `.python-version` を検査し、ルートの `.git` / `.hg` / `.svn` を CLI と同じように扱うようになりました。CLI と UI で結果が違っていた入力はどちらも同じ結果にしました。メッセージカタログが壊れていれば CLI は止まり、細工したファイル名で別の finding の id に重ねて検出を隠すこともできなくなりました。findings.json の形式は 1.2 のままです。
+
+**id が変わるのは、module・campaign・path・code・param の値に `\`・`|`・U+001F を含む finding だけです**（下の id のエスケープ）。jq なしで走査した §3 GitLab の finding も変わります（jq ありの id と同じになります）。
+
+- **CLI のカタログ**: `i18n/en.json` と `ja.json` を常に両方読み、どちらも完全であること（先頭が `{`、末尾が `}`、最後以外の行にカンマ、キーの重複なし）、両者のキーが同じこと、`cli.*` / `f.*` / `log.*` のキーがリリース時のもの（`ZES_CATALOG_KEYS_SHA256`）であることを確かめ、満たさなければ exit 64 にします。空の `en.json` で `ja.json` が英語のカタログとして読まれる（`--lang ja` で findings.json の `detail` が日本語になる）問題と、途中で切れたカタログで `detail` が `f.s22.unpinned` のようになってもエラーにならない問題を直しました。ファイルは名前で区別します
+- **CLI の引数**: `--lang` の値をすべて検査します（`--lang xx --lang ja` も exit 64。最後の値しか見ていなかった）
+- **id のエスケープ**: id v2 の元の文字列をつなぐ前に、各要素（module・campaign・path・code）と各 param の値の `\` を `\\`、`|` を `\|`、U+001F を 6 文字の `\u001f` にします。名前や `uses:` の値に `|` を含むファイルで別の finding と同じ id を作れ、後の finding が落ちていました（`duplicate_finding_id`）。ブラウザも同じ方法で計算し、共通のテストベクタを `tests/id-cases.json` に置きました
+- **§3 GitLab（jq なし）**: CVSS を jq なしでも `rules/ioc.json` から読み、jq ありと同じ `s3.gitlab_vulnerable`（`cvss` 付き）・detail・id にしました（`s3.gitlab_vulnerable_cvss9` になっていた）
+- **CLI と UI の差**: §8 CRLF の Dockerfile で CR が image に残らない（`FROM node:latest` の見逃し、`busybox\r`）。§27 `build-backend` は値を解析する（クォートの文字列、または空白・`#`・クォートまでの語。引用符のない行全体を params に入れていた）。§30 launchd の `Label` は空行や改行を挟んでも読み、改行を含む値もそのまま（plist として正しい）。§32 モデルの拡張子は大文字小文字を区別せず、UI は `node_modules` / `.git` をパスの区切り単位で判定（`x_node_modules/` を飛ばしていた）。§49 契約の問題は CLI の決まった順（JSON でない → オブジェクトでない → メンバーの重複 → 深さ → 数値 → 不正な UTF-8）で 1 つ報告し、対のない上位サロゲートのエスケープは jq と同じく JSON でないとする
+- **ブラウザ UI**: Git フック（§7 `s7.git_hook` / `s7.git_hook_suspicious`、ルートと入れ子の `.git`）と Python のランタイム（§5 `s5.python_old`、`.python-version` と `FROM python:3.x`）を CLI と同じ code・params・level・path で検査します（まったく検査していなかった）。ルートの `.git` / `.hg` / `.svn` は CLI と同じく走査せず、CLI がそこで読むもの（§26 の `.git/config`、§7 の `.git/hooks/*`）だけを検査します。640px 未満の詳細シートは区切りのない長い文も折り返します（切れていた）。SkillPact の規則の一覧は英語の "Inconclusive" / "Not applicable" が収まる幅にし、640px 未満は重大度と結果を規則名の下の行に置きます。既知の `code` でも `params` が文を埋めない finding（別の版のもの）は `{placeholder}` ではなく自身の `detail` を表示します。信頼できない名前・値のゼロ幅文字・書式文字（U+200B–200F、U+2028、U+2029、U+2060–2064、U+FEFF と、§7 の検査が隠し文字とするもの。定義は 1 つ）を `⟨U+XXXX⟩` で表示します（絵文字どうしをつなぐ U+200D はそのまま）
+- **文書**: `params` には「ファイルの内容は入れない」と書いていましたが、finding から取った文字列で、検査したファイルの文字列（`uses:` の参照やロックファイルの版など）を含むことがあるため、表示する側でエスケープが必要です。それ以上のファイルの内容は入れません。README・スキーマ・`docs/skill-contracts`・下の 0.5.0 の記述を訂正しました（データは変わりません）。id v2 の定義にエスケープを書き足しました
+- **テスト**: CLI と UI の両方を `tests/expected-codes/` で固定するフィクスチャ `r4-vcs-root`・`r4-python`・`r4-crlf-dockerfile`・`r4-build-backend`・`r4-launchagent`・`r4-pickle`・`r4-skillpact-ijson` を追加しました。`tests/run-tests.sh` に round 4 の確認（壊れたカタログ、`--lang`、id の衝突、`tests/id-cases.json`、jq なしの §3、Git フックとルートの VCS ディレクトリ）を、UI に `ui/tests/unit/r4.test.ts` と `ui/tests/e2e/r4.spec.ts`（320・360・768・1280・1440px、英語と日本語）を追加しました
+
 ## 0.5.0 — 2026-10-23
 
 ZES is now English-first. The CLI and the browser UI speak English by default, with Japanese one switch away, and findings.json is always English. Every message has a language-neutral `code`, so ids no longer depend on wording or language.
@@ -8,7 +60,7 @@ ZES is now English-first. The CLI and the browser UI speak English by default, w
 
 ### Format (findings 1.2)
 
-- `schema_version` is `"1.2"`. Every finding has `code` (the message id: key `f.<code>` in `i18n/en.json` / `i18n/ja.json`) and `params` (the values in the message, strings only, never file contents).
+- `schema_version` is `"1.2"`. Every finding has `code` (the message id: key `f.<code>` in `i18n/en.json` / `i18n/ja.json`) and `params` (the values in the message, strings only; they can include text from scanned files, such as a `uses:` reference, so consumers must escape them — corrected in 0.5.1).
 - `detail` is the English message with `params` filled in. It is the same for `--lang en`, `--lang ja`, any locale, and with or without jq.
 - id v2: SHA-256 of `zes-id-v2|module|campaign|path|code|params`, with `params` as `key=value` in C-locale key order joined by U+001F, and a `null` campaign or path as the empty string. `evidence_hash` is unchanged (the file hash, otherwise the SHA-256 of the English `detail`).
 - ZET accepts 1.2 as of kajisho5/zero-exec-triage#17. It never recomputes ids, so a plan stays tied to the findings.json it was made from.
@@ -37,7 +89,7 @@ ZES を英語優先にしました。CLI とブラウザ UI は英語が既定�
 
 **互換性のない変更: すべての finding の id が 1 回だけ変わります。** 0.4.x の findings で行った ZET の判断・GER の承認は、再スキャンと再トリアージが必要です。0.5.0 以降は文言を直しても id は変わりません。
 
-- **形式 1.2**: finding に `code`（文の識別子。`i18n/*.json` のキー `f.<code>`）と `params`（文に入る値。文字列だけ、ファイルの内容は入れない）を足しました。`detail` は英語の文に params を入れたもので、`--lang`・ロケール・jq の有無に依りません。id v2 は `zes-id-v2|module|campaign|path|code|params` の SHA-256 です。`evidence_hash` の作り方は変わりません。ZET は zero-exec-triage#17 で 1.2 を受け付けます
+- **形式 1.2**: finding に `code`（文の識別子。`i18n/*.json` のキー `f.<code>`）と `params`（文に入る値。文字列だけ。`uses:` の参照など検査したファイルの文字列を含むことがあるため、表示する側でエスケープすること〔0.5.1 で訂正〕）を足しました。`detail` は英語の文に params を入れたもので、`--lang`・ロケール・jq の有無に依りません。id v2 は `zes-id-v2|module|campaign|path|code|params` の SHA-256 です。`evidence_hash` の作り方は変わりません。ZET は zero-exec-triage#17 で 1.2 を受け付けます
 - **CLI**: メッセージカタログ（検出の文 327、ログ 77、ヘルプ・エラー 27）を起動時に awk で 1 回だけ読みます（jq は使いません）。言語は `--lang en|ja`、`ZES_LANG`、ロケールの順に決め、UTF-8 の日本語ロケールなら日本語、それ以外は英語です。日本語の文言は変えていません（`--lang ja` の端末ログは全フィクスチャで 0.4.0 と同じ）。検出の集合も全フィクスチャで変わりません
 - **ブラウザ UI**: 英語の画面と、テーマの隣の言語メニュー（640px 未満は「…」の中）を追加しました。ブラウザの言語に従い、選んだ言語を保存します（`?lang=` でも指定できます）。検査エンジンも CLI と同じ code を使い、全 53 フィクスチャで code と params まで CLI と一致することを確かめています。検体票は 1440px 以上でだけ 1 段にしました（1280〜1439px で状態の文字が 1 字ずつ折り返していたため）
 - **文書**: README・SECURITY・brand・`docs/skill-contracts`・`docs/ioc-verification`・UI の設計書は英語を正とし、日本語版を `*.ja.md` に置きました。SKILL.md は英語です（利用者の言語で答えるよう指示）。コードのコメントは英語にしました。この CHANGELOG は 0.5.0 から英語と日本語の両方で書きます
