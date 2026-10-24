@@ -3640,14 +3640,57 @@ check_s29() {
 }
 
 # §30 macOS persistence
-# plist_label FILE → PLIST_LABEL: the <string> right after <key>Label</key>, with any XML whitespace (blank lines, line
-#   breaks) between them and line breaks inside the value kept, like a plist parser (the browser engine uses the same
-#   rule). Returned in a variable: a command substitution would drop a trailing line break of the value
+# plist_canon FILE … the plist text as an XML parser sees it (the same rule as plistCanon of the browser engine): comments
+#   (<!-- … -->, an unterminated one to the end) removed, the content of <![CDATA[ … ]]> kept as text (its & < > written as
+#   &amp; &lt; &gt;), and character references (&#46; &#x2E; &quot; &apos;) decoded, except that &, < and > stay &amp;,
+#   &lt;, &gt;; an invalid reference stays as written. A leading BOM is dropped (zes_src). Linear in the file size
+ZES_PLIST_AWK='
+    BEGIN { HEX = "0123456789abcdef" }
+    function utf8(cp) {
+      if (cp < 128) return sprintf("%c", cp)
+      if (cp < 2048) return sprintf("%c%c", 192 + int(cp / 64), 128 + cp % 64)
+      if (cp < 65536) return sprintf("%c%c%c", 224 + int(cp / 4096), 128 + int(cp / 64) % 64, 128 + cp % 64)
+      return sprintf("%c%c%c%c", 240 + int(cp / 262144), 128 + int(cp / 4096) % 64, 128 + int(cp / 64) % 64, 128 + cp % 64) }
+    function esc(c) { return c == "&" ? "&amp;" : c == "<" ? "&lt;" : c == ">" ? "&gt;" : c }
+    function out(x) { if (x != "") O[++no] = x }
+    { P[++np] = $0 "\n" }
+    END {
+      S = zes_join(P, np); n = length(S); i = 1; s = 1; no = 0
+      while (i <= n) {
+        c = substr(S, i, 1)
+        if (c == "<" && substr(S, i, 4) == "<!--") {
+          out(substr(S, s, i - s))
+          for (j = i + 4; j <= n && substr(S, j, 3) != "-->"; j++) ;
+          i = (j <= n) ? j + 3 : n + 1; s = i; continue }
+        if (c == "<" && substr(S, i, 9) == "<![CDATA[") {
+          out(substr(S, s, i - s))
+          for (j = i + 9; j <= n && substr(S, j, 3) != "]]>"; j++) out(esc(substr(S, j, 1)))
+          i = (j <= n) ? j + 3 : n + 1; s = i; continue }
+        if (c == "&") {
+          for (j = i + 1; j <= n && j - i <= 10 && substr(S, j, 1) != ";"; j++) ;
+          e = (substr(S, j, 1) == ";") ? substr(S, i + 1, j - i - 1) : ""; d = ""
+          if (e == "quot") d = "\""; else if (e == "apos") d = "\047"
+          else if (e == "lt" || e == "gt" || e == "amp") d = "&" e ";"
+          else if (e ~ /^#[0-9]+$/ || e ~ /^#[xX][0-9A-Fa-f]+$/) {
+            cp = 0
+            if (e ~ /^#[xX]/) { for (k = 3; k <= length(e); k++) cp = cp * 16 + index(HEX, tolower(substr(e, k, 1))) - 1 }
+            else cp = substr(e, 2) + 0
+            if (cp >= 1 && cp <= 1114111 && (cp < 55296 || cp > 57343)) d = (cp < 128) ? esc(sprintf("%c", cp)) : utf8(cp) }
+          if (d != "") { out(substr(S, s, i - s)); out(d); i = j + 1; s = i; continue } }
+        i++ }
+      out(substr(S, s))
+      printf "%s", zes_join(O, no) }'
+plist_canon() { zes_src "$1"; awk "$ZES_AWK_LIB$ZES_PLIST_AWK" "$SRC" 2>/dev/null; }
+# plist_label FILE → PLIST_LABEL: in plist_canon FILE, the <string> right after <key>Label</key>, with any XML whitespace
+#   (blank lines, line breaks) between them and line breaks inside the value kept, like a plist parser (the browser engine
+#   uses the same rule), with &lt; &gt; &amp; decoded. Returned in a variable: a command substitution would drop a trailing
+#   line break of the value
 plist_label() {
   local v
-  v="$(awk '{ s = s $0 "\n" } END {
-      if (match(s, /<key>Label<\/key>[ \t\r\n]*<string>[^<]*<\/string>/)) {
-        m = substr(s, RSTART, RLENGTH); sub(/^<key>Label<\/key>[ \t\r\n]*<string>/, "", m); sub(/<\/string>$/, "", m); printf "%s", m } }' "$1" 2>/dev/null; printf x)"
+  v="$(plist_canon "$1" | awk 'BEGIN { RS = "\001" } {
+      if (match($0, /<key>Label<\/key>[ \t\r\n]*<string>[^<]*<\/string>/)) {
+        m = substr($0, RSTART, RLENGTH); sub(/^<key>Label<\/key>[ \t\r\n]*<string>/, "", m); sub(/<\/string>$/, "", m)
+        gsub(/&lt;/, "<", m); gsub(/&gt;/, ">", m); gsub(/&amp;/, "\\&", m); printf "%s", m } }' 2>/dev/null; printf x)"
   PLIST_LABEL="${v%x}"
 }
 check_s30() {
@@ -3659,9 +3702,11 @@ check_s30() {
     if [ -n "$lb" ] && ! printf '%s' "$lb" | grep_q '\.'; then
       high "" "$f" s30.random_label label="$lb"
     fi
-    fgrep_q '<string>(/tmp/|/private/tmp/|/Users/Shared/|/var/tmp/)|<string>[^<]*/\.[^/<]+/[^<]*</string>' "$f" && high "" "$f" s30.tmp_program
-    fgrep_q '(curl|osascript|base64|python[0-9.]* -c|bash -c)' "$f" && high "" "$f" s30.program_arguments
-  done < <(files_path '/Library/(LaunchAgents|LaunchDaemons)/[^/]+\.plist$|/LaunchAgents/[^/]+\.plist$'
+    # On the plist as parsed (no comments, CDATA as text, references decoded): a commented-out command is no command
+    plist_canon "$f" >"$TMP_DIR/plist.txt"
+    grep -q -a -E '<string>(/tmp/|/private/tmp/|/Users/Shared/|/var/tmp/)|<string>[^<]*/\.[^/<]+/[^<]*</string>' "$TMP_DIR/plist.txt" && high "" "$f" s30.tmp_program
+    grep -q -a -E '(curl|osascript|base64|python[0-9.]* -c|bash -c)' "$TMP_DIR/plist.txt" && high "" "$f" s30.program_arguments
+  done < <(files_path '/(LaunchAgents|LaunchDaemons)/[^/]+\.plist$'
            if [ "$OS_NAME" = "Darwin" ]; then ls "$HOME_DIR"/Library/LaunchAgents/*.plist 2>/dev/null; host_enabled && ls /Library/LaunchAgents/*.plist /Library/LaunchDaemons/*.plist 2>/dev/null; fi)
   while IFS= read -r f; do
     [ -n "$f" ] && fgrep_q 'DYLD_INSERT_LIBRARIES' "$f" && high "" "$f" s30.dyld_insert

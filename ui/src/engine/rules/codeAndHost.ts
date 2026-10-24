@@ -90,7 +90,10 @@ export function persistenceRules(ctx: RuleCtx): void {
     if (/(^|\/)LaunchAgents\/[^/]+\.plist$|(^|\/)LaunchDaemons\/[^/]+\.plist$/.test(p)) {
       const label = plistLabel(f.text);
       if (label && !label.includes('.')) push(ctx, { level: 'HIGH', module: '§30', campaign: null, path: p, code: 's30.random_label', params: { label }, ruleId: 's30-launchagent:label', evidenceSha: f.sha256 });
-      if (/<string>(\/tmp\/|\/private\/tmp\/|\/Users\/Shared\/|\/var\/tmp\/)|<string>[^<]*\/\.[^/<]+\/[^<]*<\/string>/.test(f.text)) push(ctx, { level: 'HIGH', module: '§30', campaign: null, path: p, code: 's30.tmp_program', ruleId: 's30-launchagent:path', evidenceSha: f.sha256 });
+      // on the plist as parsed (a commented-out command is no command), as the CLI
+      const canon = plistCanon(f.text);
+      if (/<string>(\/tmp\/|\/private\/tmp\/|\/Users\/Shared\/|\/var\/tmp\/)|<string>[^<\n]*\/\.[^/<\n]+\/[^<\n]*<\/string>/.test(canon)) push(ctx, { level: 'HIGH', module: '§30', campaign: null, path: p, code: 's30.tmp_program', ruleId: 's30-launchagent:path', evidenceSha: f.sha256 });
+      if (/(curl|osascript|base64|python[0-9.]* -c|bash -c)/.test(canon)) push(ctx, { level: 'HIGH', module: '§30', campaign: null, path: p, code: 's30.program_arguments', ruleId: 's30-launchagent:args', evidenceSha: f.sha256 });
     }
     if (/(^|\/)systemd\/user\/[^/]+\.service$|(^|\/)autostart\/[^/]+\.desktop$/.test(p) && /^[\t\v\f\r ]*(ExecStart|ExecStartPre|Exec)[\t\v\f\r ]*=[^#\n]*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/|\/\.[^/\t\n\v\f\r ]+\/|curl|wget|base64|bash -c|sh -c)/m.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§31', campaign: 'ebpf-rootkit', path: p, code: 's31.autostart_suspicious', ruleId: 's31-autostart', evidenceSha: f.sha256, locators: textLocators(f.text, /^[\t\v\f\r ]*(ExecStart|ExecStartPre|Exec)[\t\v\f\r ]*=[^#]*(\/tmp\/|\/dev\/shm\/|\/var\/tmp\/|\/\.[^/\t\n\v\f\r ]+\/|curl|wget|base64|bash -c|sh -c)/) });
@@ -275,10 +278,55 @@ export function buildSystemKeys(text: string): { backend?: string; backendPath: 
 
 export const DOCKERFILE = /^(Dockerfile.*|.*\.dockerfile)$/;
 
-/** The <string> right after <key>Label</key> of a launchd plist, with any XML whitespace (blank lines, line breaks)
- *  between them and line breaks inside the value kept (the CLI's plist_label). */
+/** The plist text as an XML parser sees it (the CLI's plist_canon): comments (<!-- … -->, an unterminated one to the end)
+ *  removed, the content of <![CDATA[ … ]]> kept as text (its & < > written as &amp; &lt; &gt;), character references
+ *  (&#46; &#x2E; &quot; &apos;) decoded, except that &, < and > stay &amp; &lt; &gt;; an invalid reference stays. */
+export function plistCanon(text: string): string {
+  const esc = (c: string) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c);
+  const out: string[] = [];
+  const n = text.length;
+  let i = 0;
+  let s = 0;
+  while (i < n) {
+    const c = text[i];
+    if (c === '<' && text.startsWith('<!--', i)) {
+      out.push(text.slice(s, i));
+      const j = text.indexOf('-->', i + 4);
+      i = j < 0 ? n : j + 3; s = i; continue;
+    }
+    if (c === '<' && text.startsWith('<![CDATA[', i)) {
+      out.push(text.slice(s, i));
+      const j = text.indexOf(']]>', i + 9);
+      const body = text.slice(i + 9, j < 0 ? n : j);
+      out.push(body.replace(/[&<>]/g, esc));
+      i = j < 0 ? n : j + 3; s = i; continue;
+    }
+    if (c === '&') {
+      const m = /^&(quot|apos|lt|gt|amp|#[0-9]+|#[xX][0-9A-Fa-f]+);/.exec(text.slice(i, i + 12));
+      let d = '';
+      if (m) {
+        const e = m[1]!;
+        if (e === 'quot') d = '"';
+        else if (e === 'apos') d = "'";
+        else if (e === 'lt' || e === 'gt' || e === 'amp') d = `&${e};`;
+        else {
+          const cp = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+          if (cp >= 1 && cp <= 0x10ffff && (cp < 0xd800 || cp > 0xdfff)) d = cp < 128 ? esc(String.fromCodePoint(cp)) : String.fromCodePoint(cp);
+        }
+      }
+      if (d) { out.push(text.slice(s, i), d); i += m![0].length; s = i; continue; }
+    }
+    i++;
+  }
+  out.push(text.slice(s));
+  return out.join('');
+}
+
+/** The <string> right after <key>Label</key> of a launchd plist (in plistCanon), with any XML whitespace (blank lines,
+ *  line breaks) between them and line breaks inside the value kept, &lt; &gt; &amp; decoded (the CLI's plist_label). */
 export function plistLabel(text: string): string | undefined {
-  return /<key>Label<\/key>[ \t\r\n]*<string>([^<]*)<\/string>/.exec(text)?.[1];
+  const v = /<key>Label<\/key>[ \t\r\n]*<string>([^<]*)<\/string>/.exec(plistCanon(text))?.[1];
+  return v?.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 }
 
 /** The image of each FROM line of a Dockerfile (the CLI's dockerfile_images): FROM after optional whitespace, then
