@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.5.4 — 2026-10-24
+
+Fixes from the sixth bug hunt. Git configs are read the way git reads them, agent hooks and MCP configs are judged on the parsed document, and the CLI and the UI agree on Git pointers, large Git configs, line breaks, Dockerfile continuations, `pyproject.toml` arrays, the BOM and repeated findings. The findings.json format stays 1.2.
+
+**No id changes for the same input** (the id definition is unchanged). Findings that were missed before now appear, a few false ones are gone (see below), and `duplicate_finding_id` is no longer recorded for a finding that is simply emitted twice.
+
+### Both sides (CLI and browser UI)
+
+- §26 Git configs: one parser that follows git's own (`config.c`): keys in any case, a key on the section-header line (`[core] fsmonitor = …`, `[core]sshCommand=…`), several headers on one line, subsections, quoted values, escapes, `\` continuations and `#` / `;` comments. Lines end at LF only (CR LF is LF, a lone CR is whitespace, U+2028 is an ordinary character), as in git. Every assignment of `fsmonitor` (when its value is not a Git boolean), `sshCommand` and `hooksPath` is reported, not only the last one: git uses the last value of the whole chain (system, global, repository config, include targets, `config.worktree`), so a `fsmonitor = false` can be overridden by a later file; reporting every dangerous assignment is an over-approximation by design. `fsmonitor = false` followed by `fsmonitor = "…"` and `[core] fsmonitor = "…"` were missed CRITICALs on both sides. `include.path` / `includeIf` on the header line are followed too. `tests/gitconfig-cases.json` holds shared vectors generated against git (`tests/gen-gitconfig-cases.py`); the `r6-gitconfig` fixtures are run by real git in `tests/run-tests.sh` (each one ZES reports makes git run its command, the others do not).
+- Git configs are read up to 16 MiB on both sides (the CLI read include targets from the first 1 MiB, the UI skipped configs over 2 MiB, so the CRITICAL of an include target was lost). A longer config is read up to the cap and recorded as `git_config_truncated`.
+- Git pointers (`gitdir:` files, `commondir`) are read as bytes on both sides: the first 4096 bytes up to the first NUL (git reads a C string), a BOM is kept (git rejects it), and the path is resolved on the real tree (`nope/../gd` fails when `nope` does not exist). A path that leaves the dropped folder and comes back through its own name is inside (the UI listed it as "outside").
+- §17 agent hooks: decided on the parsed JSON / JSONC (keys and strings decoded), never on the raw text. `"hooks"` or an escaped command string hid a `curl … | sh` hook on both sides (a regression of 0.5.3 for `.claude/settings.json`). A file that cannot be read at all falls back to a grep of the text with ASCII `\u` escapes decoded (fail-closed).
+- §17 lenient reading: a hook / MCP file that jq reads but `JSON.parse` does not (`01`, `NaN`, several documents), or that `JSON.parse` reads but jq does not (a lone surrogate escape, nesting deeper than 256), is read by one lenient reader on both sides, so a dangerous command in it is reported (CLI and UI gave HIGH vs MEDIUM `s17.config_unparsed`, and the CLI missed servers after a deep value).
+- §7 `runOn: folderOpen`, §9 `resolved`, §20 `url` / `listen`, §42 `name` and the UI's manifest detection read the decoded document too.
+- Dockerfiles: continuation lines (`\` at the end of a line, or the character of a `# escape=` directive) are joined as BuildKit does before §4, §5, §8 and §28 read `FROM` and `USER` (`FROM \` + `node:latest` gave the image `\`, and a digest on the next line was a false `s28.from_digest`).
+- §27 `pyproject.toml`: a table header counts only at the real top level, never inside an array or inline table that spans lines (`["build-system"]` as an array element hid the real backend).
+- The same finding emitted twice (same id: same module, campaign, path, code and params, as for two `FROM node:latest` lines) is merged silently; only an id shared by findings with different levels is recorded as `duplicate_finding_id`. A normal multi-stage Dockerfile no longer makes the CLI's status `partial`.
+
+### CLI
+
+- The TOML reader of `.codex/config.toml` keeps only the key paths it needs (a long dotted header with many keys under it took 40 s for 320 KB and minutes for 1 MB), and `pyproject.toml` strings are scanned once (1 MB of `''` took 15 s). The new readers are linear as well; `tests/run-tests.sh` times all of them on 1 MB inputs.
+- A line break or U+001F in an MCP server or hook event name no longer splits a record (pointers are encoded); it hid a HIGH `bash -c` server.
+- Without jq, hook and MCP files are read by the lenient reader: a hook is reported once (it was also reported as an MCP server), with its locator.
+- The BOM-free view covers every text check: a Kubernetes manifest with a BOM (`s29.host_path` was missed) and files of the inspected HOME. A name with a TAB maps back to its file. The copies without the BOM are bounded (16 MiB per file, 256 MiB in all); a larger file is read as it is and recorded as `bom_not_stripped` (a 2 GB sparse file with a BOM made 2 GB of temporary data).
+
+### Browser UI
+
+- §26, §8 `USER`, §4 / §31 / §33 / §35 / §12 and the other line-based checks match line starts at LF only (JS `m` mode also started a line after a lone CR or U+2028: UI-only CRITICALs).
+- §49: an empty array no longer leaves its member names behind (`"scope": []` followed by a sibling object gave "duplicate member name" for a valid contract). A seeded fuzz test compares `ijsonProblem` with the CLI's parser (`ui/tests/unit/ijson-fuzz.test.ts`; 25 000 inputs in 5 seeds gave no difference).
+- Markers: U+FE0E / U+FE0F are kept only where they change the drawing (U+FE0F after a text-default emoji character, U+FE0E after an emoji-default one, either one in a keycap); `p@1<U+FE0E>.0` is marked.
+- Speed: IoC values are lower-cased once and the Git discovery is linear in the depth (analyzing 10 000 files took about three times as long as in 0.5.2).
+
+### Tests
+
+- New fixtures pinned on both sides: `r6-gitconfig`, `r6-agent-hook`, `r6-dockerfile`, `r6-pyproject`. `tests/run-tests.sh` (round 6): the Git config vectors, the fixtures under real git, the Git tree and the 3 MB config of `ui/tests/unit/r6.test.ts`, merged repeats, the readers on 1 MB inputs, the BOM cases and the hook without jq. `ui/tests/e2e/r6.spec.ts` checks a 3 MB Git config and the U+FE0E marker.
+
+### 日本語
+
+6 回目のバグ探しの修正です。Git の設定は git と同じ読み方で読み、エージェントのフックと MCP の設定は解析した文書で判定します。Git のポインタ・大きな Git の設定・改行・Dockerfile の継続行・`pyproject.toml` の配列・BOM・同じ finding の繰り返しで CLI と UI の結果が揃いました。findings.json の形式は 1.2 のままです。
+
+**同じ入力の id は変わりません**（id の定義は同じ）。見逃していた finding が出るようになり、いくつかの誤検知が消え、同じ finding を 2 回出しただけでは `duplicate_finding_id` を記録しなくなりました。
+
+- **§26 Git の設定**: git の `config.c` と同じ規則の 1 つのパーサで読みます（キーの大文字小文字、見出し行のキー `[core] fsmonitor = …`、1 行に複数の見出し、サブセクション、引用符・エスケープ・`\` の継続行・`#` / `;` のコメント）。行は LF でだけ分け（CR LF は LF、単独の CR は空白、U+2028 はふつうの文字）、git と同じです。`fsmonitor`（値が Git の真偽値でないとき）・`sshCommand`・`hooksPath` はすべての代入を報告します。git は設定の連なり全体（system・global・リポジトリ・include 先・`config.worktree`）の最後の値を使い、後のファイルが `fsmonitor = false` を上書きできるので、危険な代入はどこにあっても報告します（意図した過大評価）。`fsmonitor = false` の後の `fsmonitor = "…"` と `[core] fsmonitor = "…"` は両側で CRITICAL を見逃していました。見出し行の `include.path` / `includeIf` もたどります。git で生成した共通のテストベクタを `tests/gitconfig-cases.json`（`tests/gen-gitconfig-cases.py`）に置き、`r6-gitconfig` のフィクスチャは `tests/run-tests.sh` で本物の git に実行させます（ZES が報告するものは git がコマンドを実行し、報告しないものは実行しない）
+- **大きな Git の設定**: 両側とも 16 MiB まで読みます（CLI は include 先を先頭 1 MiB から、UI は 2 MiB を超える設定を読まず、include 先の CRITICAL が消えていた）。それより長い設定は上限まで読み `git_config_truncated` を記録します
+- **Git のポインタ**: `gitdir:` ファイルと `commondir` を両側ともバイトとして読みます（先頭 4096 バイトの最初の NUL まで、BOM は残す）。パスは実際の木で解決し（`nope` がなければ `nope/../gd` は失敗）、フォルダを出て自分の名前で戻るパスはフォルダの中です
+- **§17 エージェントのフック**: 生のテキストではなく解析した JSON / JSONC（キーと文字列を復号）で判定します。`"hooks"` やエスケープしたコマンド文字列で `curl … | sh` のフックが両側で見えなくなっていました（0.5.3 で `.claude/settings.json` に入った退行）。まったく読めないファイルだけ、ASCII の `\u` を復号したテキストの grep に戻します（fail-closed）
+- **§17 緩い読み取り**: jq は読むが `JSON.parse` は読まない（`01`・`NaN`・複数の文書）、または `JSON.parse` は読むが jq は読まない（単独のサロゲートのエスケープ、256 段を超える入れ子）フック / MCP のファイルは、両側の同じ緩い読み取りで読み、危険なコマンドを報告します。§7 `runOn: folderOpen`・§9 `resolved`・§20 `url` / `listen`・§42 `name`・UI の manifest の判定も復号した文書で読みます
+- **Dockerfile**: 継続行（行末の `\`、または `# escape=` の文字）を BuildKit と同じくつないでから §4・§5・§8・§28 が `FROM` と `USER` を読みます（`FROM \` と次行の `node:latest` でイメージが `\` になっていた）
+- **§27 `pyproject.toml`**: 表の見出しは本当の最上位でだけ数え、複数行の配列・インラインテーブルの中は見出しにしません
+- **同じ finding**: 同じ id（同じ module・campaign・path・code・params）の再出力は黙って 1 件にまとめ、レベルの違う finding が id を共有したときだけ `duplicate_finding_id` を記録します（ふつうの多段 Dockerfile で status が partial になっていた）
+- **CLI**: `.codex/config.toml` の TOML 読み取りは必要なキーのパスだけを保ち（長いドット区切りの見出しと多くのキーで 320 KB に 40 秒）、`pyproject.toml` の文字列は 1 回だけ走査します（1 MB の `''` で 15 秒）。サーバー名・フックのイベント名の改行や U+001F でレコードが割れなくなりました（HIGH を隠せた）。jq がなくてもフック / MCP のファイルは緩い読み取りで読み、フックを 1 回だけ報告します。BOM を除いた読み取りは k8s のマニフェスト（`s29.host_path` の見逃し）と HOME のファイルにも使い、タブを含む名前は元のファイルに戻し、BOM を除いた写しは 1 ファイル 16 MiB・合計 256 MiB までにします（それより大きいファイルはそのまま読み `bom_not_stripped` を記録。2 GB の疎なファイルで 2 GB の一時データを作っていた）
+- **ブラウザ UI**: 行単位の検査は LF でだけ行頭とします（JS の `m` は単独の CR や U+2028 の後も行頭とし、UI だけの CRITICAL になっていた）。§49 で空の配列がメンバー名の集合を残さなくなりました（有効な契約が "duplicate member name" になっていた）。CLI のパーサと比べる種付きのファズテストを追加しました。U+FE0E / U+FE0F は描画を変える所でだけ残します（`p@1<U+FE0E>.0` は目印にする）。IoC の小文字化を 1 回にし、Git の探索を深さに対して線形にしました（1 万ファイルの解析が 0.5.2 の約 3 倍かかっていた）
+- **テスト**: CLI と UI の両方で固定するフィクスチャ `r6-gitconfig`・`r6-agent-hook`・`r6-dockerfile`・`r6-pyproject` を追加し、`tests/run-tests.sh` に round 6 の確認（Git 設定のベクタ、本物の git での実行、`ui/tests/unit/r6.test.ts` と同じ Git の木と 3 MB の設定、同じ finding の統合、1 MB の入力での時間、BOM、jq なしのフック）を、UI に `ui/tests/unit/r6.test.ts`・`ui/tests/unit/ijson-fuzz.test.ts`・`ui/tests/e2e/r6.spec.ts` を追加しました
+
 ## 0.5.3 — 2026-10-24
 
 Fixes from the fifth bug hunt. Adversarial files can no longer stall or crash the CLI's readers, the §49 contract check accepts exactly RFC 8259 JSON on both sides, the browser now reads the Git files the CLI reads, and the CLI and the UI agree on whitespace, the BOM, NUL, Dockerfile `FROM` lines, `pyproject.toml`, launchd plists, hidden characters and directory skips. The findings.json format stays 1.2.
