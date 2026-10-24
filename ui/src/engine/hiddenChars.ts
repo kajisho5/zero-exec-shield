@@ -4,7 +4,7 @@
 /** Every Default_Ignorable_Code_Point of Unicode (the set browsers draw with zero width): the soft hyphen U+00AD, U+034F,
  *  the Arabic letter mark U+061C, the Hangul fillers U+115F–1160 / U+3164 / U+FFA0, U+17B4–17B5, the Mongolian free
  *  variation selectors and vowel separator U+180B–180F, U+200B–200F (zero-width space / joiners, LRM, RLM), U+202A–202E
- *  (bidi embeddings and overrides), U+2060–206F (word joiner, invisible operators, bidi isolates, deprecated format
+ *  (bidi embeddings and overrides), U+2060–206F (word joiner, zero-width operators, bidi isolates, deprecated format
  *  characters), the variation selectors U+FE00–FE0F, U+FEFF, U+FFF0–FFF8, U+1BCA0–1BCA3, the musical symbol formatting
  *  characters U+1D173–1D17A and U+E0000–E0FFF (tags, variation selectors supplement). tests/hidden-chars.json holds the
  *  same ranges; the CLI's check_s7 regex and ui/tests/unit/r5.test.ts are checked against it. */

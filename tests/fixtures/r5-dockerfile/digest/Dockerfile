@@ -1,0 +1,2 @@
+FROM --platform=$BUILDPLATFORM alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+USER 0:0

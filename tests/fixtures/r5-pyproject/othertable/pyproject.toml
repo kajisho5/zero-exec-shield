@@ -1,0 +1,3 @@
+[tool.x]
+build-backend = "evil.other"
+backend-path = ["."]

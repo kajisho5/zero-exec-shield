@@ -1,0 +1,38 @@
+[
+  {
+    "campaign": null,
+    "code": "s30.program_arguments",
+    "level": "HIGH",
+    "module": "§30",
+    "params": {},
+    "path": "a/LaunchAgents/a.plist"
+  },
+  {
+    "campaign": null,
+    "code": "s30.random_label",
+    "level": "HIGH",
+    "module": "§30",
+    "params": {
+      "label": "xk3j9"
+    },
+    "path": "a/LaunchAgents/a.plist"
+  },
+  {
+    "campaign": null,
+    "code": "s30.random_label",
+    "level": "HIGH",
+    "module": "§30",
+    "params": {
+      "label": "qz7"
+    },
+    "path": "b/LaunchAgents/b.plist"
+  },
+  {
+    "campaign": null,
+    "code": "s30.tmp_program",
+    "level": "HIGH",
+    "module": "§30",
+    "params": {},
+    "path": "d/LaunchDaemons/d.plist"
+  }
+]

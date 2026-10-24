@@ -1,0 +1,3 @@
+[build-system]
+ backend-path = ["."]
+build-backend = "setuptools.build_meta"

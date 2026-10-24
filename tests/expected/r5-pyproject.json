@@ -1,0 +1,51 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§27",
+      "path": "inline/pyproject.toml"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§27",
+      "path": "pathonly/pyproject.toml"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§27",
+      "path": "bom/pyproject.toml"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§27",
+      "path": "decoy/pyproject.toml"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§27",
+      "path": "inline/pyproject.toml"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

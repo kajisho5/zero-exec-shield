@@ -1,0 +1,182 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§16",
+      "path": "bom/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§16",
+      "path": "bom/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§16",
+      "path": "platform/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§16",
+      "path": "platform/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§16",
+      "path": "vt/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§16",
+      "path": "vt/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "bom/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "cr/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "platform/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "vt/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "wheel/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "bom/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "bom/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "cr/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "digest/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "platform/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "platform/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "vt/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§8",
+      "path": "wheel/Dockerfile"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

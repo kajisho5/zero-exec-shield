@@ -1,0 +1,1 @@
+build-system = { requires = [], build-backend = "evil.inline", backend-path = ["."] }

@@ -1,0 +1,96 @@
+{
+  "findings": [
+    {
+      "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skills/frac/skill.contract.json",
+      "related": [
+        {
+          "path": "skills/frac",
+          "relation": "skill_dir"
+        }
+      ]
+    },
+    {
+      "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skills/longdup/skill.contract.json",
+      "related": [
+        {
+          "path": "skills/longdup",
+          "relation": "skill_dir"
+        }
+      ]
+    },
+    {
+      "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skills/minimal/skill.contract.json",
+      "related": [
+        {
+          "path": "skills/minimal",
+          "relation": "skill_dir"
+        }
+      ]
+    },
+    {
+      "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skills/multi/skill.contract.json",
+      "related": [
+        {
+          "path": "skills/multi",
+          "relation": "skill_dir"
+        }
+      ]
+    },
+    {
+      "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skills/nan/skill.contract.json",
+      "related": [
+        {
+          "path": "skills/nan",
+          "relation": "skill_dir"
+        }
+      ]
+    },
+    {
+      "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skills/zeros/skill.contract.json",
+      "related": [
+        {
+          "path": "skills/zeros",
+          "relation": "skill_dir"
+        }
+      ]
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

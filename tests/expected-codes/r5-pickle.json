@@ -1,0 +1,32 @@
+[
+  {
+    "campaign": "hf-supply-chain",
+    "code": "s32.pickle_model",
+    "level": "MEDIUM",
+    "module": "§32",
+    "params": {
+      "format": "PT"
+    },
+    "path": "a/.PT"
+  },
+  {
+    "campaign": "hf-supply-chain",
+    "code": "s32.pickle_model",
+    "level": "MEDIUM",
+    "module": "§32",
+    "params": {
+      "format": "pkl"
+    },
+    "path": "a/.pkl"
+  },
+  {
+    "campaign": "hf-supply-chain",
+    "code": "s32.pickle_model",
+    "level": "MEDIUM",
+    "module": "§32",
+    "params": {
+      "format": "pkl"
+    },
+    "path": "x_node_modules/m.pkl"
+  }
+]

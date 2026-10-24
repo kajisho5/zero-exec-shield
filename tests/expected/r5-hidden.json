@@ -1,0 +1,33 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§7",
+      "path": "emoji/AGENTS.md"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§7",
+      "path": "filler/CLAUDE.md"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§7",
+      "path": "shy/CLAUDE.md"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

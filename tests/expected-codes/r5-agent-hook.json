@@ -1,0 +1,42 @@
+[
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.agent_hook",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "broken/.cursor/hooks.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.agent_hook",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "hook/.claude/settings.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "hook/.claude/settings.json"
+  },
+  {
+    "campaign": "mcp-poisoning",
+    "code": "s17.dangerous_command",
+    "level": "HIGH",
+    "module": "§17",
+    "params": {},
+    "path": "mcp-only/.claude/settings.json"
+  },
+  {
+    "campaign": null,
+    "code": "s41.instructions_and_hooks",
+    "level": "HIGH",
+    "module": "§41",
+    "params": {},
+    "path": "."
+  }
+]

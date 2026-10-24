@@ -1,0 +1,33 @@
+{
+  "findings": [
+    {
+      "campaign": "hf-supply-chain",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§32",
+      "path": "a/.PT"
+    },
+    {
+      "campaign": "hf-supply-chain",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§32",
+      "path": "a/.pkl"
+    },
+    {
+      "campaign": "hf-supply-chain",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§32",
+      "path": "x_node_modules/m.pkl"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}
