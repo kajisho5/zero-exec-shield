@@ -257,8 +257,14 @@ cli_text() {
   local k="$1"; shift
   if [ "$ZES_LANG_RESOLVED" = ja ]; then zes_render "${CLI_MSG_JA[$k]-$k}" "$@"; else zes_render "${CLI_MSG_EN[$k]-$k}" "$@"; fi
 }
-# cli_fail KEY [key=value...] … prints "ZES: <message>" to stderr and exits 64
-cli_fail() { cli_text "$@"; printf 'ZES: %s\n' "$RENDERED" >&2; exit 64; }
+# cli_fail KEY [key=value...] … prints "ZES: <message>" to stderr and exits 64. The values (paths from ZES_I18N_DIR,
+#   ZES_IOC, arguments) and the message are encoded for the terminal like every other untrusted text (zes_enc)
+cli_fail() {
+  local k="$1" a; shift
+  local -a kv=()
+  for a in "$@"; do zes_enc "${a#*=}"; kv+=("${a%%=*}=$ENC_TERM"); done
+  cli_text "$k" "${kv[@]}"; zes_enc "$RENDERED"; printf 'ZES: %s\n' "$ENC_TERM" >&2; exit 64
+}
 usage() {  # printf only: no cat (it can run before the second PATH sanitising)
   local k
   for k in "${CLI_HELP_LINES[@]}"; do
@@ -266,14 +272,9 @@ usage() {  # printf only: no cat (it can run before the second PATH sanitising)
   done
 }
 
-# Argument / environment errors (exit 64). Values are encoded for the terminal (no escape injection by control or
-#   C1 control characters)
-arg_error() {  # arg_error KEY [key=value...]
-  local k="$1" a; shift
-  local -a kv=()
-  for a in "$@"; do zes_enc "${a#*=}"; kv+=("${a%%=*}=$ENC_TERM"); done
-  cli_fail "$k" "${kv[@]}"
-}
+# Argument / environment errors (exit 64). Values are encoded for the terminal by cli_fail (no escape injection by
+#   control or C1 control characters)
+arg_error() { cli_fail "$@"; }  # arg_error KEY [key=value...]
 
 set_mode() {
   if [ -n "$MODE" ] && [ "$MODE" != "$1" ]; then
@@ -337,10 +338,13 @@ fi
 #   always English) and MSG_LANG (the terminal). No jq: a run without jq must give the same detail and id. The files are
 #   flat JSON, one "key": "value" per line, with only \" and \\ escapes. Fail-closed (exit 64): each file must be complete
 #   ("{" first, "}" last, a comma after every entry but the last, no duplicate key), both files must have the same key
-#   set, and the cli.* / f.* / log.* keys must be exactly the ones this script was released with (ZES_CATALOG_KEYS_SHA256,
-#   the SHA-256 of those keys in C-locale order, one per line; tests/run-tests.sh checks it against i18n/en.json).
+#   set, every entry must have the same placeholders ({name}) in both files, and the cli.* / f.* / log.* keys with their
+#   placeholders must be exactly the ones this script was released with (ZES_CATALOG_KEYS_SHA256: the SHA-256 of the lines
+#   "key name,name..." (placeholder names sorted, deduplicated) in C-locale order of the keys; tests/run-tests.sh checks it
+#   against i18n/en.json). So a catalog cannot drop or rename the {ref} of a detail, and every catalog text printed to the
+#   terminal is encoded (zes_enc) like other untrusted text.
 #   A file is told apart by its name (an empty file has no line 1, so counting files by FNR would be wrong)
-ZES_CATALOG_KEYS_SHA256="f27b8c68b014fb8003d203da2222d5664ec9cd0002ec40bea0241a66794fd8d4"
+ZES_CATALOG_KEYS_SHA256="c2d43bd0032b08715c2a787f3cfdaa17bac827ffc97b4f5ae69843ca23e3471b"
 I18N_DIR="${ZES_I18N_DIR:-$SCRIPT_DIR/i18n}"
 declare -A MSG_EN=() MSG_LANG=()
 ZES_CATALOG_AWK='
@@ -366,13 +370,23 @@ ZES_CATALOG_AWK='
     if (!done || (rest != "" && rest != ",")) fail()
     if ((t SUBSEP key) in seen) fail()
     seen[t, key] = 1; comma[t] = (rest == ","); cnt[t]++
-    printf "%s\037%s\037%s\n", t, key, v }
+    # placeholder names of the value (as zes_render reads them), sorted and deduplicated
+    np = 0; x = v; delete PN
+    while (match(x, /\{[a-z_]+\}/)) { nm = substr(x, RSTART + 1, RLENGTH - 2); x = substr(x, RSTART + RLENGTH)
+      if (!(nm in PN)) { PN[nm] = 1; PL[++np] = nm } }
+    for (a = 2; a <= np; a++) { nm = PL[a]; for (b = a - 1; b >= 1 && PL[b] > nm; b--) PL[b + 1] = PL[b]; PL[b + 1] = nm }
+    ph = ""; for (a = 1; a <= np; a++) ph = ph (a > 1 ? "," : "") PL[a]
+    PH[t, key] = ph
+    printf "%s\037%s\037%s\n", t, key, v
+    if (t == "E") printf "P\037%s %s\n", key, ph }
   END {
     if (bad || !("E" in closed) || !("J" in closed) || cnt["E"] != cnt["J"]) exit
-    for (x in seen) { split(x, p, SUBSEP); if (!(((p[1] == "E" ? "J" : "E") SUBSEP p[2]) in seen)) exit }
+    for (x in seen) { split(x, p, SUBSEP); if (!(((p[1] == "E" ? "J" : "E") SUBSEP p[2]) in seen)) exit
+      if (PH["E", p[2]] != PH["J", p[2]]) exit }
     print "OK" }'
 zes_load_catalog() {
   local en="$I18N_DIR/en.json" ja="$I18N_DIR/ja.json" f line t k ok=0 sum
+  local -a phs=()
   for f in "$en" "$ja"; do { [ -f "$f" ] && [ -r "$f" ]; } || cli_fail cli.err.catalog path="$f"; done
   local -a lines=()
   mapfile -t lines < <(ZES_CAT_EN="$en" ZES_CAT_JA="$ja" awk "$ZES_CATALOG_AWK" "$en" "$ja" 2>/dev/null)
@@ -383,10 +397,11 @@ zes_load_catalog() {
                     [ "$ZES_LANG_RESOLVED" = ja ] || MSG_LANG["$k"]="$t" ;;
       J"$US_CHAR"*) line="${line#J"$US_CHAR"}"; k="${line%%"$US_CHAR"*}"; t="${line#*"$US_CHAR"}"
                     [ "$ZES_LANG_RESOLVED" = ja ] && MSG_LANG["$k"]="$t" ;;
+      P"$US_CHAR"*) case "${line#P"$US_CHAR"}" in cli.*|f.*|log.*) phs+=("${line#P"$US_CHAR"}") ;; esac ;;
     esac
   done
   [ "$ok" -eq 1 ] || cli_fail cli.err.catalog path="$en $ja"
-  sum="$(for k in "${!MSG_EN[@]}"; do case "$k" in cli.*|f.*|log.*) printf '%s\n' "$k" ;; esac; done | sort \
+  sum="$(printf '%s\n' "${phs[@]}" | sort \
     | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; } 2>/dev/null)"
   [ "${sum%% *}" = "$ZES_CATALOG_KEYS_SHA256" ] || cli_fail cli.err.catalog path="$en $ja"
 }
@@ -433,8 +448,8 @@ msg() { local k="$1"; shift; zes_render "${MSG_LANG[$k]-$k}" "$@"; }
 # log_section "§N" … the title is log.section.sN
 log_section() {
   CURRENT_MODULE="$1"
-  msg "log.section.s${1#§}"
-  printf '\n%s== %s %s ==%s\n' "$C_CYN" "$1" "$RENDERED" "$C_OFF" >&3
+  msg "log.section.s${1#§}"; zes_enc "$RENDERED"
+  printf '\n%s== %s %s ==%s\n' "$C_CYN" "$1" "$ENC_TERM" "$C_OFF" >&3
 }
 log_info() { msg "$@"; zes_enc "$RENDERED"; printf '%s  %s%s\n' "$C_DIM" "$ENC_TERM" "$C_OFF" >&3; }
 
@@ -4785,9 +4800,9 @@ main() {
   if [ "$ib" != "$INCIDENT_BUNDLE" ]; then
     record_error "core" "incident_bundle_mismatch:${ib:-none}"
   fi
-  msg log.banner version="$ZES_VERSION" spec="$ZES_SPEC_VERSION"
+  msg log.banner version="$ZES_VERSION" spec="$ZES_SPEC_VERSION"; zes_enc "$RENDERED"; local banner="$ENC_TERM"
   zes_enc "$ROOT"
-  printf '%s%s%s  bundle=%s  mode=%s  root=%s  os=%s  jq=%s\n' "$C_CYN" "$RENDERED" "$C_OFF" "$INCIDENT_BUNDLE" "$MODE" "$ENC_TERM" "$OS_NAME" "$HAVE_JQ" >&3
+  printf '%s%s%s  bundle=%s  mode=%s  root=%s  os=%s  jq=%s\n' "$C_CYN" "$banner" "$C_OFF" "$INCIDENT_BUNDLE" "$MODE" "$ENC_TERM" "$OS_NAME" "$HAVE_JQ" >&3
   # PATH entries dropped by sanitization (relative, empty, under the scan root). A fake jq / git / coreutils inside the scan root is never started
   local e
   for e in "${PATH_DROPPED[@]}"; do record_error "core" "path_entry_dropped:$e"; done
@@ -4812,8 +4827,8 @@ main() {
   [ "$FATAL" -eq 1 ] && status="error"
   local c h m
   c="$(grep -c '"level":"CRITICAL"' "$FINDINGS_FILE")"; h="$(grep -c '"level":"HIGH"' "$FINDINGS_FILE")"; m="$(grep -c '"level":"MEDIUM"' "$FINDINGS_FILE")"
-  msg log.result
-  printf '\n%s%s%s CRITICAL=%s HIGH=%s MEDIUM=%s status=%s\n' "$C_CYN" "$RENDERED" "$C_OFF" "$c" "$h" "$m" "$status" >&3
+  msg log.result; zes_enc "$RENDERED"
+  printf '\n%s%s%s CRITICAL=%s HIGH=%s MEDIUM=%s status=%s\n' "$C_CYN" "$ENC_TERM" "$C_OFF" "$c" "$h" "$m" "$status" >&3
   if [ "$JSON_OUT" -eq 1 ]; then emit_json "$status"; fi
   [ "$status" = "error" ] && return 2
   return 0

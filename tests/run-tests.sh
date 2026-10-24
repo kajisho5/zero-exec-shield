@@ -735,9 +735,7 @@ for c in empty_en empty_ja trunc missing both after dup comma; do
 done
 mkcat good; ZES_I18N_DIR="$TMP/cat-good" ZES_LANG=ja run_scan "$FIX/github-actions" worm "$FIX/_home" >/dev/null || { cat_ok=0; cat_msg="$cat_msg good"; }
 [ "$cat_ok" -eq 1 ] && ok "空・途中で切れた・キーの欠けた・en と ja でキーの違うカタログは --lang en / ja とも exit 64" || ng "不完全なカタログを受理:$cat_msg"
-want="$(grep -o '^"[a-z0-9_.]*"' "$REPO/i18n/en.json" | tr -d '"' | grep -E '^(cli|f|log)\.' | sort | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1)"
-grep -q -x -F "ZES_CATALOG_KEYS_SHA256=\"$want\"" "$SCAN" && ok "ZES_CATALOG_KEYS_SHA256 が i18n/en.json の cli.* / f.* / log.* のキーと一致" \
-  || ng "ZES_CATALOG_KEYS_SHA256 が i18n/en.json と不一致（キーを変えたら $want に更新）"
+# (ZES_CATALOG_KEYS_SHA256 itself is checked in the round 5 section: keys and placeholder names)
 
 # CLI-3: every --lang value is checked, not only the last one
 lang_ok=1
@@ -854,6 +852,37 @@ while IFS=$'\037' read -r nm hx want; do
   [ "$got" = "$want" ] || ij_bad="$ij_bad $nm(${got:-none})"
 done < <(jq -r '.cases[] | [.name, .hex, (.problem // "")] | join("\u001f")' "$TESTS_DIR/ijson-cases.json")
 [ -z "$ij_bad" ] && ok "tests/ijson-cases.json の I-JSON 判定を sp_ijson_problem で再現（RFC 8259 のみ・数値は厳密な 10 進比較）" || ng "I-JSON 判定が tests/ijson-cases.json と不一致:$ij_bad"
+
+# CLI-5: every catalog text printed to the terminal is encoded (banner, section titles, result line, catalog / IoC error
+#   messages with their paths), and a catalog whose placeholders differ from the released ones (a detail without {ref},
+#   ja and en with different placeholders) is exit 64. ZES_CATALOG_KEYS_SHA256 covers the keys and their placeholder names
+want="$(jq -r 'to_entries[] | select(.key | test("^(cli|f|log)\\.")) | "\(.key) \([.value | scan("\\{[a-z_]+\\}") | .[1:-1]] | unique | join(","))"' "$REPO/i18n/en.json" \
+  | LC_ALL=C sort | { sha256sum 2>/dev/null || shasum -a 256; } | cut -d' ' -f1)"
+grep -q -x -F "ZES_CATALOG_KEYS_SHA256=\"$want\"" "$SCAN" && ok "ZES_CATALOG_KEYS_SHA256 が i18n/en.json の cli.* / f.* / log.* のキーとプレースホルダ名に一致" \
+  || ng "ZES_CATALOG_KEYS_SHA256 が i18n/en.json と不一致（キーかプレースホルダを変えたら $want に更新）"
+C5="$TMP/r5-cat"; mkdir -p "$C5/esc" "$C5/noref" "$C5/japh" "$TMP/r5-t1/.github/workflows"
+printf 'jobs:\n  a:\n    steps:\n      - uses: evil/a@v1\n' >"$TMP/r5-t1/.github/workflows/w.yml"
+ESC=$'\033'; BEL=$'\a'; CR=$'\r'
+for l in en ja; do
+  sed -e "s/^\(\"log\.section\.s22\": \"[^\"]*\)\"/\1${ESC}]0;PWNED${BEL}${ESC}[2J\"/" -e "s/^\(\"log\.banner\": \"\)/\1ZES${ESC}[31mRED${CR}/" \
+      -e "s/^\(\"log\.result\": \"[^\"]*\)\"/\1${ESC}[2J\"/" "$REPO/i18n/$l.json" >"$C5/esc/$l.json"
+  sed 's/^\("f\.s22\.unpinned": "\)[^"]*"/\1No problem, all safe"/' "$REPO/i18n/$l.json" >"$C5/noref/$l.json"
+done
+cp "$REPO/i18n/en.json" "$C5/japh/en.json"; sed 's/^\("f\.s22\.unpinned": "[^"]*\){ref}/\1{reff}/' "$REPO/i18n/ja.json" >"$C5/japh/ja.json"
+ZES_I18N_DIR="$C5/esc" run_scan "$TMP/r5-t1" standard "$FIX/_home" >/dev/null; rc=$?
+c5_ok=1; { [ "$rc" = 0 ] && ! grep -q "$(printf '\033')" "$TMP/stderr.txt" && ! grep -q "$(printf '\r')" "$TMP/stderr.txt" \
+  && grep -q -F 'ZES\x1b[31mRED\x0d' "$TMP/stderr.txt" && grep -q -F 'SHA pinning\x1b]0;PWNED\x07\x1b[2J ==' "$TMP/stderr.txt"; } || c5_ok=0
+for c in noref japh; do
+  ZES_I18N_DIR="$C5/$c" run_scan "$TMP/r5-t1" standard "$FIX/_home" >"$TMP/r5-cat.json"; rc=$?
+  { [ "$rc" = 64 ] && [ ! -s "$TMP/r5-cat.json" ]; } || c5_ok=0
+done
+mkdir -p "$C5/x$(printf '\033')[2Jy"
+ZES_I18N_DIR="$C5/x$(printf '\033')[2Jy" run_scan "$TMP/r5-t1" quick "$FIX/_home" >/dev/null; rc=$?
+{ [ "$rc" = 64 ] && ! grep -q "$(printf '\033')" "$TMP/stderr.txt" && grep -q -F 'x\x1b[2Jy/en.json' "$TMP/stderr.txt"; } || c5_ok=0
+ZES_IOC="$C5/i$(printf '\033')c.json" run_scan "$TMP/r5-t1" quick "$FIX/_home" >/dev/null; rc=$?
+{ [ "$rc" = 64 ] && ! grep -q "$(printf '\033')" "$TMP/stderr.txt" && grep -q -F 'i\x1bc.json' "$TMP/stderr.txt"; } || c5_ok=0
+[ "$c5_ok" -eq 1 ] && ok "カタログ由来の端末出力（バナー・見出し・結果行・エラーのパス）は符号化、プレースホルダの違うカタログは exit 64" \
+  || ng "カタログの端末出力の符号化 / プレースホルダ検査が不十分"
 
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"
