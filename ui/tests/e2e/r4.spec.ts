@@ -15,6 +15,8 @@ const FIX = fileURLToPath(new URL('../../../tests/fixtures/', import.meta.url));
 function longRef(): string {
   const root = join(mkdtempSync(join(tmpdir(), 'zes-e2e-')), 'longref');
   mkdirSync(join(root, '.github/workflows'), { recursive: true });
+  // A visible file too: Playwright WebKit cannot setInputFiles a folder that holds only hidden entries (see app.spec.ts)
+  writeFileSync(join(root, 'README.md'), 'x\n');
   writeFileSync(join(root, '.github/workflows/ci.yml'), 'on: push\njobs:\n  a:\n    runs-on: x\n    steps:\n      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567a\n');
   return root;
 }
