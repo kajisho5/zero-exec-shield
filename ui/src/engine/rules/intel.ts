@@ -6,6 +6,7 @@ import type { Severity } from '../types';
 import { basename, ere, versionCmp, versionMatches, type FCode } from '../util';
 import { hookLocators } from './agentConfig';
 import { workflowText } from './ciAndExtensions';
+import { DOCKERFILE, plistLabel } from './codeAndHost';
 import { collectDeps } from './supplyChain';
 
 const NUM = /^\d+(\.\d+)+$/;
@@ -19,6 +20,29 @@ export function versionBranchVulnerable(v: string, fixed: string[]): boolean {
   const branch = (x: string) => x.replace(/^v/, '').split('.').slice(0, 2).join('.');
   const same = fixed.find((f) => branch(f) === branch(v));
   return same ? versionCmp(v, same) < 0 : true;
+}
+
+/** §5 Python runtime from loaded files (the file part of CLI check_s5; the host python3 is CLI only): the first line of
+ *  .python-version (all whitespace removed) and python:3.x image tags of FROM in Dockerfiles. 3.N means 3.N.0. */
+export function pythonRules(ctx: RuleCtx): void {
+  ctx.checks.add('s5-python');
+  const mins = ctx.ioc.runtime_minimums?.python ?? [];
+  if (!mins.length) return;
+  const judge = (v: string, path: string, sha: string | null) => {
+    if (!/^3\.\d+(\.\d+)?$/.test(v)) return;
+    const ver = /^3\.\d+$/.test(v) ? `${v}.0` : v;
+    if (versionBranchVulnerable(ver, mins)) push(ctx, { level: 'HIGH', module: '§5', campaign: null, path, code: 's5.python_old', params: { fixed: mins.join(' '), version: ver }, ruleId: `s5-python:${ver}`, evidenceSha: sha, kind: 'runtime.cve' });
+  };
+  for (const f of readable(ctx)) {
+    if (f.name === '.python-version') judge((f.text.split('\n')[0] ?? '').replace(/[ \t\n\v\f\r]/g, ''), f.relPath, f.sha256);
+    else if (DOCKERFILE.test(f.name)) {
+      // grep -i -o 'FROM[[:space:]]+([^ ]*/)?python:3\.[0-9]+(\.[0-9]+)?' | sed 's/.*python://' (the sed is case-sensitive)
+      for (const m of f.text.matchAll(/FROM[ \t\v\f\r]+([^ \n]*\/)?python:3\.[0-9]+(\.[0-9]+)?/gi)) {
+        const i = m[0].lastIndexOf('python:');
+        if (i >= 0) judge(m[0].slice(i + 7), f.relPath, f.sha256);
+      }
+    }
+  }
 }
 
 /** Takes the version from image tags in compose / Dockerfile / k8s / tf / json (same as CLI detect_service_version) */
@@ -257,7 +281,7 @@ export function intelRules(ctx: RuleCtx): void {
     }
     const labels = new Set(h.launch_labels ?? []);
     for (const f of readable(ctx).filter((x) => /(^|\/)Launch(Agents|Daemons)\/[^/]+\.plist$/.test(x.relPath))) {
-      const label = /<key>Label<\/key>\s*<string>([^<]+)<\/string>/.exec(f.text)?.[1];
+      const label = plistLabel(f.text);
       if (label && labels.has(label)) push(ctx, { level: 'CRITICAL', module: '§30', campaign: h.campaign, path: f.relPath, code: 'intel.launchd', params: { label }, ruleId: `s30-intel-host:launch:${label}`, evidenceSha: f.sha256 });
     }
     const units = new Set(h.systemd_units ?? []);

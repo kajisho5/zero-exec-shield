@@ -59,7 +59,9 @@ export function modelSupplyRules(ctx: RuleCtx): void {
 
 export function persistenceRules(ctx: RuleCtx): void {
   ctx.checks.add('s10-rc').add('s26-gitconfig').add('s26-envrc').add('s30-launchagent').add('s31-ldpreload').add('s31-autostart').add('s33-prompt').add('s35-history');
-  for (const f of readable(ctx)) {
+  // ctx.vcs: the root .git/config, which the CLI reads for §26 although it does not walk the root .git
+  const rootGitConfig = ctx.vcs.filter((x): x is typeof x & { text: string } => x.text !== null && x.name === 'config');
+  for (const f of [...readable(ctx), ...rootGitConfig]) {
     const p = f.relPath;
     if (RC.test(p)) {
       if (/(curl|wget)[^|#\n]*\|\s*(ba|z)?sh/.test(f.text)) push(ctx, { level: 'HIGH', module: '§10', campaign: null, path: p, code: 's10.curl_sh', ruleId: 's10-rc:curlsh', evidenceSha: f.sha256, locators: textLocators(f.text, /(curl|wget)[^|#]*\|\s*(ba|z)?sh/) });

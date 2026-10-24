@@ -1,0 +1,56 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
+      "level": "HIGH",
+      "module": "§16",
+      "path": "img/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "gha.unpinned",
+      "level": "MEDIUM",
+      "module": "§28",
+      "path": "img/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
+      "level": "HIGH",
+      "module": "§5",
+      "path": ".python-version"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
+      "level": "HIGH",
+      "module": "§5",
+      "path": "img/Dockerfile"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "runtime.cve",
+      "level": "HIGH",
+      "module": "§5",
+      "path": "old/.python-version"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

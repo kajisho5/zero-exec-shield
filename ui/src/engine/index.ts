@@ -2,7 +2,7 @@ import type { RuleCtx } from './context';
 import { IOC, type IocDb } from './ioc';
 import { aiAssistantRules, mcpRegistryRules, mcpRules } from './rules/agentConfig';
 import { actionsRules, extensionRules } from './rules/ciAndExtensions';
-import { emudhraRules, infraRules, intelRules } from './rules/intel';
+import { emudhraRules, infraRules, intelRules, pythonRules } from './rules/intel';
 import { buildHookRules, containerRules, credentialRules, homeRules, ebpfRules, modelSupplyRules, persistenceRules, sigstoreRules } from './rules/codeAndHost';
 import { analyzePasteText } from './rules/network';
 import { phpRules } from './rules/php';
@@ -16,6 +16,9 @@ import { makeFinding } from './util';
 export * from './types';
 export { IOC } from './ioc';
 
+const VCS_ROOT = /^\.(git|hg|svn)(\/|$)/;
+const VCS_READ = /^\.git\/(config|hooks\/[^/]+)$/;
+
 function sortFindings(xs: Finding[]): Finding[] {
   return xs.sort((a, b) => SEVERITY_RANK[b.level] - SEVERITY_RANK[a.level] || Number(a.module.slice(1)) - Number(b.module.slice(1)) || (a.path ?? '').localeCompare(b.path ?? ''));
 }
@@ -23,13 +26,18 @@ function sortFindings(xs: Finding[]): Finding[] {
 /** Evaluates the loaded files. The return value contains no file content (only paths, rule IDs, fixed wording and hashes). */
 export async function analyzeFiles(input: FileInput[], ioc: IocDb = IOC): Promise<EngineResult> {
   const seen = new Set<string>();
-  const files = input.filter((f) => (seen.has(f.relPath) ? false : (seen.add(f.relPath), true)));
-  const first = files[0]?.relPath ?? '';
+  const all = input.filter((f) => (seen.has(f.relPath) ? false : (seen.add(f.relPath), true)));
+  const first = all[0]?.relPath ?? '';
   const top = first.includes('/') ? first.slice(0, first.indexOf('/')) : '';
-  const root = top && files.every((f) => f.relPath.startsWith(top + '/')) ? top : '';
+  const root = top && all.every((f) => f.relPath.startsWith(top + '/')) ? top : '';
+  // Like the CLI's inventory, the root .git / .hg / .svn are not walked (nested ones are); only what the CLI reads there
+  // statically stays available to the §26 / §7 rules
+  const rel = (p: string) => (root ? p.slice(root.length + 1) : p);
+  const files = all.filter((f) => !VCS_ROOT.test(rel(f.relPath)));
+  const vcs = all.filter((f) => VCS_READ.test(rel(f.relPath)));
   const ctx: RuleCtx = {
-    files, byPath: new Map(files.map((f) => [f.relPath, f])), ioc, specs: [], blast: [],
-    viewers: { mcp: [], actions: [], extensions: [] }, errors: [], checks: new Set(), root,
+    files, byPath: new Map([...files, ...vcs].map((f) => [f.relPath, f])), ioc, specs: [], blast: [],
+    viewers: { mcp: [], actions: [], extensions: [] }, errors: [], checks: new Set(), root, vcs,
   };
   filenameRules(ctx);
   packageRules(ctx);
@@ -49,6 +57,7 @@ export async function analyzeFiles(input: FileInput[], ioc: IocDb = IOC): Promis
   sigstoreRules(ctx);
   credentialRules(ctx);
   infraRules(ctx);
+  pythonRules(ctx);
   phpRules(ctx);
   emudhraRules(ctx);
   intelRules(ctx);

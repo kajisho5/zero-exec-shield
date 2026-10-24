@@ -165,9 +165,16 @@ export const isAiInstruction = (f: { name: string; relPath: string }) =>
   /^(\.cursorrules|CLAUDE\.md|CLAUDE\.local\.md|AGENTS\.md|GEMINI\.md|copilot-instructions\.md|\.windsurfrules|\.clinerules)$/.test(f.name)
   || /(^|\/)\.cursor\/rules\/[^/]+$|(^|\/)\.clinerules\/.+|(^|\/)\.github\/instructions\/.+|(^|\/)\.claude\/(.+\/)?[^/]+\.md$/.test(f.relPath);
 
-/** §7 Invisible characters, BiDi control characters and homoglyphs in AI instruction files. */
+/** §7 Invisible characters, BiDi control characters and homoglyphs in AI instruction files; Git hooks. */
 export function aiAssistantRules(ctx: RuleCtx): void {
-  ctx.checks.add('s7-invisible').add('s7-homoglyph');
+  ctx.checks.add('s7-invisible').add('s7-homoglyph').add('s7-git-hook');
+  // Git hooks (CLI check_s7): every non-sample file directly in the hooks directory of the root .git and of nested .git
+  // directories (the CLI's "$hookdir"/* glob: no dot files). gitdir: files and the commondir of a worktree are not
+  // resolved in the browser
+  for (const f of [...ctx.vcs, ...ctx.files].filter((x) => /(^|\/)\.git\/hooks\/[^/.][^/]*$/.test(x.relPath) && !x.name.endsWith('.sample'))) {
+    const bad = f.text !== null && /(curl|wget|base64|nc |\/dev\/tcp|python[0-9.]* -c|node -e)/.test(f.text);
+    push(ctx, { level: bad ? 'HIGH' : 'MEDIUM', module: '§7', campaign: null, path: f.relPath, code: bad ? 's7.git_hook_suspicious' : 's7.git_hook', ruleId: 's7-git-hook', evidenceSha: f.sha256 });
+  }
   const targets = readable(ctx).filter(isAiInstruction);
   for (const f of targets) {
     // Embedding with variation selectors (U+FE00–FE0D, U+E0100–E01EF, 2 or more consecutive U+FE00–FE0F) is covered too (same as CLI §7)
