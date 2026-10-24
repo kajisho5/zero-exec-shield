@@ -2678,12 +2678,14 @@ jsonc_to_json() {
         if (ins) {
           if (esc) esc = 0; else if (ch == "\\") esc = 1; else if (ch == "\"") ins = 0
           printf "%s", ch; continue }
+        # Comments are skipped with a loop (index(substr($0, i), …) would copy the rest of the file once per comment)
         if (ch == "/" && substr($0, i + 1, 1) == "/") {
-          j = index(substr($0, i), "\n"); if (j == 0) i = n; else i = i + j - 2
+          while (i < n && substr($0, i + 1, 1) != "\n") i++
           continue }
         if (ch == "/" && substr($0, i + 1, 1) == "*") {
-          j = index(substr($0, i + 2), "*/"); if (j == 0) { printf "%s", substr($0, i); i = n; continue }
-          i = i + j + 2; printf " "; continue }
+          for (j = i + 2; j < n && substr($0, j, 2) != "*/"; j++) ;
+          if (j >= n) { printf "%s", substr($0, i); i = n; continue }
+          i = j + 1; printf " "; continue }
         if (ch ~ /[ \t\r\n]/) { printf "%s", ch; continue }
         if (pc) { if (ch != "}" && ch != "]") printf ","; pc = 0 }
         if (ch == ",") { pc = 1; continue }
@@ -2705,7 +2707,7 @@ jsonc_to_json() {
 #   Places that cannot be parsed as syntax (invalid TOML, unknown escapes etc.) and servers whose command is not a string or that have neither command nor url
 #   are reported with a "?<reason>" line, and the caller records them in errors[] (unreadable configs are not treated as 0 hits)
 codex_toml_mcp_commands() {
-  text_lines "$1" | awk '
+  text_lines "$1" | awk "$ZES_AWK_LIB"'
     function perr(why) { print "?parse_error:" why ":line" line; exit }
     function ch(k) { return substr(S, i + k, 1) }
     function skip_ws() { while (i <= n && (ch(0) == " " || ch(0) == "\t")) i++ }
@@ -2741,75 +2743,86 @@ codex_toml_mcp_commands() {
         if (length(h) != L || cp < 0 || cp > 1114111) perr("bad_escape")
         i += L; return utf8(cp) }
       perr("bad_escape") }
-    function strch(c) { if (c == "\t") return " "; if (c < " " && c != "") perr("control_character"); return c }
-    function bstr(   out, c) {
-      i++; out = ""
+    # Strings are collected as pieces in SP[1..sn] (runs of plain characters as one substr, then each decoded escape) and joined
+    #   once at the end, so a long string costs linear time. A tab becomes a space; other control characters are an error
+    function plain(c) { if (c < " " && c != "" && c != "\t") perr("control_character") }
+    function piece(s) { if (i > s) SP[++sn] = substr(S, s, i - s) }
+    function bstr(   c, s) {
+      i++; sn = 0; s = i
       while (1) { if (i > n) perr("unterminated_string"); c = ch(0)
-        if (c == "\"") { i++; return out }
+        if (c == "\"") { piece(s); i++; return zes_join(SP, sn) }
         if (c == "\n") perr("newline_in_string")
-        if (c == "\\") { i++; out = out esc(); continue }
-        out = out strch(c); i++ } }
-    function lstr(   out, c) {
-      i++; out = ""
+        if (c == "\\") { piece(s); i++; SP[++sn] = esc(); s = i; continue }
+        plain(c); if (c == "\t") { piece(s); SP[++sn] = " "; s = i + 1 }
+        i++ } }
+    function lstr(   c, s) {
+      i++; sn = 0; s = i
       while (1) { if (i > n) perr("unterminated_string"); c = ch(0)
-        if (c == "\047") { i++; return out }
+        if (c == "\047") { piece(s); i++; return zes_join(SP, sn) }
         if (c == "\n") perr("newline_in_string")
-        out = out strch(c); i++ } }
+        plain(c); if (c == "\t") { piece(s); SP[++sn] = " "; s = i + 1 }
+        i++ } }
     # Multi-line string. q is the delimiter (" or \047). Up to 2 delimiter characters may appear right before the closing delimiter
-    function mlstr(q,   out, c, k, j) {
+    function mlstr(q,   c, k, j, s) {
       i += 3; if (ch(0) == "\n") { line++; i++ }
-      out = ""
+      sn = 0; s = i
       while (1) { if (i > n) perr("unterminated_string"); c = ch(0)
         if (c == q && ch(1) == q && ch(2) == q) {
+          piece(s)
           k = 0; while (ch(k) == q) k++
           if (k > 5) perr("bad_multiline_string")
-          for (j = 3; j < k; j++) out = out q
-          i += k; return out }
+          for (j = 3; j < k; j++) SP[++sn] = q
+          i += k; return zes_join(SP, sn) }
         if (c == "\\" && q == "\"") {
+          piece(s)
           j = 1; while (ch(j) == " " || ch(j) == "\t") j++
-          if (ch(j) == "\n") { i += j; while (i <= n && (ch(0) == " " || ch(0) == "\t" || ch(0) == "\n")) { if (ch(0) == "\n") line++; i++ }; continue }
-          i++; out = out esc(); continue }
-        if (c == "\n") { line++; out = out " "; i++; continue }
-        out = out strch(c); i++ } }
+          if (ch(j) == "\n") { i += j; while (i <= n && (ch(0) == " " || ch(0) == "\t" || ch(0) == "\n")) { if (ch(0) == "\n") line++; i++ }; s = i; continue }
+          i++; SP[++sn] = esc(); s = i; continue }
+        if (c == "\n") { piece(s); line++; SP[++sn] = " "; i++; s = i; continue }
+        plain(c); if (c == "\t") { piece(s); SP[++sn] = " "; s = i + 1 }
+        i++ } }
     # Read a key (dotted, quoted keys allowed) into KS[1..nk]
-    function key(   nk, k, c) {
+    function key(   nk, k, c, s) {
       nk = 0
       while (1) { skip_ws(); c = ch(0)
         if (c == "\"") { if (ch(1) == "\"" && ch(2) == "\"") perr("bad_key"); k = bstr() }
         else if (c == "\047") { if (ch(1) == "\047" && ch(2) == "\047") perr("bad_key"); k = lstr() }
-        else { k = ""; while (i <= n && ch(0) ~ /[A-Za-z0-9_-]/) { k = k ch(0); i++ }; if (k == "") perr("bad_key") }
+        else { s = i; while (i <= n && ch(0) ~ /[A-Za-z0-9_-]/) i++; k = substr(S, s, i - s); if (k == "") perr("bad_key") }
         KS[++nk] = k; skip_ws()
         if (ch(0) == ".") { i++; continue }
         return nk } }
     function rec(t, p, v) { print t "\037" p "\037" v }
-    function value(p,   c, t, idx, nk, kp, k) {
+    # Arrays and inline tables nest at most 80 deep, the limit of the TOML parser of Codex CLI (toml 0.9 / toml_parser
+    #   RecursionGuard, LIMIT = 80); deeper is a parse error (fail-closed, before mawk runs out of evaluation stack)
+    function value(p,   c, t, idx, nk, kp, k, s) {
       c = ch(0)
+      if ((c == "[" || c == "{") && ++depth > 80) perr("nesting_too_deep")
       if (c == "\"") { if (ch(1) == "\"" && ch(2) == "\"") t = mlstr("\""); else t = bstr(); rec("s", p, t); return }
       if (c == "\047") { if (ch(1) == "\047" && ch(2) == "\047") t = mlstr("\047"); else t = lstr(); rec("s", p, t); return }
       if (c == "[") {
         i++; idx = 0; rec("a", p, "")
         while (1) { skip_wsnl(); if (i > n) perr("unterminated_array")
-          if (ch(0) == "]") { i++; return }
+          if (ch(0) == "]") { i++; depth--; return }
           value(p SUBSEP idx); idx++
           skip_wsnl(); c = ch(0)
           if (c == ",") { i++; continue }
-          if (c == "]") { i++; return }
+          if (c == "]") { i++; depth--; return }
           perr("bad_array") } }
       if (c == "{") {
         i++; rec("t", p, ""); skip_wsnl()
-        if (ch(0) == "}") { i++; return }
+        if (ch(0) == "}") { i++; depth--; return }
         while (1) { skip_wsnl(); nk = key(); kp = p; for (k = 1; k <= nk; k++) kp = kp SUBSEP KS[k]
           skip_ws(); if (ch(0) != "=") perr("bad_inline_table"); i++; skip_ws()
           value(kp); skip_wsnl(); c = ch(0)
           if (c == ",") { i++; continue }
-          if (c == "}") { i++; return }
+          if (c == "}") { i++; depth--; return }
           perr("bad_inline_table") } }
-      t = ""; while (i <= n && ch(0) ~ /[A-Za-z0-9_+.:-]/) { t = t ch(0); i++ }
+      s = i; while (i <= n && ch(0) ~ /[A-Za-z0-9_+.:-]/) i++; t = substr(S, s, i - s)
       if (t ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ && ch(0) == " " && ch(1) ~ /[0-9]/) { i++; while (i <= n && ch(0) ~ /[0-9:.Zz+-]/) i++ }
       if (t == "") perr("bad_value")
       rec("o", p, t) }
     BEGIN { RS = "\001" }
-    { S = $0; n = length(S); i = 1; line = 1; tbl = ""
+    { S = $0; n = length(S); i = 1; line = 1; tbl = ""; depth = 0
       while (1) {
         skip_wsnl(); if (i > n) break
         if (ch(0) == "[") {
@@ -2821,7 +2834,7 @@ codex_toml_mcp_commands() {
           tbl = p; rec("t", p, ""); eol(); continue }
         nk = key(); p = tbl; for (k = 1; k <= nk; k++) p = (k == 1 && p == "") ? KS[1] : p SUBSEP KS[k]
         skip_ws(); if (ch(0) != "=") perr("expected_equals"); i++; skip_ws()
-        value(p); eol() } }' | awk -F'\037' '
+        value(p); eol() } }' | awk -F'\037' "$ZES_AWK_LIB"'
     /^\?/ { print; next }
     { np = split($2, P, "\034") }
     P[1] != "mcp_servers" { next }
@@ -2830,13 +2843,15 @@ codex_toml_mcp_commands() {
     np == 2 { if ($1 != "t") print "?unexpected_value:" nm; next }
     P[3] == "command" && np == 3 { if ($1 == "s") cmd[nm] = $3; else bad[nm] = "unparsed_command"; next }
     P[3] == "args" {
-      if ($1 == "s" && (np == 3 || np == 4)) args[nm] = args[nm] (args[nm] == "" ? "" : " ") $3
+      if ($1 == "s" && (np == 3 || np == 4)) { AG[nm, ++ag[nm]] = (agz[nm] ? " " : "") $3; if ($3 != "") agz[nm] = 1 }
       else if (!(np == 3 && $1 == "a")) bad[nm] = "unparsed_args"
       next }
     P[3] == "url" && np == 3 { hasurl[nm] = 1 }
     END {
       for (k = 1; k <= no; k++) { nm = order[k]
-        if (cmd[nm] != "") print "=" nm "\037" cmd[nm] (args[nm] != "" ? " " args[nm] : "")
+        # the args pieces of this server, joined once
+        na = ag[nm] + 0; for (j = 1; j <= na; j++) T[j] = AG[nm, j]; a = agz[nm] ? zes_join(T, na) : ""
+        if (cmd[nm] != "") print "=" nm "\037" cmd[nm] (a != "" ? " " a : "")
         if (nm in bad) print "?" bad[nm] ":" nm
         else if (cmd[nm] == "" && !(nm in hasurl)) print "?no_command:" nm } }'
 }
@@ -3032,57 +3047,82 @@ workflow_files() { files_path '/\.github/workflows/[^/]+\.ya?ml$'; }
 #     deeper and not a mapping/sequence (multi-line folding of YAML plain scalars)
 #   uses: >-                              - uses:
 #     actions/checkout@v4   → uses: actions/checkout@v4      actions/checkout@v4 → - uses: actions/checkout@v4
+# Awk helpers shared by the YAML / TOML / JSONC readers below. Every reader is linear in the input size: text is accumulated as
+#   pieces in an array and joined pairwise once (zes_join), never appended to a growing string per line or per character.
+#   Patterns that mawk matches in quadratic time on a long run of blanks (unanchored /[ \t]+$/, /[[:space:]]*(#.*)?$/ and two
+#   adjacent blank stars) are written as loops. tests/run-tests.sh times the readers on 1 MB adversarial inputs
+ZES_AWK_LIB='
+    function zes_join(A, n,   m, k) {
+      if (n < 1) return ""
+      while (n > 1) { m = 0; for (k = 1; k <= n; k += 2) A[++m] = (k < n) ? A[k] A[k + 1] : A[k]; n = m }
+      return A[1] }
+    # zes_rtrim(x, set): x without the trailing characters that are in set (sub(/[ \t]+$/, "") without the regex)
+    function zes_rtrim(x, set,   n) {
+      n = length(x)
+      while (n > 0 && index(set, substr(x, n, 1))) n--
+      return substr(x, 1, n) }
+'
 yaml_flatten() {
-  text_lines "$1" | awk '
+  text_lines "$1" | awk "$ZES_AWK_LIB"'
     function lead(x) { match(x, /^[ \t]*/); return RLENGTH }
-    function props(v) { while (match(v, /^(&[^ \t]+|![^ \t]*)([ \t]+|$)/)) v = substr(v, RLENGTH + 1); return v }
+    # Node properties at the start of a value, all of them in one match (a loop of single matches would copy the rest of the
+    #   value once per property)
+    function props(v) { if (match(v, /^((&[^ \t]+|![^ \t]*)([ \t]+|$))+/)) v = substr(v, RLENGTH + 1); return v }
     function isalias(v) { return v ~ /^\*[^ \t,\]}]+[ \t]*(#.*)?$/ }
-    # Bracket depth outside quotes ([ { and ] })
-    function depth(x,   i, c, q, d) {
-      d = 0; q = ""
-      for (i = 1; i <= length(x); i++) { c = substr(x, i, 1)
-        if (q != "") { if (c == "\\" && q == "\"") { i++; continue } if (c == q) q = ""; continue }
-        if (c == "\"" || c == "\047") { q = c; continue }
-        if (c == "#" && (i == 1 || substr(x, i - 1, 1) ~ /[ \t]/)) break
-        if (c == "[" || c == "{") d++; else if (c == "]" || c == "}") d-- }
-      return d }
+    # Bracket depth outside quotes ([ { and ] }) of the flow collection being accumulated, updated incrementally with the text
+    #   appended to it (state: fd depth, fq open quote, fesc escaped character pending, fstop a comment was reached, fprev the
+    #   previous character)
+    function dscan(x,   i, c, n) {
+      n = length(x)
+      for (i = 1; i <= n && !fstop; i++) { c = substr(x, i, 1)
+        if (fesc) { fesc = 0; fprev = c; continue }
+        if (fq != "") { if (c == "\\" && fq == "\"") fesc = 1; else if (c == fq) fq = ""; fprev = c; continue }
+        if (c == "\"" || c == "\047") { fq = c; fprev = c; continue }
+        if (c == "#" && (fprev == "" || fprev == " " || fprev == "\t")) { fstop = 1; break }
+        if (c == "[" || c == "{") fd++; else if (c == "]" || c == "}") fd--
+        fprev = c } }
     # Remove end-of-line comments outside quotes (space + #)
-    function nocomment(x,   i, c, q) {
-      q = ""
-      for (i = 1; i <= length(x); i++) { c = substr(x, i, 1)
+    function nocomment(x,   i, c, q, n) {
+      q = ""; n = length(x)
+      for (i = 1; i <= n; i++) { c = substr(x, i, 1)
         if (q != "") { if (c == "\\" && q == "\"") { i++; continue } if (c == q) q = ""; continue }
         if (c == "\"" || c == "\047") { q = c; continue }
         if (c == "#" && (i == 1 || substr(x, i - 1, 1) ~ /[ \t]/)) return substr(x, 1, i - 1) }
       return x }
     function item(el, ind) {
-      sub(/^[ \t]+/, "", el); sub(/[ \t]+$/, "", el); if (el == "") return
+      sub(/^[ \t]+/, "", el); el = zes_rtrim(el, " \t"); if (el == "") return
       el = props(el); if (isalias(el)) print "#ZES-YAML-ALIAS"
       print ind "- " el }
     # Output the top-level elements of "[ a, {b: c}, … ]" one per line
-    function flow(body, ind,   i, c, q, d, el) {
-      sub(/^[ \t]*\[/, "", body); sub(/\][ \t]*(#.*)?$/, "", body)
-      d = 0; q = ""; el = ""
-      for (i = 1; i <= length(body); i++) { c = substr(body, i, 1)
-        if (q != "") { el = el c; if (c == "\\" && q == "\"") { i++; el = el substr(body, i, 1); continue } if (c == q) q = ""; continue }
-        if (c == "\"" || c == "\047") { q = c; el = el c; continue }
+    function flow(body, ind,   i, c, q, d, s, n) {
+      sub(/^[ \t]*\[/, "", body)
+      # the closing "]" (the first one followed only by blanks and a comment)
+      if (match(body, /\][ \t]*#/)) body = substr(body, 1, RSTART - 1); else if (match(body, /\][ \t]*$/)) body = substr(body, 1, RSTART - 1)
+      d = 0; q = ""; s = 1; n = length(body)
+      for (i = 1; i <= n; i++) { c = substr(body, i, 1)
+        if (q != "") { if (c == "\\" && q == "\"") { i++; continue } if (c == q) q = ""; continue }
+        if (c == "\"" || c == "\047") { q = c; continue }
         if (c == "[" || c == "{") d++; else if (c == "]" || c == "}") d--
-        if (c == "," && d == 0) { item(el, ind); el = ""; continue }
-        el = el c }
-      item(el, ind) }
+        if (c == "," && d == 0) { item(substr(body, s, i - s), ind); s = i + 1 } }
+      item(substr(body, s), ind) }
+    function flowend(   body) { body = zes_join(FP, fn); fn = 0; inflow = 0; print apre; flow(body, sprintf("%" (aind + 2) "s", "")) }
     function value(pre, v, keyind) {
       v = props(v)
       if (isalias(v) || pre ~ /<<:[ \t]*$/) print "#ZES-YAML-ALIAS"
       if (v ~ /^[|>][-+0-9]*[ \t]*(#.*)?$/) { print pre v; inblk = 1; bind = keyind; return }
       if (v ~ /^\[/) {
-        if (depth(v) > 0) { acc = nocomment(v); apre = pre; aind = keyind; return }
+        fd = 0; fq = ""; fesc = 0; fstop = 0; fprev = ""; dscan(v)
+        if (fd > 0) { fn = 0; FP[++fn] = nocomment(v); inflow = 1; apre = pre; aind = keyind
+          # dscan(v) and dscan(nocomment(v)) end in the same state except for fstop (the comment that nocomment removed)
+          fd = 0; fq = ""; fesc = 0; fstop = 0; fprev = ""; dscan(FP[1]); return }
         print pre; flow(v, sprintf("%" (keyind + 2) "s", "")); return }
       print pre v }
     {
       line = $0
       if (inblk) { if (line ~ /^[ \t]*$/ || lead(line) > bind) { print line; next } inblk = 0 }
-      if (acc != "") {
-        t = nocomment(line); sub(/^[ \t]+/, "", t); acc = acc " " t
-        if (depth(acc) <= 0) { print apre; flow(acc, sprintf("%" (aind + 2) "s", "")); acc = "" }
+      if (inflow) {
+        t = nocomment(line); sub(/^[ \t]+/, "", t); t = " " t; FP[++fn] = t; dscan(t)
+        if (fd <= 0) flowend()
         next }
       pre = ""
       if (match(line, /^[ \t]*-([ \t]+|$)/)) {
@@ -3093,27 +3133,42 @@ yaml_flatten() {
       if (match(line, /^[ \t]*(-[ \t]+)?["\047]?[A-Za-z0-9_.$<-]+["\047]?:([ \t]+|$)/)) {
         value(substr(line, 1, RLENGTH), substr(line, RLENGTH + 1), ki); next }
       print line }
-    END { if (acc != "") { print apre; flow(acc, sprintf("%" (aind + 2) "s", "")) } }'
+    END { if (inflow) flowend() }'
 }
 workflow_text() {
-  yaml_flatten "$1" | awk '
+  yaml_flatten "$1" | awk "$ZES_AWK_LIB"'
+    # The unanchored /[[:space:]]*…$/ patterns of this stage are written as loops (mawk is quadratic on long blank runs there)
+    function isws(c) { return c != "" && index(" \t\n\v\f\r", c) }
+    # sub(/[[:space:]]*(#.*)?$/, "", x)
+    function cutc(x,   h) { h = index(x, "#"); if (h == 0) return zes_rtrim(x, " \t\n\v\f\r"); return zes_rtrim(substr(x, 1, h - 1), " \t\n\v\f\r") }
+    # sub(/[[:space:]]+#.*$/, "", x)
+    function cutsc(x,   i, n) { n = length(x); for (i = 2; i <= n; i++) if (substr(x, i, 1) == "#" && isws(substr(x, i - 1, 1))) return zes_rtrim(substr(x, 1, i - 1), " \t\n\v\f\r"); return x }
+    # x ~ /^[[:space:]]*(-[[:space:]]+)?["\047]?[A-Za-z0-9_.$-]+["\047]?:[[:space:]]*([>|][-+0-9]*)?[[:space:]]*(#.*)?$/
+    function keyline(x,   r) {
+      if (!match(x, /^[[:space:]]*(-[[:space:]]+)?["\047]?[A-Za-z0-9_.$-]+["\047]?:/)) return 0
+      r = substr(x, RLENGTH + 1); sub(/^[[:space:]]+/, "", r)
+      if (match(r, /^[>|][-+0-9]*/)) { r = substr(r, RLENGTH + 1); sub(/^[[:space:]]+/, "", r) }
+      return r == "" || substr(r, 1, 1) == "#" }
+    function flush() { print pend (anz ? " " zes_join(AP, an) : ""); pend = ""; an = 0; anz = 0 }
     pend != "" {
       if ($0 ~ /^[[:space:]]*$/ || (!blk && $0 ~ /^[[:space:]]*#/)) next
       match($0, /^[[:space:]]*/)
       if (RLENGTH > pind && (blk || $0 !~ /^[[:space:]]*(-([[:space:]]|$)|["\047]?[A-Za-z0-9_.$-]+["\047]?:([[:space:]]|$))/)) {
-        v = $0; sub(/^[[:space:]]+/, "", v); if (!blk) sub(/[[:space:]]+#.*$/, "", v); sub(/[[:space:]]+$/, "", v)
-        acc = acc (acc == "" ? "" : " ") v; next }
-      print pend (acc != "" ? " " acc : ""); pend = ""; acc = ""
+        v = $0; sub(/^[[:space:]]+/, "", v); if (!blk) v = cutsc(v); v = zes_rtrim(v, " \t\n\v\f\r")
+        AP[++an] = (anz ? " " : "") v; if (v != "") anz = 1; next }
+      flush()
     }
-    /^[[:space:]]*(-[[:space:]]+)?["\047]?[A-Za-z0-9_.$-]+["\047]?:[[:space:]]*([>|][-+0-9]*)?[[:space:]]*(#.*)?$/ {
+    keyline($0) {
       match($0, /^[[:space:]]*/); pind = RLENGTH
       if ($0 ~ /^[[:space:]]*-[[:space:]]/) { t = $0; sub(/^[[:space:]]*-[[:space:]]+/, "", t); pind = length($0) - length(t) - 1 }
-      pend = $0; sub(/[[:space:]]*(#.*)?$/, "", pend)
+      pend = cutc($0)
       blk = (pend ~ /:[[:space:]]*[>|][-+0-9]*$/)
-      sub(/[[:space:]]*[>|][-+0-9]*$/, "", pend); acc = ""; next
+      # sub(/[[:space:]]*[>|][-+0-9]*$/, "", pend)
+      if (blk) { n = length(pend); while (n > 0 && index("-+0123456789", substr(pend, n, 1))) n--; pend = zes_rtrim(substr(pend, 1, n - 1), " \t\n\v\f\r") }
+      an = 0; anz = 0; next
     }
     { print }
-    END { if (pend != "") print pend (acc != "" ? " " acc : "") }'
+    END { if (pend != "") flush() }'
 }
 
 # §21 GitHub Actions dangerous patterns
