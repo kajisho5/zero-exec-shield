@@ -2,24 +2,23 @@
 // and the SkillPact result column fits the longest label in both languages (UI 10). Opens index.html on file://.
 // The layout depends on the width only; isMobile / hasTouch are not set (setInputFiles on a directory hangs with them in Firefox and WebKit).
 import { expect, test } from '@playwright/test';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { pickDir } from './pick-dir';
 
 const INDEX = 'file://' + fileURLToPath(new URL('../../../index.html', import.meta.url));
 const FIX = fileURLToPath(new URL('../../../tests/fixtures/', import.meta.url));
 
-/** A workflow whose finding message has a 41-character unbroken uses: reference. */
-function longRef(): string {
-  const root = join(mkdtempSync(join(tmpdir(), 'zes-e2e-')), 'longref');
-  mkdirSync(join(root, '.github/workflows'), { recursive: true });
-  // A visible file too: Playwright WebKit cannot setInputFiles a folder that holds only hidden entries (see app.spec.ts)
-  writeFileSync(join(root, 'README.md'), 'x\n');
-  writeFileSync(join(root, '.github/workflows/ci.yml'), 'on: push\njobs:\n  a:\n    runs-on: x\n    steps:\n      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567a\n');
-  return root;
-}
+const h = (s: string) => 'sha256:' + createHash('sha256').update(s).digest('hex');
+/** A findings.json (CLI format) whose message has a 41-character unbroken uses: reference. Imported rather than scanned:
+ *  Playwright WebKit drops hidden entries (.github) from a folder given to setInputFiles. */
+const LONG = 'actions/checkout@0123456789abcdef0123456789abcdef01234567a';
+const longRefDoc = JSON.stringify({
+  schema_version: '1.0', incident_bundle: 'ZES-2026-OCT-EMERGENCY-V5.2', scan_started_at: '2026-10-24T00:00:00Z', scan_finished_at: '2026-10-24T00:00:01Z',
+  scan_mode: 'full', status: 'ok', errors: [],
+  findings: [{ id: h('longref'), level: 'MEDIUM', module: '§22', campaign: null, path: '/proj/.github/workflows/ci.yml',
+    detail: `Action not pinned to a full commit SHA: ${LONG}`, evidence_hash: h('e') }],
+});
 
 for (const lang of ['en', 'ja'] as const) {
   for (const width of [320, 360]) {
@@ -27,7 +26,7 @@ for (const lang of ['en', 'ja'] as const) {
       const ctx = await browser.newContext({ viewport: { width, height: 800 }, locale: lang === 'ja' ? 'ja-JP' : 'en-US' });
       const page = await ctx.newPage();
       await page.goto(`${INDEX}?lang=${lang}`);
-      await pickDir(page, longRef());
+      await page.getByTestId('import-input').setInputFiles({ name: 'findings.json', mimeType: 'application/json', buffer: Buffer.from(longRefDoc) });
       await page.locator('[data-testid=finding-row] button[data-finding]').filter({ hasText: '0123456789abcdef' }).first().click();
       const p = page.getByTestId('finding-sheet').locator('p').first();
       await expect(p).toContainText('0123456789abcdef');
