@@ -28,7 +28,7 @@ umask 077
 # If CDPATH is exported, a relative cd resolves to another directory and also prints the path to stdout, so disable it
 unset CDPATH
 
-ZES_VERSION="0.5.1"      # software version
+ZES_VERSION="0.5.2"      # software version
 ZES_SPEC_VERSION="5.2"   # version of the Master Specification this conforms to
 INCIDENT_BUNDLE="ZES-2026-OCT-EMERGENCY-V5.2"
 FINDINGS_SCHEMA_VERSION="1.2"  # 1.2: code / params (catalog key and values), English detail, id v2

@@ -1,0 +1,44 @@
+{
+  "findings": [
+    {
+      "campaign": "brotli-http2shell-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.vulnerable",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "requirements.txt",
+      "subject": {
+        "ecosystem": "pypi",
+        "fixed_versions": [
+          "1.2.1"
+        ],
+        "package": "brotli",
+        "safe_version": "1.2.1",
+        "version": "1.1.0"
+      }
+    },
+    {
+      "campaign": "brotli-http2shell-oct2026",
+      "evidence": {
+        "kind": "file"
+      },
+      "kind": "pkg.vulnerable",
+      "level": "HIGH",
+      "module": "§15",
+      "path": "requirements.txt",
+      "subject": {
+        "ecosystem": "pypi",
+        "fixed_versions": [
+          "1.2.1.0"
+        ],
+        "package": "brotlicffi",
+        "safe_version": "1.2.1.0",
+        "version": "1.2.0.0"
+      }
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}
