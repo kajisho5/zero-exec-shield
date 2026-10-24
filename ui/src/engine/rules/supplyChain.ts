@@ -1,7 +1,7 @@
 // §2 / §15 / §25 / §36 / §41: matching of file names, hashes, package.json and lockfiles
 import { atRoot, push, readable, rootRel, type RuleCtx } from '../context';
 import type { IocPackage } from '../ioc';
-import { asciiLower, asciiTrim, basename, dirname, parseJsonc, versionMatches } from '../util';
+import { asciiLower, asciiTrim, basename, dirname, lf, parseJsonc, versionMatches } from '../util';
 import type { FindingRelated } from '../types';
 
 export function filenameRules(ctx: RuleCtx): void {
@@ -207,9 +207,9 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
       out.push({ eco: 'npm', name, version, path: f.relPath, sha: f.sha256 });
     } else if (f.name === 'Cargo.lock') {
       // name / version of [[package]] blocks (same as CLI build_deps)
-      for (const b of f.text.split(/^\[\[package\]\][\t\v\f\r ]*$/m).slice(1)) {
-        const n = /^name[\t\v\f\r ]*=[\t\v\f\r ]*"([^"]+)"/m.exec(b)?.[1];
-        const v = /^version[\t\v\f\r ]*=[\t\v\f\r ]*"([^"]+)"/m.exec(b)?.[1];
+      for (const b of f.text.split(lf(/^\[\[package\]\][\t\v\f\r ]*$/m)).slice(1)) {
+        const n = lf(/^name[\t\v\f\r ]*=[\t\v\f\r ]*"([^"]+)"/m).exec(b)?.[1];
+        const v = lf(/^version[\t\v\f\r ]*=[\t\v\f\r ]*"([^"]+)"/m).exec(b)?.[1];
         if (n && v) out.push({ eco: 'cargo', name: n, version: v, path: f.relPath, sha: f.sha256 });
       }
     } else if (f.name === 'composer.lock') {
@@ -226,7 +226,7 @@ export function collectDeps(ctx: RuleCtx): Dep[] {
       }
     } else if (f.name === 'Gemfile.lock') {
       // With a platform suffix (nokogiri (1.16.0-x86_64-linux)), only the version part is compared
-      for (const m of lines(f.text).join('\n').matchAll(/^ {4}([A-Za-z0-9._-]+) \(([0-9][^)]*)\)$/gm)) {
+      for (const m of lines(f.text).join('\n').matchAll(lf(/^ {4}([A-Za-z0-9._-]+) \(([0-9][^)]*)\)$/gm))) {
         if (m[1] && m[2]) out.push({ eco: 'gem', name: m[1], version: m[2].replace(/-[A-Za-z].*$/, ''), path: f.relPath, sha: f.sha256 });
       }
     } else if (/^(requirements|constraints).*\.txt$/.test(f.name)) {

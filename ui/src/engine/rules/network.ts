@@ -45,17 +45,17 @@ const HISTORY = /(^|\/)\.(bash|zsh)_history$/;
 /** The CLI's s18 params (grep -o -i -F | sort -u | head -n3): the matched strings, leftmost-longest and not overlapping,
  *  in lower case, unique, C-locale order, the first 3 joined by spaces; the campaign of the first IoC entry that contains
  *  the first of them. */
-function matched(low: string, hits: NetIoc[], all: NetIoc[]): { iocs: string; campaign: string | null } | null {
+function matched(low: string, hits: (NetIoc & { low: string })[], all: (NetIoc & { low: string })[]): { iocs: string; campaign: string | null } | null {
   if (!hits.length) return null;
   const occ: [number, number][] = [];
-  for (const v of new Set(hits.map((h) => asciiLower(h.value)))) for (let i = low.indexOf(v); i >= 0; i = low.indexOf(v, i + 1)) occ.push([i, v.length]);
+  for (const v of new Set(hits.map((h) => h.low))) for (let i = low.indexOf(v); i >= 0; i = low.indexOf(v, i + 1)) occ.push([i, v.length]);
   occ.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
   const found = new Set<string>();
   let end = 0;
   for (const [s, n] of occ) { if (s < end) continue; found.add(low.slice(s, s + n)); end = s + n; }
   const vals = [...found].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).slice(0, 3);
   const first = vals[0]!;
-  return { iocs: vals.join(' '), campaign: all.find((i) => asciiLower(i.value).includes(first))?.campaign ?? hits[0]?.campaign ?? null };
+  return { iocs: vals.join(' '), campaign: all.find((i) => i.low.includes(first))?.campaign ?? hits[0]?.campaign ?? null };
 }
 
 export function networkRules(ctx: RuleCtx): void {
@@ -66,7 +66,8 @@ export function networkRules(ctx: RuleCtx): void {
       push(ctx, { level: 'HIGH', module: '§18', campaign: null, path: f.relPath, code: 's18.history_curl_sh', ruleId: 's18-history-curlsh', evidenceSha: f.sha256 });
     }
   }
-  const iocs = networkIocs(ctx.ioc);
+  // the IoC values lower-cased once (asciiLower per IoC per file was most of the time of a 10 000-file scan)
+  const iocs = networkIocs(ctx.ioc).map((i) => ({ ...i, low: asciiLower(i.value) }));
   // §34 hosts file (the part of CLI check_s34 that can be evaluated from files): overrides of registries/GitHub and C2 domains. Case-insensitive
   ctx.checks.add('s34-hosts');
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -77,12 +78,12 @@ export function networkRules(ctx: RuleCtx): void {
     }
     const low = asciiLower(body);
     for (const i of iocs.filter((x) => x.kind === 'malicious' && !/^[0-9.]+$/.test(x.value))) {
-      if (low.includes(asciiLower(i.value))) push(ctx, { level: 'CRITICAL', module: '§34', campaign: null, path: f.relPath, code: 's34.hosts_c2', params: { host: i.value }, ruleId: `s34-hosts-c2:${i.value}`, evidenceSha: f.sha256 });
+      if (low.includes(i.low)) push(ctx, { level: 'CRITICAL', module: '§34', campaign: null, path: f.relPath, code: 's34.hosts_c2', params: { host: i.value }, ruleId: `s34-hosts-c2:${i.value}`, evidenceSha: f.sha256 });
     }
   }
   for (const f of readable(ctx)) {
     const low = asciiLower(f.text);
-    const hits = iocs.filter((i) => low.includes(asciiLower(i.value)));
+    const hits = iocs.filter((i) => low.includes(i.low));
     // CLI check_s18: shell history is not a network IoC file; a C2 domain / IP in it is s18.history_c2 (no campaign)
     if (HISTORY.test(f.relPath)) {
       if (hits.some((h) => h.kind === 'malicious')) push(ctx, { level: 'CRITICAL', module: '§18', campaign: null, path: f.relPath, code: 's18.history_c2', ruleId: 's18-netioc', evidenceSha: f.sha256 });

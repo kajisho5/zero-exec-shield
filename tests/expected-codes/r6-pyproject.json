@@ -1,0 +1,30 @@
+[
+  {
+    "campaign": null,
+    "code": "s27.backend_path",
+    "level": "HIGH",
+    "module": "§27",
+    "params": {},
+    "path": "inarray/pyproject.toml"
+  },
+  {
+    "campaign": null,
+    "code": "s27.build_backend",
+    "level": "MEDIUM",
+    "module": "§27",
+    "params": {
+      "backend": "evil_backend"
+    },
+    "path": "decoyarray/pyproject.toml"
+  },
+  {
+    "campaign": null,
+    "code": "s27.build_backend",
+    "level": "MEDIUM",
+    "module": "§27",
+    "params": {
+      "backend": "evil_backend"
+    },
+    "path": "inarray/pyproject.toml"
+  }
+]

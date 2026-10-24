@@ -10,6 +10,26 @@ export function refang(s: string): string {
   return s.replace(/\[\.\]/g, '.').replace(/^hxxp/i, 'http');
 }
 
+/** The regex with line anchors as grep has them: "^" and "$" (outside character classes) match only at the start / end of
+ *  the text or next to LF, and the m flag is dropped. JS m-mode also starts a line after a lone CR, U+2028 and U+2029,
+ *  which grep and git do not (a "\r" inside a line is an ordinary character there, so "[\t\v\f\r ]*$" still takes the CR
+ *  of CR LF). Use it for every line-based check that the CLI runs with grep. */
+export function lf(re: RegExp): RegExp {
+  const src = re.source;
+  let out = '';
+  let cls = false;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]!;
+    if (c === '\\') { out += c + (src[i + 1] ?? ''); i++; continue; }
+    if (cls) { if (c === ']') cls = false; out += c; continue; }
+    if (c === '[') { cls = true; out += c; if (src[i + 1] === '^') { out += '^'; i++; } if (src[i + 1] === ']') { out += ']'; i++; } continue; }
+    if (c === '^') { out += '(?<![^\\n])'; continue; }
+    if (c === '$') { out += '(?![^\\n])'; continue; }
+    out += c;
+  }
+  return new RegExp(out, re.flags.replace('m', ''));
+}
+
 export function basename(p: string): string {
   const i = p.lastIndexOf('/');
   return i < 0 ? p : p.slice(i + 1);
@@ -23,7 +43,8 @@ export function dirname(p: string): string {
 /** toLowerCase() of the ASCII letters only, as the CLI's tolower / grep -i in the C locale (JS would also fold the Kelvin
  *  sign to "k", "İ" to "i̇" …, so "a.p\u212Al" would read as a .pkl file). */
 export function asciiLower(s: string): string {
-  return s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+  // an all-ASCII text (most files) folds the same way with toLowerCase, which is much faster than the replace
+  return /^[\x00-\x7f]*$/.test(s) ? s.toLowerCase() : s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
 }
 
 /** Lower-case extension (ASCII letters only, see asciiLower); '' when the only dot is the first character. */
@@ -135,6 +156,15 @@ export function textLocators(text: string, re: RegExp, exclude?: RegExp): TextLo
     if (re.test(l) && !(exclude && exclude.test(l))) out.push({ format: 'text', line: i + 1, text: l });
   }
   return out;
+}
+
+/** Text locators of the given 1-based lines (the CLI's lines_locators), at most 64. */
+export function lineLocators(text: string, lines: number[]): TextLocatorSpec[] {
+  const all = text.split('\n');
+  return lines.slice(0, 64).filter((n) => n >= 1 && n <= all.length).map((n) => {
+    const l = all[n - 1]!;
+    return { format: 'text', line: n, text: l.endsWith('\r') ? l.slice(0, -1) : l };
+  });
 }
 
 /** related determined by module and path alone (same as default_related of the CLI). */

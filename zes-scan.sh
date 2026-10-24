@@ -28,7 +28,7 @@ umask 077
 # If CDPATH is exported, a relative cd resolves to another directory and also prints the path to stdout, so disable it
 unset CDPATH
 
-ZES_VERSION="0.5.3"      # software version
+ZES_VERSION="0.5.4"      # software version
 ZES_SPEC_VERSION="5.2"   # version of the Master Specification this conforms to
 INCIDENT_BUNDLE="ZES-2026-OCT-EMERGENCY-V5.2"
 FINDINGS_SCHEMA_VERSION="1.2"  # 1.2: code / params (catalog key and values), English detail, id v2
@@ -593,13 +593,19 @@ TEXT_LOCATORS_MAX=64
 text_locators() {
   local f="$1"; shift
   [ -f "$f" ] && [ -r "$f" ] || return 0
-  local n out="" h
+  lines_locators "$f" < <(zes_src "$f"; grep -n -a -E "$@" -- "$SRC" 2>/dev/null | { if [ -n "${TL_EXCLUDE:-}" ]; then grep -v -i -E -- "^[0-9]+:(${TL_EXCLUDE})"; else cat; fi; } | cut -d: -f1 | head -n "$TEXT_LOCATORS_MAX")
+}
+# lines_locators FILE < line numbers … the text locators of those lines (one number per line, at most TEXT_LOCATORS_MAX used)
+lines_locators() {
+  local f="$1" n out="" h k=0
+  [ -f "$f" ] && [ -r "$f" ] || return 0
   while IFS= read -r n; do
     [[ "$n" =~ ^[0-9]+$ ]] || continue
+    k=$((k + 1)); [ "$k" -le "$TEXT_LOCATORS_MAX" ] || break
     h="$(awk -v n="$n" 'NR == n { sub(/\r$/, ""); if (NR == 1) sub(/^\357\273\277/, ""); printf "%s", $0; exit }' "$f" 2>/dev/null | zes_sha256_cmd | awk '{print $1}')"
     [[ "$h" =~ ^[0-9a-f]{64}$ ]] || continue
     out="${out:+$out,}{\"format\":\"text\",\"line\":$n,\"line_sha256\":\"sha256:$h\"}"
-  done < <(zes_src "$f"; grep -n -a -E "$@" -- "$SRC" 2>/dev/null | { if [ -n "${TL_EXCLUDE:-}" ]; then grep -v -i -E -- "^[0-9]+:(${TL_EXCLUDE})"; else cat; fi; } | cut -d: -f1 | head -n "$TEXT_LOCATORS_MAX")
+  done
   printf '%s' "$out"
 }
 # x_text_locators FILE [grep-opts...] PATTERN → "locators":[…]
@@ -617,11 +623,12 @@ json_ptr_locators() {
 # Agent hooks (hooks.<Event>[i] of .claude/settings.json) whose command contains $s (case-insensitive)
 #   (the unit /hooks/<Event>/<i> that claude.hook in GER removes)
 HOOK_PATHS_STR='path(.hooks? | objects | .[]? | arrays | .[] | select([.. | objects | .command? | strings] | any(ascii_downcase | contains($s | ascii_downcase))))'
-# Agent hook entries (/hooks/<Event>/<i>) in document order, one record per line: pointer US H US cmdline. H is 1 when a
+# Agent hook entries (/hooks/<Event>/<i>) in document order, one record per line: pointer US H US cmdline (the pointer
+#   encoded with ptrenc of JQ_PTRENC, so a line break in an event name cannot split the record). H is 1 when a
 #   .command string inside the entry matches $re. Each entry gives one record with an empty cmdline,
 #   then one record per line of command + args of every object inside it that has command (as mcpq of check_s17)
 HOOK_ENTRY_CMDS='path(.hooks? | objects | .[]? | arrays | .[]) as $p | getpath($p) as $e
-  | ("/" + ($p | map(tostring | gsub("~"; "~0") | gsub("/"; "~1")) | join("/"))) as $ptr
+  | ("/" + ($p | map(tostring | gsub("~"; "~0") | gsub("/"; "~1")) | join("/")) | ptrenc) as $ptr
   | ($e | [.. | objects | .command? | strings] | any(test($re)) | if . then "1" else "0" end) as $h
   | $ptr + "\u001f" + $h + "\u001f" + ("", ($e | .. | select(type == "object" and has("command"))
       | ((.command | tostring) + " " + ((.args // []) | if type == "array" then map(tostring) | join(" ") else tostring end))
@@ -694,13 +701,15 @@ emit() {
   zes_enc "$campaign"; jc="$ENC_JSON"; ic="$ENC_ID"
   zes_id_esc "$module"; im="$ID_ESC"; zes_id_esc "$code"
   id="sha256:$(sha256_str "zes-id-v2|$im|$ic|$ip|$ID_ESC|$canon")"
-  # Each id only once. The preimage is injective, so a repeated id is the same finding emitted twice; it is still recorded in
-  #   errors[] every time, never dropped silently (dedup_findings does the same across subshells)
+  # Each id only once. The preimage is injective over module, campaign, path, code and params, so a repeated id is the
+  #   same finding emitted again (a check that emits once per matching line, such as two FROM lines with the same image):
+  #   it is merged silently, as the UI does. Only an id shared by findings that differ in level is recorded as
+  #   duplicate_finding_id (dedup_findings does the same across subshells)
   if [ -n "${SEEN_IDS[$id]+x}" ]; then
-    record_error "core" "duplicate_finding_id:$id"
+    [ "${SEEN_IDS[$id]}" = "$level" ] || record_error "core" "duplicate_finding_id:$id"
     return 0
   fi
-  SEEN_IDS[$id]=1
+  SEEN_IDS[$id]="$level"
   ev=""; evk="detail"; evh=""
   if [ -n "$path" ] && [ -L "$path" ]; then
     local lt; lt="$(readlink -- "$path" 2>/dev/null; printf x)"; lt="${lt%x}"; lt="${lt%$'\n'}"
@@ -881,57 +890,125 @@ in_root_regular() { [ -f "$1" ] && realpath_in_root "$1" >/dev/null; }
 READ_TIMEOUT=10
 read_capped() { run_timeout "$READ_TIMEOUT" head -c "$2" -- "$1" 2>/dev/null; }
 
+# Git configs are read by one parser that follows git's own (ZES_GITCFG_AWK below): §26, the include targets of
+#   git_discover and git_cfg_get all see the variables git sees. At most GIT_CFG_MAX bytes of a config are read (the UI
+#   reads Git configs up to the same cap); a longer one is read up to the cap and recorded as git_config_truncated
+GIT_CFG_MAX=16777216
+ZES_GITCFG_AWK='
+    # Git config files read the way git reads them (config.c: parse_config, get_base_var, get_extended_base_var,
+    #   get_value, parse_value): one UTF-8 BOM at the start is skipped, CR LF is LF (a lone CR is whitespace), "#" / ";"
+    #   start a comment, "[section]", "[section \"sub\"]" and "[section.sub]" headers may be followed on the same line by
+    #   another header or by a variable, names are case-insensitive (subsections of the quoted form are not), a value
+    #   is unquoted / unescaped (\n \t \b \\ \"), whitespace outside quotes becomes one space per character and is trimmed
+    #   at both ends, and "\" at the end of a line continues the value. Where git stops with "bad config line", this
+    #   reader skips to the next line and goes on (it never reports less than git reads).
+    #   One record per variable: line US section US subsection US key US hasval US value (subsection and value with \ as \\,
+    #   LF as \n and US as \u, see ZES_GITCFG_DEC; line is the line of the key; hasval 0 for "key" without "=")
+    function gc_enc(v) { gsub(/\\/, "\\\\", v); gsub(/\n/, "\\n", v); gsub(/\037/, "\\u", v); return v }
+    function gc_out(hv, v) { printf "%d\037%s\037%s\037%s\037%d\037%s\n", GKL, GSEC, gc_enc(GSUB), GKEY, hv, gc_enc(v) }
+    # gc_sec(L, p, n): the header that starts after "[" at p; returns the position after "]" or 0 (bad header)
+    function gc_sec(L, p, n,   q, c, k, S, ns, nm) {
+      for (q = p; q <= n; q++) { c = substr(L, q, 1)
+        if (c == "]") { if (q == p) return 0
+          GSEC = tolower(substr(L, p, q - p)); GSUB = ""
+          if (k = index(GSEC, ".")) { GSUB = substr(GSEC, k + 1); GSEC = substr(GSEC, 1, k - 1) }
+          return q + 1 }
+        if (index(GWS, c)) break
+        if (c !~ /[A-Za-z0-9.-]/) return 0 }
+      if (q > n || q == p) return 0
+      nm = tolower(substr(L, p, q - p))
+      for (; q <= n && index(GWS, substr(L, q, 1)); q++) ;
+      if (q > n || substr(L, q, 1) != "\"") return 0
+      ns = 0; k = q + 1
+      for (q = k; q <= n; q++) { c = substr(L, q, 1)
+        if (c == "\"") break
+        if (c == "\\") { S[++ns] = substr(L, k, q - k); q++; if (q > n) return 0; k = q } }
+      if (q > n || substr(L, q + 1, 1) != "]") return 0
+      # the section changes only with a complete header (as the UI: a bad one leaves the section as it was)
+      S[++ns] = substr(L, k, q - k); GSEC = nm; GSUB = zes_join(S, ns)
+      return q + 2 }
+    # gc_add(t): plain text t (no special character) of the value; whitespace outside quotes as in parse_value
+    function gc_add(t,   a, b, n) {
+      if (GQ) { if (t != "") { gc_pend(); GV[++GN] = t; GLEN += length(t) } return }
+      n = length(t); for (a = 1; a <= n && index(GWS, substr(t, a, 1)); a++) ;
+      if (a > n) { if (GLEN) GSP += n; return }
+      for (b = n; index(GWS, substr(t, b, 1)); b--) ;
+      if (GLEN) GSP += a - 1
+      t = substr(t, a, b - a + 1); gsub(/[ \t\r]/, " ", t)
+      gc_pend(); GV[++GN] = t; GLEN += length(t); GSP = n - b }
+    function gc_pend() { for (; GSP > 0; GSP--) { GV[++GN] = " "; GLEN++ } }
+    function gc_ch(c) { gc_pend(); GV[++GN] = c; GLEN++ }
+    # gc_val(L, p, n): scans the value from p to the end of the line (GIN stays 1 after a continuation)
+    function gc_val(L, p, n,   P, m, i, s, c, e) {
+      L = substr(L, p); n = length(L)
+      m = split(L, P, /[\\";#]/); s = 0
+      for (i = 1; i <= m; i++) {
+        if (length(P[i])) gc_add(P[i])
+        s += length(P[i]) + 1
+        if (s > n) break
+        c = substr(L, s, 1)
+        if (c == "#" || c == ";") { if (GQ) { gc_ch(c); continue } GCOM = 1; break }
+        if (c == "\"") { gc_pend(); GQ = !GQ; continue }
+        # backslash: escape of the next character, or a continuation at the end of the line
+        gc_pend()
+        if (s == n) return
+        e = substr(L, s + 1, 1)
+        if (e == "n") e = "\n"; else if (e == "t") e = "\t"; else if (e == "b") e = "\b"; else if (e != "\\" && e != "\"") GBAD = 1
+        GV[++GN] = e; GLEN++
+        # the escaped character is the first character of the next part, or a separator (then that part is empty)
+        s++; if (length(P[i + 1])) P[i + 1] = substr(P[i + 1], 2); else i++ }
+      gc_end() }
+    function gc_end() { gc_out(1, zes_join(GV, GN)); GIN = 0; GN = 0; GLEN = 0; GSP = 0; GQ = 0; GCOM = 0 }
+    BEGIN { GWS = " \t\r"; GSEC = ""; GSUB = "" }
+    { L = $0
+      if (NR == 1 && substr(L, 1, 3) == "\357\273\277") L = substr(L, 4)
+      n = length(L); if (n && substr(L, n, 1) == "\r") L = substr(L, 1, --n)
+      if (GIN) { gc_val(L, 1, n); next }
+      for (p = 1; p <= n; ) { c = substr(L, p, 1)
+        if (index(GWS, c)) { p++; continue }
+        if (c == "#" || c == ";") break
+        if (c == "[") { p = gc_sec(L, p + 1, n); if (!p) break; continue }
+        if (c !~ /[A-Za-z]/) break
+        for (q = p + 1; q <= n && substr(L, q, 1) ~ /[A-Za-z0-9-]/; q++) ;
+        GKEY = tolower(substr(L, p, q - p)); GKL = NR
+        for (; q <= n && (substr(L, q, 1) == " " || substr(L, q, 1) == "\t"); q++) ;
+        if (q > n) { gc_out(0, ""); break }
+        if (substr(L, q, 1) != "=") break
+        GIN = 1; GN = 0; GLEN = 0; GSP = 0; GQ = 0; GCOM = 0
+        gc_val(L, q + 1, n); break } }
+    END { if (GIN) gc_end() }
+'
+# gc_dec(v): a subsection or value of a ZES_GITCFG_AWK record as text (for the awk programs that read the records)
+ZES_GITCFG_DEC='
+    function gc_dec(v,   P, n, k, O, no, c) {
+      if (!index(v, "\\")) return v
+      n = split(v, P, /\\/); O[no = 1] = P[1]
+      for (k = 2; k <= n; k++) {
+        if (P[k] == "") { O[++no] = "\\"; if (++k <= n) O[++no] = P[k]; continue }
+        c = substr(P[k], 1, 1); O[++no] = (c == "n" ? "\n" : c == "u" ? "\037" : c) substr(P[k], 2) }
+      return zes_join(O, no) }'
+# git_cfg_capped FILE … true when FILE is at most GIT_CFG_MAX bytes (git_cfg_vars reads all of it)
+git_cfg_capped() { local z; z="$(stat_size "$1")"; [ "${z:-0}" -le "$GIT_CFG_MAX" ] 2>/dev/null; }
+# git_cfg_vars FILE … the variables of a Git config, one ZES_GITCFG_AWK record per variable (does not start git)
+git_cfg_vars() { read_capped "$1" "$GIT_CFG_MAX" | awk "$ZES_AWK_LIB$ZES_GITCFG_AWK" 2>/dev/null; }
 # git_cfg_get SECTION SUBSECTION KEY … reads a value from the Git config of the scan root (config of $ROOT/.git) without starting git
-#   (the last value; include is not followed). Does not read when it points outside the root or is not a regular file (FIFO, device).
-#   Supports both [sec "sub"] and the old form [sec.sub]
+#   (the last value, "true" for a key without "="; include is not followed). Does not read when it points outside the root
+#   or is not a regular file (FIFO, device). SECTION and KEY are case-insensitive, a quoted subsection is not ([sec "sub"];
+#   the old form [sec.sub] is lower-cased, as git does)
 git_cfg_get() {
   local cfg="${ROOT_GITCOMMON:-$RP/.git}/config"
   in_root_regular "$cfg" || return 1
-  read_capped "$cfg" 1048576 | ZES_S="$1" ZES_SS="$2" ZES_K="$3" awk '
+  git_cfg_vars "$cfg" | ZES_S="$1" ZES_SS="$2" ZES_K="$3" awk -F'\037' "$ZES_AWK_LIB$ZES_GITCFG_DEC"'
     BEGIN { ws = tolower(ENVIRON["ZES_S"]); wss = ENVIRON["ZES_SS"]; wk = tolower(ENVIRON["ZES_K"]); found = 0 }
-    { line = $0; sub(/\r$/, "", line); if (NR == 1) sub(/^\357\273\277/, "", line) }
-    line ~ /^[[:space:]]*\[/ {
-      h = line; sub(/^[[:space:]]*\[[[:space:]]*/, "", h); sub(/\][^]]*$/, "", h)
-      if (match(h, /[[:space:]]+"/)) { sec = tolower(substr(h, 1, RSTART - 1)); ss = substr(h, RSTART + RLENGTH); sub(/"[[:space:]]*$/, "", ss); gsub(/\\\\/, "\001", ss); gsub(/\\/, "", ss); gsub(/\001/, "\\", ss) }
-      else if (index(h, ".")) { sec = tolower(substr(h, 1, index(h, ".") - 1)); ss = tolower(substr(h, index(h, ".") + 1)) }
-      else { sec = tolower(h); ss = "" }
-      sub(/[[:space:]]+$/, "", sec); next }
-    sec == ws && ss == wss {
-      l = line; sub(/^[[:space:]]+/, "", l)
-      if (!match(l, /^[A-Za-z][A-Za-z0-9-]*/)) next
-      k = tolower(substr(l, 1, RLENGTH)); if (k != wk) next
-      r = substr(l, RLENGTH + 1); sub(/^[[:space:]]*/, "", r)
-      if (r == "") { v = "true"; found = 1; next }
-      if (substr(r, 1, 1) != "=") next
-      r = substr(r, 2); v = ""; inq = 0
-      for (i = 1; i <= length(r); i++) { c = substr(r, i, 1)
-        if (c == "\\" && i < length(r)) { i++; c = substr(r, i, 1); v = v (c == "n" ? "\n" : c == "t" ? "\t" : c == "b" ? "" : c); continue }
-        if (c == "\"") { inq = !inq; continue }
-        if (!inq && (c == "#" || c == ";")) break
-        v = v c }
-      sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); found = 1 }
-    END { if (found) print v; else exit 1 }'
+    $2 == ws && gc_dec($3) == wss && $4 == wk { v = ($5 == 1) ? gc_dec($6) : "true"; found = 1 }
+    END { if (!found) exit 1; print v }'
 }
 
-# git_cfg_includes CONFIG … the values of include.path / includeIf "<condition>".path, one per line (conditions are not evaluated; all of them). Does not start git
+# git_cfg_includes CONFIG … the values of include.path / includeIf "<condition>".path in document order, each followed by
+#   NUL (conditions are not evaluated; all of them, and [include "x"] too). Does not start git
 git_cfg_includes() {
-  read_capped "$1" 1048576 | awk '
-    { line = $0; sub(/\r$/, "", line); if (NR == 1) sub(/^\357\273\277/, "", line) }
-    line ~ /^[[:space:]]*\[/ {
-      h = line; sub(/^[[:space:]]*\[[[:space:]]*/, "", h); sub(/\][^]]*$/, "", h)
-      sec = tolower(h); sub(/[[:space:]"].*$/, "", sec); sub(/\..*$/, "", sec); next }
-    sec == "include" || sec == "includeif" {
-      l = line; sub(/^[[:space:]]+/, "", l)
-      if (tolower(substr(l, 1, 4)) != "path") next
-      r = substr(l, 5); sub(/^[[:space:]]*/, "", r)
-      if (substr(r, 1, 1) != "=") next
-      r = substr(r, 2); v = ""; inq = 0
-      for (i = 1; i <= length(r); i++) { c = substr(r, i, 1)
-        if (c == "\\" && i < length(r)) { i++; v = v substr(r, i, 1); continue }
-        if (c == "\"") { inq = !inq; continue }
-        if (!inq && (c == "#" || c == ";")) break
-        v = v c }
-      sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); if (v != "") print v }'
+  git_cfg_vars "$1" | awk -F'\037' "$ZES_AWK_LIB$ZES_GITCFG_DEC"'
+    ($2 == "include" || $2 == "includeif") && $4 == "path" && $5 == 1 && $6 != "" { printf "%s%c", gc_dec($6), 0 }'
 }
 
 # ---------------------------------------------------------------------------
@@ -943,8 +1020,11 @@ git_cfg_includes() {
 # ---------------------------------------------------------------------------
 GIT_DIRS_FILE=""; GIT_CFG_LIST=""; GIT_HOOKS_LIST=""
 ROOT_GITDIR=""; ROOT_GITCOMMON=""
-git_read_pointer() {  # git_read_pointer FILE PREFIX … the <path> of "PREFIX<path>" (if PREFIX is empty, line 1 itself)
-  local l; l="$(read_capped "$1" 4096 | head -n1 | tr -d '\r')"
+# git_read_pointer FILE PREFIX … the <path> of "PREFIX<path>" (if PREFIX is empty, line 1 itself): the first 4096 bytes up to
+#   the first NUL (git reads the file as a C string, so "../g<NUL>d" is ../g), line 1, CR removed, ASCII whitespace trimmed.
+#   A leading BOM is kept (git does not skip it: "<BOM>gitdir:" is no gitfile). The UI's git.ts pointer() is the same
+git_read_pointer() {
+  local l; l="$(read_capped "$1" 4096 | tr '\000' '\n' | head -n1 | tr -d '\r')"
   if [ -n "$2" ]; then case "$l" in "$2"*) l="${l#"$2"}" ;; *) return 1 ;; esac; fi
   l="${l#"${l%%[![:space:]]*}"}"; l="${l%"${l##*[![:space:]]}"}"
   [ -n "$l" ] || return 1
@@ -997,8 +1077,9 @@ git_cfg_collect() {
   local cfg="$1" depth="$2" inc t r
   grep -q -x -F -- "$cfg" "$GIT_CFG_LIST" 2>/dev/null && return 0
   printf '%s\n' "$cfg" >>"$GIT_CFG_LIST"
+  git_cfg_capped "$cfg" || record_error "core" "git_config_truncated:$cfg"
   [ "$depth" -lt 10 ] || { record_error "core" "git_include_too_deep:$cfg"; return 0; }
-  while IFS= read -r inc; do
+  while IFS= read -r -d '' inc; do
     case "$inc" in "~/"*) t="$HOME_DIR/${inc#\~/}" ;; /*) t="$inc" ;; *) t="${cfg%/*}/$inc" ;; esac
     # Targets are read only when they are regular files inside the scan root (or the inspected HOME). git never reads them
     r="$(resolve_path "$t")"
@@ -1270,27 +1351,56 @@ zes_rel() {
 files_rel() { ZES_RE="$1" ZES_RP="$RP" awk 'BEGIN { rp = ENVIRON["ZES_RP"] "/" } { r = (index($0, rp) == 1) ? substr($0, length(rp)) : $0; if (r ~ ENVIRON["ZES_RE"]) print }' "$FILES_LIST"; }
 
 # A leading UTF-8 BOM is not part of the text, on both sides: the browser reads files with TextDecoder (which drops one
-#   BOM), and the CLI reads a copy without it for every text check. bom_prepare (after build_inventory) copies each scanned
-#   file that starts with EF BB BF, minus those 3 bytes, to $TMP_DIR/bom/<n>; BOM_SRC maps the path to the copy. zes_src F
-#   sets SRC to the path to read (the copy or F itself); fgrep_q, grep_q, grep_l and text_locators use it. Evidence hashes
-#   and the reported path stay those of the original file
+#   BOM), and the CLI reads a view without it for every text check. bom_prepare (after build_inventory) copies each scanned
+#   file that starts with EF BB BF, minus those 3 bytes, to $TMP_DIR/bom/<n>; BOM_SRC maps the path to the copy. Files
+#   outside the scan root (the inspected HOME, host files) are looked at when a check first reads them (bom_lazy). zes_src
+#   F sets SRC to the path to read (the copy or F itself); fgrep_q, grep_q, grep_l and text_locators use it. Evidence hashes
+#   and the reported path stay those of the original file.
+#   The copies are bounded: a file over BOM_COPY_MAX (16 MiB, the largest file the browser reads, a Git config) or one that
+#   would take the copies over BOM_COPY_TOTAL (256 MiB) is not copied; it is read as it is (its BOM stays in front of line 1)
+#   and bom_not_stripped:<path> is recorded in errors[]. A 2 GB sparse file with a BOM costs no temporary space
+BOM_COPY_MAX=16777216
+BOM_COPY_TOTAL=268435456
 declare -A BOM_SRC=()
 BOM_MAP=""
 bom_prepare() {
-  local f k=0
+  local f k=0 z tot=0
   mkdir -p "$TMP_DIR/bom" || return 0
   BOM_MAP="$TMP_DIR/bom/map"; : >"$BOM_MAP"
   while IFS= read -r f; do
     [ -n "$f" ] && [ "$f" != /dev/null ] && [ -f "$f" ] || continue
     [ "$(head -c 3 -- "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ] || continue
-    k=$((k + 1))
-    tail -c +4 -- "$f" >"$TMP_DIR/bom/$k" 2>/dev/null || continue
+    z="$(stat_size "$f")"; z="${z:-0}"
+    if [ "$z" -gt "$BOM_COPY_MAX" ] || [ $((tot + z)) -gt "$BOM_COPY_TOTAL" ]; then record_error "core" "bom_not_stripped:$f"; continue; fi
+    tot=$((tot + z)); k=$((k + 1))
+    tail -c +4 -- "$f" 2>/dev/null | head -c "$BOM_COPY_MAX" >"$TMP_DIR/bom/$k" || continue
     BOM_SRC["$f"]="$TMP_DIR/bom/$k"
-    printf '%s\t%s\n' "$TMP_DIR/bom/$k" "$f" >>"$BOM_MAP"
+    # map line: <n> TAB original (the original is everything after the first TAB, so a TAB in a name maps back)
+    printf '%s\t%s\n' "$k" "$f" >>"$BOM_MAP"
   done < <(tr '\n' '\0' <"$FILES_LIST" | xargs -0 grep -l -a -E "^$(printf '\357\273\277')" -- /dev/null 2>/dev/null)
   return 0
 }
-zes_src() { SRC="$1"; if [ "${#BOM_SRC[@]}" -gt 0 ] && [ -n "${BOM_SRC[$1]+x}" ]; then SRC="${BOM_SRC[$1]}"; fi; }
+# bom_lazy F … SRC for a file outside the inventory (HOME, host files): a bounded copy without the BOM in $TMP_DIR/bom/h<hash>,
+#   made once (the checks run in subshells, so the copy on disk is the cache)
+bom_lazy() {
+  [ -f "$1" ] && [ -r "$1" ] || return 0
+  local c; c="$TMP_DIR/bom/h$(sha256_str "$1")"
+  if [ -f "$c" ]; then SRC="$c"; return 0; fi
+  [ -f "$c.none" ] && return 0
+  if [ "$(head -c 3 -- "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" != "efbbbf" ]; then : >"$c.none" 2>/dev/null; return 0; fi
+  local z; z="$(stat_size "$1")"
+  if [ "${z:-0}" -gt "$BOM_COPY_MAX" ]; then record_error "core" "bom_not_stripped:$1"; : >"$c.none" 2>/dev/null; return 0; fi
+  tail -c +4 -- "$1" 2>/dev/null | head -c "$BOM_COPY_MAX" >"$c.tmp" && mv -f -- "$c.tmp" "$c" && SRC="$c"
+  return 0
+}
+zes_src() {
+  SRC="$1"
+  if [ "${#BOM_SRC[@]}" -gt 0 ] && [ -n "${BOM_SRC[$1]+x}" ]; then SRC="${BOM_SRC[$1]}"; return 0; fi
+  # files of the scan root were all looked at by bom_prepare (except the root .git, which the inventory leaves out)
+  case "$1" in "") return 0 ;; "$RP"/.git/*) ;; "$RP"/*) return 0 ;; esac
+  [ -n "$BOM_MAP" ] && bom_lazy "$1"
+  return 0
+}
 # bom_split < list … the NUL-separated list for xargs, with BOM files replaced by their copies; bom_unmap maps copies back
 bom_split() {
   if [ "${#BOM_SRC[@]}" -eq 0 ]; then tr '\n' '\0'; return; fi
@@ -1299,7 +1409,8 @@ bom_split() {
 }
 bom_unmap() {
   if [ "${#BOM_SRC[@]}" -eq 0 ]; then cat; return; fi
-  awk -F'\t' 'NR == FNR { m[$1] = $2; next } { print (($0 in m) ? m[$0] : $0) }' "$BOM_MAP" -
+  ZES_BD="$TMP_DIR/bom/" awk 'NR == FNR { t = index($0, "\t"); m[ENVIRON["ZES_BD"] substr($0, 1, t - 1)] = substr($0, t + 1); next }
+    { print (($0 in m) ? m[$0] : $0) }' "$BOM_MAP" -
 }
 # grep_l PATTERN [grep-opts...] < filelist … returns only the paths of files whose contents match (contents are never output)
 #   A file that starts with a UTF-8 BOM is read without it (BOM_SRC, as the browser's TextDecoder does)
@@ -1314,7 +1425,7 @@ grep_lF() {
 # Existence check on a single file
 fgrep_q() {
   local n=$#
-  if [ "$n" -gt 0 ] && [ "${#BOM_SRC[@]}" -gt 0 ] && [ -n "${BOM_SRC[${!n}]+x}" ]; then set -- "${@:1:n-1}" "${BOM_SRC[${!n}]}"; fi
+  if [ "$n" -gt 0 ]; then zes_src "${!n}"; set -- "${@:1:n-1}" "$SRC"; fi
   grep -q -a -E "$@" 2>/dev/null
 }
 # Existence check at the end of a pipe (cmd | grep_q [grep-opts...] PATTERN). Returns the same truth value as grep -q, but reads the input to the end.
@@ -1323,7 +1434,9 @@ fgrep_q() {
 #   it made detail (e.g. the list of dangerous permissions in §24) and id change between runs. Do not use grep -q in pipes
 grep_q() {
   local n=$#
-  if [ "$n" -gt 0 ] && [ "${#BOM_SRC[@]}" -gt 0 ] && [ -n "${BOM_SRC[${!n}]+x}" ]; then set -- "${@:1:n-1}" "${BOM_SRC[${!n}]}"; fi
+  # the last operand is a file only when it is an absolute path to one (scanned paths are absolute; cmd | grep_q PATTERN
+  #   has none, and a pattern is never replaced)
+  if [ "$n" -gt 0 ] && [[ "${!n}" == /* ]] && [ -f "${!n}" ]; then zes_src "${!n}"; set -- "${@:1:n-1}" "$SRC"; fi
   n="$(grep -c "$@" 2>/dev/null)"; [ "${n:-0}" -gt 0 ] 2>/dev/null
 }
 # Conversion for reading TSV while keeping empty fields. IFS=$'\t' treats tab as whitespace and collapses consecutive tabs into one separator
@@ -2239,7 +2352,7 @@ check_s4() {
   done < <(files_named '^\.tool-versions$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    zes_src "$f"; grep -E -i -o '^[[:space:]]*FROM[[:space:]]+([^ ]*/)?php(:[^ ]+)?' "$SRC" 2>/dev/null | while IFS= read -r line; do
+    dockerfile_lines "$f" | grep -E -i -o '^[[:space:]]*FROM[[:space:]]+([^ ]*/)?php(:[^ ]+)?' 2>/dev/null | while IFS= read -r line; do
       case "$line" in
         *php:*latest*|*php) medium "" "$f" s4.php_image_floating ;;
         *) info "" "$f" s4.php_image image="${line##* }" ;;
@@ -2308,7 +2421,7 @@ check_s5() {
   done < <(files_named '^\.python-version$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -E -i -o 'FROM[[:space:]]+([^ ]*/)?python:3\.[0-9]+(\.[0-9]+)?' "$f" 2>/dev/null | sed -E 's/.*python://' | while IFS= read -r v; do
+    dockerfile_lines "$f" | grep -E -i -o 'FROM[[:space:]]+([^ ]*/)?python:3\.[0-9]+(\.[0-9]+)?' 2>/dev/null | sed -E 's/.*python://' | while IFS= read -r v; do
       check_py_version "$v" "$f"
     done
   done < <(files_named '^(Dockerfile.*|.*\.dockerfile)$')
@@ -2505,7 +2618,8 @@ check_s7() {
   done <"$GIT_HOOKS_LIST"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q '"runOn"[[:space:]]*:[[:space:]]*"folderOpen"' "$f" && high "mcp-poisoning" "$f" s7.folder_open \
+    # on the decoded document (json_view: an escaped "run\u004fn" is runOn as VS Code reads it)
+    json_view "$f" | grep_q -E '"runOn"[[:space:]]*:[[:space:]]*"folderOpen"' && high "mcp-poisoning" "$f" s7.folder_open \
       --x="$(x_locators "$(json_ptr_locators "$f" "$TASK_RUNON_PATHS")")"
   done < <(files_path '/\.(vscode|claude|cursor)/tasks\.json$')
   intel_strings
@@ -2525,7 +2639,7 @@ check_s8() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     # USER root, USER 0, USER root:<group>, USER 0:0 (the user is root whatever the group)
-    fgrep_q -i '^[[:space:]]*USER[[:space:]]+(root|0)(:[^[:space:]]*)?([[:space:]]|$)' "$f" && medium "" "$f" s8.user_root
+    dockerfile_lines "$f" | grep_q -i -E '^[[:space:]]*USER[[:space:]]+(root|0)(:[^[:space:]]*)?([[:space:]]|$)' && medium "" "$f" s8.user_root
     dockerfile_images "$f" | while IFS= read -r img; do
       case "$img" in scratch|'$'*|*@sha256:*) continue ;; esac
       if [[ "$img" == *:latest ]] || [[ "${img##*/}" != *:* ]]; then medium "" "$f" s8.floating_image image="$img"; fi
@@ -2537,17 +2651,45 @@ check_s8() {
   return 0
 }
 
-# dockerfile_images FILE … the image of each FROM line, one per line (the same rule as fromImages of the browser engine):
-#   the line (a leading BOM, a CR before the line break removed) is FROM after optional whitespace, then whitespace; the
-#   words after it are split on [[:space:]] (space, tab, VT, FF, CR; not NBSP or other Unicode spaces), flags such as
+# dockerfile_lines FILE … the logical lines of a Dockerfile as BuildKit's parser joins them (the same rule as
+#   dockerfileLines of the browser engine): lines end at LF (a BOM and a CR before the LF removed); the escape character is
+#   "\" or the one of a leading "# escape=" parser directive ("`"); a line that ends with it (spaces / tabs after it
+#   allowed) continues on the next line, joined without a separator after the escape character is removed; inside a
+#   continuation, comment lines (# after optional whitespace) and lines of only whitespace are skipped. Outside one,
+#   comment lines and empty lines give nothing, and leading whitespace is removed. "FROM \" + "  node:latest" is one line
+dockerfile_lines() {
+  text_lines "$1" | awk "$ZES_AWK_LIB"'
+    function cont(l,   e) { e = length(l); while (e > 0 && index(" \t", substr(l, e, 1))) e--
+      if (e > 0 && substr(l, e, 1) == esc) { CONT = substr(l, 1, e - 1); return 1 } return 0 }
+    BEGIN { esc = "\\"; dir = 1; incont = 0; n = 0 }
+    { l = $0
+      if (dir) {
+        if (match(l, /^#[ \t]*[A-Za-z][A-Za-z0-9]*[ \t]*=/)) {
+          k = substr(l, 2, RLENGTH - 2); gsub(/[ \t]/, "", k); v = substr(l, RLENGTH + 1); sub(/^[ \t]+/, "", v); v = zes_rtrim(v, " \t")
+          if (tolower(k) == "escape" && (v == "`" || v == "\\")) esc = v
+          next }
+        dir = 0 }
+      t = l; sub(/^[ \t\v\f\r]+/, "", t)
+      if (!incont) {
+        if (substr(t, 1, 1) == "#" || t == "") next
+        if (!cont(t)) { print t; next }
+        n = 0; P[++n] = CONT; incont = 1; next }
+      if (substr(t, 1, 1) == "#" || t ~ /^[ \t\v\f\r]*$/) next
+      if (cont(l)) { P[++n] = CONT; next }
+      P[++n] = l; print zes_join(P, n); incont = 0 }
+    END { if (incont) print zes_join(P, n) }'
+}
+# dockerfile_images FILE … the image of each FROM instruction, one per line (the same rule as fromImages of the browser
+#   engine), on the logical lines (dockerfile_lines): FROM after optional whitespace, then whitespace; the words after it
+#   are split on [[:space:]] (space, tab, VT, FF, CR; not NBSP or other Unicode spaces), flags such as
 #   --platform=linux/amd64 are skipped and the first other word is the image. A FROM line without one prints nothing
 #   (never an empty image). A NUL becomes U+0001 (a shell variable cannot hold it; the browser engine does the same)
 dockerfile_images() {
-  awk 'NR == 1 { sub(/^\357\273\277/, "") }
-    { sub(/\r$/, ""); gsub(/\0/, "\001"); l = $0
+  dockerfile_lines "$1" | awk '
+    { gsub(/\0/, "\001"); l = $0
       if (!match(tolower(l), /^[ \t\v\f\r]*from[ \t\v\f\r]+/)) next
       n = split(substr(l, RLENGTH + 1), w, /[ \t\v\f\r]+/)
-      for (k = 1; k <= n; k++) { if (w[k] == "" || substr(w[k], 1, 2) == "--") continue; print w[k]; break } }' "$1" 2>/dev/null
+      for (k = 1; k <= n; k++) { if (w[k] == "" || substr(w[k], 1, 2) == "--") continue; print w[k]; break } }' 2>/dev/null
 }
 
 # §9 Rust/Go/Node typosquatting and unofficial sources
@@ -2558,12 +2700,14 @@ check_s9() {
   # Matching of known typosquat names is done in §15 check_lockfile_versions (any_version)
   local -a regs; mapfile -t regs < <(read_ioc '.official_registries')
   local re; re="$(printf '%s|' "${regs[@]}" | sed 's/\./\\./g; s/|$//')"
+  # On the decoded document (json_view), as npm reads it: an escaped key or URL cannot hide the source
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if grep -E -o '"resolved"[[:space:]]*:[[:space:]]*"https?://[^/"]+' "$f" 2>/dev/null | sed -E 's#.*://##' | sort -u | grep -v -E "^($re)$" | grep_q .; then
+    json_view "$f" >"$TMP_DIR/s9.view"
+    if grep -E -o '"resolved"[[:space:]]*:[[:space:]]*"https?://[^/"]+' "$TMP_DIR/s9.view" 2>/dev/null | sed -E 's#.*://##' | sort -u | grep -v -E "^($re)$" | grep_q .; then
       high "" "$f" s9.non_official_registry
     fi
-    fgrep_q '"resolved"[[:space:]]*:[[:space:]]*"(git\+|github:|https?://[^"]*\.tgz#)' "$f" && medium "" "$f" s9.git_url_dependency
+    grep_q -E '"resolved"[[:space:]]*:[[:space:]]*"(git\+|github:|https?://[^"]*\.tgz#)' "$TMP_DIR/s9.view" && medium "" "$f" s9.git_url_dependency
   done < <(files_named '^(package-lock\.json|npm-shrinkwrap\.json)$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -2784,6 +2928,176 @@ mcp_config_files() {
   done
   return 0
 }
+ZES_JSONW_AWK='
+    # The lenient reading of agent / MCP JSON (§17; the same reader as lenientJson in the UI (agentConfig.ts)): read when jq is
+    #   missing or cannot parse the file (jq 1.7 stops at depth 256 and rejects a lone surrogate escape, both of which
+    #   JSON.parse and the agents accept), so that a dangerous command is reported whenever the file can be read leniently.
+    #   Accepted: JSON plus comments (// and /* */), trailing commas, any literal jq or JSON.parse reads (a run of characters
+    #   other than whitespace, structure, quotes and "/": true, 01, NaN, Infinity …), several documents in a row, lone
+    #   surrogate escapes (U+FFFD), any depth. A control character in a string, an unknown escape, an unbalanced structure or
+    #   a missing ":" / "," fails: then only "!" is printed.
+    #   For every object with a "command" member (the last one of each name counts), at its end:
+    #     O US pointer US entry US s US command      (s = 1 when command is a string; LF and US in command as \002;
+    #                                                pointers encoded as ptr_dec reads them)
+    #     L US pointer US entry US line              for every line of command + " " + args (args: the strings and literals in
+    #                                                it joined by " ", as jq map(tostring) | join(" ") for an array of strings;
+    #                                                nothing for null / false)
+    #   entry is the hook entry /hooks/<Event>/<i> that holds the object ("" outside one); the pointer is "?" below depth 256.
+    #   Then "K" and, when a comment or
+    #   a trailing comma was read, "C" (the locator format is then jsonc).
+    function jw_fail() { JWBAD = 1 }
+    function jw_esc(k) { gsub(/~/, "~0", k); gsub(/\//, "~1", k); return k }
+    function jw_u8(c) {
+      if (c < 128) return sprintf("%c", c)
+      if (c < 2048) return sprintf("%c%c", 192 + int(c / 64), 128 + c % 64)
+      if (c < 65536) return sprintf("%c%c%c", 224 + int(c / 4096), 128 + int(c / 64) % 64, 128 + c % 64)
+      return sprintf("%c%c%c%c", 240 + int(c / 262144), 128 + int(c / 4096) % 64, 128 + int(c / 64) % 64, 128 + c % 64) }
+    function jw_hex(h,   i, v) { v = 0; for (i = 1; i <= 4; i++) v = v * 16 + index("0123456789abcdef", tolower(substr(h, i, 1))) - 1; return v }
+    # a scalar (decoded string or literal text) of the value being read
+    function jw_scalar(s, isstr, lit,   k, c) {
+      for (k = NCAP; k >= 1 && k > NCAP - 64; k--) { c = CAP[k]; CT[c, ++CN[c]] = s }
+      jw_value(isstr ? "s" : "l", s, lit) }
+    # a value ended (scalar or container) at depth D: the member it was the value of, the next expectation
+    function jw_value(kind, s, lit,   c) {
+      NV++
+      if (D == 0) { EX = "v"; return }
+      if (TY[D] == "a") { IX[D]++; EX = ","; return }
+      if (CAPK[D] != "") {
+        c = D
+        if (CAPK[D] == "command") { CMD[D] = 1; CS[D] = (kind == "s"); CV[D] = (kind == "s") ? s : jw_cat(c) }
+        else { AV[D] = (kind == "l" && (lit == "null" || lit == "false")) ? "" : jw_cat(c) }
+        NCAP--; CAPK[D] = "" }
+      EX = "," }
+    function jw_cat(c,   A, n, k) { n = CN[c]; for (k = 1; k <= n; k++) { A[k] = CT[c, k]; delete CT[c, k] } CN[c] = 0; return zes_join_sp(A, n) }
+    function zes_join_sp(A, n,   m, k) {
+      if (n < 1) return ""
+      while (n > 1) { m = 0; for (k = 1; k <= n; k += 2) A[++m] = (k < n) ? A[k] " " A[k + 1] : A[k]; n = m }
+      return A[1] }
+    # a container opens at depth D + 1 (the value of the current member / element)
+    # The pointer of a container is built only down to depth 256 (the depth jq reads; deeper pointers would cost time
+    #   quadratic in the depth): deeper ones are "?", and their objects are reported without a locator
+    function jw_open(t,   p, e, nm) {
+      if (D == 0) { p = ""; e = ""; nm = "" }
+      else if (PT[D] == "?" || D >= 256) { p = "?"; e = EN[D] }
+      else if (TY[D] == "a") { nm = IX[D]; p = PT[D] "/" nm; e = EN[D] }
+      else { nm = KY[D]; p = PT[D] "/" jw_esc(nm); e = EN[D] }
+      if (e == "" && D == 3 && TY[1] == "o" && KY[1] == "hooks" && TY[2] == "o" && TY[3] == "a") e = p
+      D++; TY[D] = t; PT[D] = p; EN[D] = e; IX[D] = 0; KY[D] = ""; CMD[D] = 0; CS[D] = 0; CV[D] = ""; AV[D] = ""; CAPK[D] = ""
+      EX = (t == "o") ? "k" : "v" }
+    function jw_close(t,   lines, n, k, p, e) {
+      if (D == 0 || TY[D] != t) { jw_fail(); return }
+      if (t == "o" && CMD[D]) {
+        p = PT[D]; e = EN[D]
+        if (p != "?") p = jw_penc(p); e = jw_penc(e)
+        OUT[++NO] = "O\037" p "\037" e "\037" CS[D] "\037" jw_clean(CV[D], "\002")
+        n = split(CV[D] " " AV[D], lines, "\n")
+        for (k = 1; k <= n; k++) OUT[++NO] = "L\037" p "\037" e "\037" jw_clean(lines[k], " ") }
+      D--
+      # a container that is the value of a captured member ends that member
+      jw_value(t == "o" ? "o" : "a", "", "") }
+    # pointers as printf %b reads them back (ptr_dec): \ doubled, LF as \n, US as \0037
+    function jw_penc(p) { gsub(/\\/, "\\\\", p); gsub(/\n/, "\\n", p); gsub(/\037/, "\\0037", p); return p }
+    function jw_clean(s, nl) { gsub(/\037/, "\002", s); gsub(/\n/, nl, s); return s }
+    BEGIN { D = 0; EX = "v"; NO = 0; NCAP = 0; INC = 0; JWBAD = 0; JWC = 0 }
+    JWBAD { next }
+    { L = $0; n = length(L)
+      for (i = 1; i <= n && !JWBAD; i++) { c = substr(L, i, 1)
+        if (INC) { if (c == "*" && substr(L, i + 1, 1) == "/") { INC = 0; i++ } continue }
+        if (c == " " || c == "\t" || c == "\r") continue
+        if (c == "/") { c2 = substr(L, i + 1, 1); JWC = 1
+          if (c2 == "/") break
+          if (c2 == "*") { INC = 1; i++; continue }
+          jw_fail(); break }
+        if (c == "\"") {
+          # string: decoded into S (pieces), up to the closing quote on this line
+          ns = 0; st = i + 1; ok = 0
+          for (j = st; j <= n; j++) { d = substr(L, j, 1)
+            if (d == "\"") { ok = 1; break }
+            if (d < " ") { break }
+            if (d == "\\") {
+              S[++ns] = substr(L, st, j - st); e = substr(L, j + 1, 1)
+              if (e == "u") { h = substr(L, j + 2, 4); if (h !~ /^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$/) { j = n + 1; break }
+                cp = jw_hex(h); j += 5
+                if (cp >= 55296 && cp < 56320 && substr(L, j + 1, 2) == "\\u" && substr(L, j + 3, 4) ~ /^[dD][c-fC-F][0-9A-Fa-f][0-9A-Fa-f]$/) {
+                  cp = 65536 + (cp - 55296) * 1024 + jw_hex(substr(L, j + 3, 4)) - 56320; j += 6 }
+                else if (cp >= 55296 && cp < 57344) cp = 65533
+                S[++ns] = jw_u8(cp) }
+              else if (e == "\"" || e == "\\" || e == "/") { S[++ns] = e; j++ }
+              else if (e == "b") { S[++ns] = "\b"; j++ } else if (e == "f") { S[++ns] = "\f"; j++ }
+              else if (e == "n") { S[++ns] = "\n"; j++ } else if (e == "r") { S[++ns] = "\r"; j++ } else if (e == "t") { S[++ns] = "\t"; j++ }
+              else { j = n + 1; break }
+              st = j + 1 } }
+          if (!ok) { jw_fail(); break }
+          S[++ns] = substr(L, st, j - st); str = zes_join(S, ns); i = j
+          if (EX == "k") { KY[D] = str; EX = ":"; continue }
+          if (EX != "v") { jw_fail(); break }
+          jw_scalar(str, 1, ""); continue }
+        if (c == ":") { if (EX != ":") { jw_fail(); break }
+          EX = "v"; if (KY[D] == "command" || KY[D] == "args") { CAPK[D] = KY[D]; CAP[++NCAP] = D; CN[D] = 0 } ; continue }
+        if (c == ",") { if (EX == ",") { EX = (TY[D] == "o") ? "k" : "v"; continue }
+          jw_fail(); break }
+        if (c == "{" || c == "[") { if (EX != "v") { jw_fail(); break } jw_open(c == "{" ? "o" : "a"); continue }
+        if (c == "}" || c == "]") {
+          t = (c == "}") ? "o" : "a"
+          if (EX == "k" || (EX == "v" && t == "a")) { if (D && TY[D] == t && (IX[D] > 0 || KY[D] != "")) JWC = 1 }
+          else if (EX != ",") { jw_fail(); break }
+          jw_close(t); continue }
+        # a literal: the longest run of other characters
+        for (j = i; j <= n && substr(L, j, 1) !~ /[ \t\r{}\[\]:,"\/]/; j++) ;
+        if (EX != "v" || j == i) { jw_fail(); break }
+        lit = substr(L, i, j - i); i = j - 1
+        jw_scalar(lit, 0, lit) } }
+    # a text without any value is not read (an empty file stays unparsed, as in the UI: fail-closed)
+    END { if (JWBAD || D != 0 || INC || !NV) { print "!"; exit }
+      for (k = 1; k <= NO; k++) print OUT[k]
+      print "K"; if (JWC) print "C" }
+'
+# json_lenient FILE … the records of ZES_JSONW_AWK for FILE (its BOM-free view; one BOM, as the browser's TextDecoder)
+json_lenient() { zes_src "$1"; awk "$ZES_AWK_LIB$ZES_JSONW_AWK" "$SRC" 2>/dev/null; }
+# json_lenient_cmds FILE mcp HK … the MCP check's records from the lenient reading: fmt US pointer US command line, without the
+#   objects inside a hook entry when HK is 1 (as mcpq). json_lenient_cmds FILE hook … the agent-hook check's records (as
+#   HOOK_ENTRY_CMDS): fmt US entry US h US line, after a leading "ok" record. Prints nothing and fails when the file
+#   cannot be read leniently either
+json_lenient_cmds() {
+  json_lenient "$1" | awk -F'\037' -v mode="$2" -v hk="${3:-0}" -v re='(curl|wget|base64|nc |/dev/tcp)' '
+    # rest(r, k): the record r from its field k on (the last field may hold US)
+    function rest(r, k,   i) { for (i = 1; i < k; i++) r = substr(r, index(r, "\037") + 1); return r }
+    $1 == "!" { bad = 1 } $1 == "C" { fmt = "jsonc" } $1 == "O" || $1 == "L" { R[++n] = $0 }
+    END { if (bad) exit 1
+      if (fmt == "") fmt = "json"
+      if (mode == "hook") print fmt "\037\0370\037"
+      for (k = 1; k <= n; k++) { split(R[k], F, "\037")
+        if (mode == "mcp") { if (F[1] == "L" && !(hk == 1 && F[3] != "")) print (F[2] == "?" ? "-" : fmt) "\037" F[2] "\037" rest(R[k], 4); continue }
+        if (F[3] == "") continue
+        if (F[1] == "L") { print fmt "\037" F[3] "\0370\037" rest(R[k], 4); continue }
+        c = rest(R[k], 5); gsub(/\002/, "\n", c)
+        print fmt "\037" F[3] "\037" ((F[4] == 1 && c ~ re) ? 1 : 0) "\037" } }'
+}
+# ptr_dec ENCODED … sets PTR to the pointer (the encoding of jq "$ptr | ptrenc" and of ZES_JSONW_AWK, read with printf %b)
+ptr_dec() { printf -v PTR '%b' "$1"; }
+# jq definition used in front of the programs that print pointers: \ doubled, LF as \n, US as \0037 (ptr_dec reverses it),
+#   so a member name with a line break or U+001F cannot split a record (R6-CLI-2)
+JQ_PTRENC='def ptrenc: gsub("\\\\"; "\\\\") | gsub("\n"; "\\n") | gsub("\u001f"; "\\0037");'
+# json_view FILE … the text the raw-text checks of JSON files read: the document as jq prints it (-c: keys and strings
+#   decoded, so "run\u004fn" is "runOn" and an escaped quote cannot end a string early; comments removed for JSONC), or,
+#   when jq is missing or the file does not parse, the BOM-free text with \u escapes of printable ASCII other than " and \
+#   decoded (fail-closed)
+json_view() {
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    jq -c . "$1" 2>/dev/null && return 0
+    jsonc_to_json "$1" | jq -c . 2>/dev/null && return 0
+  fi
+  zes_src "$1"; json_unescape_ascii <"$SRC"
+}
+json_unescape_ascii() {
+  awk "$ZES_AWK_LIB"'
+    function hx(h,   i, v) { v = 0; for (i = 1; i <= 4; i++) v = v * 16 + index("0123456789abcdef", tolower(substr(h, i, 1))) - 1; return v }
+    { L = $0; n = split(L, P, /\\u00[2-7][0-9A-Fa-f]/); if (n == 1) { print; next }
+      no = 0; pos = 1
+      for (k = 1; k < n; k++) { pos += length(P[k]); O[++no] = P[k]; c = hx(substr(L, pos + 2, 4)); pos += 6
+        O[++no] = (c == 34 || c == 92 || c == 127) ? substr(L, pos - 6, 6) : sprintf("%c", c) }
+      O[++no] = P[n]; print zes_join(O, no) }'
+}
 # Convert JSONC (.vscode/mcp.json etc. officially allow comments and trailing commas) to JSON
 #   Removes // line comments, /* */ block comments and commas right before a closing bracket outside strings (strings are kept as is)
 jsonc_to_json() {
@@ -2909,6 +3223,15 @@ codex_toml_mcp_commands() {
         if (ch(0) == ".") { i++; continue }
         return nk } }
     function rec(t, p, v) { print t "\037" p "\037" v }
+    # pj(p, c): the key path p extended by c. Stage 2 reads only paths under mcp_servers, at most 4 deep, so any other path
+    #   is "-" and a path stops growing after 5 components (a 6th, \035, marks "deeper"): each path is a few components long,
+    #   and a long dotted key or header, or many keys under one, costs linear time (it was quadratic)
+    function pj(p, c,   m, T) {
+      if (p == "-") return p
+      if (p == "") return (c == "mcp_servers") ? c : "-"
+      m = split(p, T, SUBSEP)
+      if (m >= 6) return p
+      return p SUBSEP ((m == 5) ? "\035" : c) }
     # Arrays and inline tables nest at most 80 deep, the limit of the TOML parser of Codex CLI (toml 0.9 / toml_parser
     #   RecursionGuard, LIMIT = 80); deeper is a parse error (fail-closed, before mawk runs out of evaluation stack)
     function value(p,   c, t, idx, nk, kp, k, s) {
@@ -2920,7 +3243,7 @@ codex_toml_mcp_commands() {
         i++; idx = 0; rec("a", p, "")
         while (1) { skip_wsnl(); if (i > n) perr("unterminated_array")
           if (ch(0) == "]") { i++; depth--; return }
-          value(p SUBSEP idx); idx++
+          value(pj(p, idx)); idx++
           skip_wsnl(); c = ch(0)
           if (c == ",") { i++; continue }
           if (c == "]") { i++; depth--; return }
@@ -2928,7 +3251,7 @@ codex_toml_mcp_commands() {
       if (c == "{") {
         i++; rec("t", p, ""); skip_wsnl()
         if (ch(0) == "}") { i++; depth--; return }
-        while (1) { skip_wsnl(); nk = key(); kp = p; for (k = 1; k <= nk; k++) kp = kp SUBSEP KS[k]
+        while (1) { skip_wsnl(); nk = key(); kp = p; for (k = 1; k <= nk; k++) kp = pj(kp, KS[k])
           skip_ws(); if (ch(0) != "=") perr("bad_inline_table"); i++; skip_ws()
           value(kp); skip_wsnl(); c = ch(0)
           if (c == ",") { i++; continue }
@@ -2944,12 +3267,12 @@ codex_toml_mcp_commands() {
         skip_wsnl(); if (i > n) break
         if (ch(0) == "[") {
           arr = (ch(1) == "["); i += arr ? 2 : 1
-          nk = key(); p = KS[1]; for (k = 2; k <= nk; k++) p = p SUBSEP KS[k]
+          nk = key(); p = ""; for (k = 1; k <= nk; k++) p = pj(p, KS[k])
           skip_ws()
-          if (arr) { if (ch(0) != "]" || ch(1) != "]") perr("bad_table_header"); i += 2; p = p SUBSEP (AT[p]++) }
+          if (arr) { if (ch(0) != "]" || ch(1) != "]") perr("bad_table_header"); i += 2; p = pj(p, AT[p]++) }
           else { if (ch(0) != "]") perr("bad_table_header"); i++ }
           tbl = p; rec("t", p, ""); eol(); continue }
-        nk = key(); p = tbl; for (k = 1; k <= nk; k++) p = (k == 1 && p == "") ? KS[1] : p SUBSEP KS[k]
+        nk = key(); p = tbl; for (k = 1; k <= nk; k++) p = pj(p, KS[k])
         skip_ws(); if (ch(0) != "=") perr("expected_equals"); i++; skip_ws()
         value(p); eol() } }' | awk -F'\037' "$ZES_AWK_LIB"'
     /^\?/ { print; next }
@@ -2994,9 +3317,9 @@ check_s17() {
   #   If command contains newlines, each line is matched separately (as before)
   #   In agent hook files ($hk == 1) the objects inside a hook entry (/hooks/<Event>/<i>/…) are hooks, not MCP servers:
   #   they are skipped here and judged by the agent-hook check below (which also applies MCP_DANGER_RE to them)
-  local mcpq='path(.. | select(type == "object" and has("command"))) as $p
+  local mcpq="$JQ_PTRENC"'path(.. | select(type == "object" and has("command"))) as $p
     | select(($hk == 1 and ($p | length) >= 3 and $p[0] == "hooks" and ($p[1] | type) == "string" and ($p[2] | type) == "number") | not)
-    | (if ($p | length) == 0 then "" else "/" + ($p | map(tostring | gsub("~"; "~0") | gsub("/"; "~1")) | join("/")) end) as $ptr
+    | (if ($p | length) == 0 then "" else "/" + ($p | map(tostring | gsub("~"; "~0") | gsub("/"; "~1")) | join("/")) end | ptrenc) as $ptr
     | getpath($p) | ((.command | tostring) + " " + ((.args // []) | if type == "array" then map(tostring) | join(" ") else tostring end))
     | split("\n")[] | $fmt + "\u001f" + $ptr + "\u001f" + .'
   local hk
@@ -3009,8 +3332,8 @@ check_s17() {
     # Only files the agent-hook check below reads (the same list), so no hook is left unchecked
     hk=0; [ -n "${hookfiles[$f]+x}" ] && hk=1
     while IFS=$'\037' read -r fmt ptr cmdline; do
-      # Without jq the pointer is unknown (loc is empty; the finding is emitted, locators are not)
-      loc=""; [ "$HAVE_JQ" -eq 1 ] || [[ "$f" == *.toml ]] && loc="{\"format\":\"$fmt\",\"pointer\":$(jq_str "$ptr")}"
+      # fmt "-": the grep fallback, which does not know the location (the finding is emitted, its locator is not)
+      loc=""; [ "$fmt" = "-" ] || { ptr_dec "$ptr"; loc="{\"format\":\"$fmt\",\"pointer\":$(jq_str "$PTR")}"; }
       if printf '%s' "$cmdline" | grep_q -i -E -- "$MCP_DANGER_RE"; then hi+=("$loc")
       elif printf '%s' "$cmdline" | grep_q -E '(^|[[:space:]"/])(npx|uvx|bunx|pnpm dlx)([[:space:]"]|$)'; then me+=("$loc")
       fi
@@ -3019,20 +3342,22 @@ check_s17() {
         codex_toml_mcp_commands "$f" | while IFS= read -r cmdline; do
           case "$cmdline" in "?"*) record_error "§17" "codex_toml_unparsed:${cmdline#\?}:$f"; continue ;; esac
           cmdline="${cmdline#=}"; nm="${cmdline%%$'\037'*}"
-          printf 'toml\037%s\037%s\n' "$(json_pointer mcp_servers "$nm")" "${cmdline#*$'\037'}"
+          ptr="$(json_pointer mcp_servers "$nm")"; ptr="${ptr//\\/\\\\}"
+          printf 'toml\037%s\037%s\n' "$ptr" "${cmdline#*$'\037'}"
         done
-      elif [ "$HAVE_JQ" -eq 1 ]; then
-        # If it cannot be read as strict JSON, reread it as JSONC (comments, trailing commas); if that also fails, errors[]
-        jq -r --arg fmt json --argjson hk "$hk" "$mcpq" "$f" 2>/dev/null \
-          || jsonc_to_json "$f" | jq -r --arg fmt jsonc --argjson hk "$hk" "$mcpq" 2>/dev/null \
-          || record_error "§17" "mcp_config_parse_failed:$f"
       else
-        # Without jq: join "command" and the "args" that follows it into one line (on separate lines "bash" and "-c" would not be linked).
-        #   The location (pointer) is unknown, so locators are not emitted
-        tr '\n' ' ' <"$f" 2>/dev/null | grep -E -o '"(command|args)"[[:space:]]*:[[:space:]]*("([^"\\]|\\.)*"|\[[^]]*\])' | awk '
-          { v = $0; sub(/^"[a-z]+"[[:space:]]*:[[:space:]]*/, "", v); gsub(/^\[|\]$/, "", v); gsub(/"[[:space:]]*,[[:space:]]*"/, " ", v); gsub(/^[[:space:]]*"|"[[:space:]]*$/, "", v)
-            if ($0 ~ /^"command"/) { if (cur != "") print "json\037\037" cur; cur = v } else cur = cur " " v }
-          END { if (cur != "") print "json\037\037" cur }'
+        # Strict JSON, then JSONC (comments, trailing commas) with jq; then the lenient reading (ZES_JSONW_AWK: what
+        #   JSON.parse or jq would read, at any depth; also the reader without jq); if that fails too, errors[] and the
+        #   grep fallback (fail-closed: commands are found, their locations are not)
+        { [ "$HAVE_JQ" -eq 1 ] && { jq -r --arg fmt json --argjson hk "$hk" "$mcpq" "$f" 2>/dev/null \
+            || jsonc_to_json "$f" | jq -r --arg fmt jsonc --argjson hk "$hk" "$mcpq" 2>/dev/null; }; } \
+          || json_lenient_cmds "$f" mcp "$hk" \
+          || { record_error "§17" "mcp_config_parse_failed:$f"
+               # join "command" and the "args" that follows it into one line (on separate lines "bash" and "-c" would not be linked)
+               zes_src "$f"; tr '\n' ' ' <"$SRC" 2>/dev/null | json_unescape_ascii | grep -E -o '"(command|args)"[[:space:]]*:[[:space:]]*("([^"\\]|\\.)*"|\[[^]]*\])' | awk '
+                 { v = $0; sub(/^"[a-z]+"[[:space:]]*:[[:space:]]*/, "", v); gsub(/^\[|\]$/, "", v); gsub(/"[[:space:]]*,[[:space:]]*"/, " ", v); gsub(/^[[:space:]]*"|"[[:space:]]*$/, "", v)
+                   if ($0 ~ /^"command"/) { if (cur != "") print "-\037\037" cur; cur = v } else cur = cur " " v }
+                 END { if (cur != "") print "-\037\037" cur }'; }
       fi)
     # Issues of the same kind in the same file are merged into one finding, listing the matching servers in locators (findings 1.1;
     #   each pointer only once; lines split at a newline in command point to the same server)
@@ -3057,38 +3382,43 @@ check_s17() {
       high "mcp-poisoning" "$l" s17.symjack_decoy target="$t"
     fi
   done <"$LINKS_LIST"
-  # Agent hooks (network access/obfuscation in the hooks of .claude/settings.json). A hook entry (/hooks/<Event>/<i>) is
-  #   reported when (a) the file-wide grep preselects the file and a .command string inside the entry matches, or (b) the
-  #   command + args of an object inside the entry match MCP_DANGER_RE on some line (case-insensitive; the rule the MCP
-  #   check applied to hooks before it skipped them; no preselection). npx / uvx in a hook is not reported (s17.npx is
-  #   about unpinned MCP server packages). A curl in mcpServers is not an agent hook. Without jq, or when the file cannot
-  #   be parsed, the preselection decides (fail-closed)
+  # Agent hooks (network access/obfuscation in the hooks of .claude/settings.json). Judged on the parsed document (keys and
+  #   strings decoded, so "hook\u0073" is hooks and an escaped quote is part of the string): a hook entry
+  #   (/hooks/<Event>/<i>) is reported when a .command string inside it matches (curl|wget|base64|nc |/dev/tcp), or the
+  #   command + args of an object inside it match MCP_DANGER_RE on some line (case-insensitive; the rule the MCP check
+  #   applied to hooks before it skipped them). npx / uvx in a hook is not reported (s17.npx is about unpinned MCP server
+  #   packages). A curl in mcpServers is not an agent hook. The document is read with jq (JSON, then JSONC) or else
+  #   leniently (json_lenient_cmds, also without jq). Only a file that cannot be read at all falls back to a grep of the text
+  #   (with \u escapes of ASCII decoded, json_unescape_ascii): "hooks" and a command with one of those words (fail-closed)
   local hl gate ptr h ok first
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    gate=0
-    fgrep_q '"hooks"[[:space:]]*:' "$f" && fgrep_q '"command"[[:space:]]*:[[:space:]]*"[^"]*(curl|wget|base64|nc |/dev/tcp)' "$f" && gate=1
     hl=""; ok=0
-    if [ "$HAVE_JQ" -eq 1 ] && fgrep_q '"hooks"' "$f"; then
-      local -A flagged=()
-      local -a order=()
-      while IFS=$'\037' read -r fmt ptr h cmdline; do
-        ok=1
-        [ -n "$ptr" ] || continue
-        [ -n "${flagged[$ptr]+x}" ] || { flagged[$ptr]=0; order+=("$fmt"$'\037'"$ptr"); }
-        [ "${flagged[$ptr]}" -eq 1 ] && continue
-        if { [ "$gate" -eq 1 ] && [ "$h" = 1 ]; } || { [ -n "$cmdline" ] && printf '%s' "$cmdline" | grep_q -i -E -- "$MCP_DANGER_RE"; }; then flagged[$ptr]=1; fi
-      done < <(
-        # The leading "ok" record tells that the file parsed even when it has no hook entries
-        jq -r --arg fmt json --arg re '(curl|wget|base64|nc |/dev/tcp)' '"json\u001f\u001f0\u001f", ($fmt + "\u001f" + ('"$HOOK_ENTRY_CMDS"'))' "$f" 2>/dev/null \
-          || jsonc_to_json "$f" | jq -r --arg fmt jsonc --arg re '(curl|wget|base64|nc |/dev/tcp)' '"jsonc\u001f\u001f0\u001f", ($fmt + "\u001f" + ('"$HOOK_ENTRY_CMDS"'))' 2>/dev/null)
-      for first in "${order[@]}"; do
-        ptr="${first#*$'\037'}"
-        [ "${flagged[$ptr]}" -eq 1 ] && hl="${hl:+$hl,}{\"format\":\"${first%%$'\037'*}\",\"pointer\":$(jq_str "$ptr")}"
-      done
-      unset flagged order
+    local -A flagged=()
+    local -a order=()
+    while IFS=$'\037' read -r fmt ptr h cmdline; do
+      ok=1
+      [ -n "$ptr" ] || continue
+      [ -n "${flagged[$ptr]+x}" ] || { flagged[$ptr]=0; order+=("$fmt"$'\037'"$ptr"); }
+      [ "${flagged[$ptr]}" -eq 1 ] && continue
+      if [ "$h" = 1 ] || { [ -n "$cmdline" ] && printf '%s' "$cmdline" | grep_q -i -E -- "$MCP_DANGER_RE"; }; then flagged[$ptr]=1; fi
+    done < <(
+      # The leading "ok" record tells that the file parsed even when it has no hook entries
+      { [ "$HAVE_JQ" -eq 1 ] && {
+          jq -r --arg fmt json --arg re '(curl|wget|base64|nc |/dev/tcp)' "$JQ_PTRENC"'"json\u001f\u001f0\u001f", ($fmt + "\u001f" + ('"$HOOK_ENTRY_CMDS"'))' "$f" 2>/dev/null \
+            || jsonc_to_json "$f" | jq -r --arg fmt jsonc --arg re '(curl|wget|base64|nc |/dev/tcp)' "$JQ_PTRENC"'"jsonc\u001f\u001f0\u001f", ($fmt + "\u001f" + ('"$HOOK_ENTRY_CMDS"'))' 2>/dev/null; }; } \
+        || json_lenient_cmds "$f" hook)
+    for first in "${order[@]}"; do
+      ptr="${first#*$'\037'}"
+      [ "${flagged[$ptr]}" -eq 1 ] && { ptr_dec "$ptr"; hl="${hl:+$hl,}{\"format\":\"${first%%$'\037'*}\",\"pointer\":$(jq_str "$PTR")}"; }
+    done
+    unset flagged order
+    gate=0
+    if [ "$ok" -eq 0 ]; then
+      json_view "$f" >"$TMP_DIR/s17.view" 2>/dev/null
+      fgrep_q '"hooks"[[:space:]]*:' "$TMP_DIR/s17.view" && fgrep_q '"command"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*(curl|wget|base64|nc |/dev/tcp)' "$TMP_DIR/s17.view" && gate=1
     fi
-    if [ -n "$hl" ] || { [ "$gate" -eq 1 ] && [ "$ok" -eq 0 ]; }; then
+    if [ -n "$hl" ] || [ "$gate" -eq 1 ]; then
       high "mcp-poisoning" "$f" s17.agent_hook --x="$(x_locators "$hl")"
     fi
   done < <(files_path "$AGENT_HOOK_FILES_RE")
@@ -3170,14 +3500,17 @@ check_s20() {
     [ -n "$f" ] && high "mcp-poisoning" "$f" s20.deadbugz
   done
   local nre; nre="$(read_ioc '.mcp_poisoning.neighbor.internal_ip_regex')"
+  # On the decoded document (json_view; the TOML of Codex as it is), as the agents read it
+  local v="$TMP_DIR/s20.view"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -q -E "\"(url|serverUrl|endpoint)\"[[:space:]]*:[[:space:]]*\"https?://${nre}" "$f" 2>/dev/null \
+    if [[ "$f" == *.toml ]]; then zes_src "$f"; cat -- "$SRC" >"$v" 2>/dev/null; else json_view "$f" >"$v"; fi
+    grep -q -E "\"(url|serverUrl|endpoint)\"[[:space:]]*:[[:space:]]*\"https?://${nre}" "$v" 2>/dev/null \
       && medium "mcp-poisoning" "$f" s20.neighborjack
-    grep -q -E '"(url|serverUrl)"[[:space:]]*:[[:space:]]*"http://' "$f" 2>/dev/null \
-      && grep -E -o '"(url|serverUrl)"[[:space:]]*:[[:space:]]*"http://[^"]+' "$f" | grep_q -v -E 'http://(localhost|127\.0\.0\.1|\[::1\])' \
+    grep -q -E '"(url|serverUrl)"[[:space:]]*:[[:space:]]*"http://' "$v" 2>/dev/null \
+      && grep -E -o '"(url|serverUrl)"[[:space:]]*:[[:space:]]*"http://[^"]+' "$v" | grep_q -v -E 'http://(localhost|127\.0\.0\.1|\[::1\])' \
       && medium "mcp-poisoning" "$f" s20.plain_http
-    grep -q -E '"(host|bind|listen)"[[:space:]]*:[[:space:]]*"0\.0\.0\.0"|--host[ =]0\.0\.0\.0' "$f" 2>/dev/null \
+    grep -q -E '"(host|bind|listen)"[[:space:]]*:[[:space:]]*"0\.0\.0\.0"|--host[ =]0\.0\.0\.0' "$v" 2>/dev/null \
       && medium "mcp-poisoning" "$f" s20.listen_all
   done < <(mcp_config_files | sort -u)
   intel_strings
@@ -3514,16 +3847,45 @@ check_s25() {
 }
 
 # §26 Developer tool settings
+#   Git configs are read as git reads them (git_cfg_vars): a key on the header line ("[core] fsmonitor = x"), any case,
+#   quoted and escaped values, continuations and comments count as git counts them. Every assignment is checked, not
+#   only the last one: git uses the last value of the whole chain (system, global, the repository config, the include
+#   targets at the place of their include.path, config.worktree), and a later "fsmonitor = false" can be undone by a
+#   file that comes after it, so a dangerous value anywhere is reported (an over-approximation: a value that a later line
+#   overrides is still reported). The key is matched in every section, as before. core.fsmonitor runs a command unless
+#   its value is a Git boolean (no "=", "", true / yes / on / false / no / off in any case, or an int that git_parse_int
+#   accepts); sshCommand and hooksPath are reported for any value
+S26_VARS_AWK='
+    function gbool(v,   l, u, m) {
+      l = tolower(v)
+      if (l == "" || l == "true" || l == "yes" || l == "on" || l == "false" || l == "no" || l == "off") return 1
+      # git_parse_int (strtoimax base 0, unit k / m / g, int range); a leading 0 is octal there, so only 0 itself
+      if (l !~ /^[-+]?(0|[1-9][0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?[0-9]?)[kmg]?$/) return 0
+      u = 1; if (l ~ /k$/) u = 1024; else if (l ~ /m$/) u = 1048576; else if (l ~ /g$/) u = 1073741824
+      m = l; sub(/[kmg]$/, "", m); sub(/^[-+]/, "", m); m = (m + 0) * u
+      return (substr(l, 1, 1) == "-") ? m <= 2147483648 : m <= 2147483647 }
+    function hit(k) { if (++N[k] <= 64) H[k] = H[k] " " $1 }
+    $4 == "fsmonitor" && $5 == 1 && !gbool(gc_dec($6)) { hit("fsmonitor") }
+    $4 == "sshcommand" && $5 == 1 { hit("sshcommand") }
+    $4 == "hookspath" && $5 == 1 { hit("hookspath") }
+    END { if (N["fsmonitor"]) print "fsmonitor" H["fsmonitor"]; if (N["sshcommand"]) print "sshcommand" H["sshcommand"]
+          if (N["hookspath"]) print "hookspath" H["hookspath"] }'
 check_s26() {
   log_section "§26"
-  local f
+  local f k lines
+  local -A s26_repo=()
+  while IFS= read -r f; do [ -n "$f" ] && s26_repo["$f"]=1; done <"$GIT_CFG_LIST"
   while IFS= read -r f; do
     [ -n "$f" ] && [ -f "$f" ] || continue
-    fgrep_q -i '^[[:space:]]*fsmonitor[[:space:]]*=' "$f" && ! fgrep_q -i '^[[:space:]]*fsmonitor[[:space:]]*=[[:space:]]*(true|false)[[:space:]]*$' "$f" \
-      && critical "" "$f" s26.fsmonitor \
-        --x="$(TL_EXCLUDE='[[:space:]]*fsmonitor[[:space:]]*=[[:space:]]*(true|false)[[:space:]]*$' x_text_locators "$f" -i '^[[:space:]]*fsmonitor[[:space:]]*=')"
-    fgrep_q -i '^[[:space:]]*sshCommand[[:space:]]*=' "$f" && high "" "$f" s26.ssh_command --x="$(x_text_locators "$f" -i '^[[:space:]]*sshCommand[[:space:]]*=')"
-    fgrep_q -i '^[[:space:]]*hooksPath[[:space:]]*=' "$f" && medium "" "$f" s26.hooks_path --x="$(x_text_locators "$f" -i '^[[:space:]]*hooksPath[[:space:]]*=')"
+    [ -n "${s26_repo[$f]+x}" ] || git_cfg_capped "$f" || record_error "§26" "git_config_truncated:$f"
+    while read -r k lines; do
+      lines="$(tr ' ' '\n' <<<"$lines" | lines_locators "$f")"
+      case "$k" in
+        fsmonitor) critical "" "$f" s26.fsmonitor --x="$(x_locators "$lines")" ;;
+        sshcommand) high "" "$f" s26.ssh_command --x="$(x_locators "$lines")" ;;
+        hookspath) medium "" "$f" s26.hooks_path --x="$(x_locators "$lines")" ;;
+      esac
+    done < <(git_cfg_vars "$f" | awk -F'\037' "$ZES_AWK_LIB$ZES_GITCFG_DEC$S26_VARS_AWK")
   done < <(printf '%s\n' "$HOME_DIR/.gitconfig" "$HOME_DIR/.config/git/config"; cat "$GIT_CFG_LIST"; files_named '^\.gitconfig$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -3566,12 +3928,14 @@ toml_value_head() {
 # pyproject_build_system FILE … "B<text after =>" for the first build-backend and "P" for a backend-path of the
 #   [build-system] table (the same rule as buildSystemKeys of the browser engine). Only keys of that table count: lines
 #   under [build-system] (until the next table header), "build-system.build-backend = …" before the first header, and the
-#   keys of "build-system = { … }" on its line. Lines inside multi-line strings (""" / ''') are never keys (a
-#   description can hold a decoy "build-backend = …" line). TOML whitespace is space and tab; a BOM and CRs are removed,
-#   a NUL becomes U+0001 (as in the browser engine)
+#   keys of "build-system = { … }" on its line. A tokenizer state carries over lines: inside a multi-line string (""" /
+#   ''') or an array / inline table that spans lines (bracket depth outside strings and comments), a line is neither a
+#   table header nor a key, so "[\"build-system\"]" as an element of an array or a decoy "build-backend = …" line in a
+#   description is just a value. Each character is looked at once (no copy of the rest of the line per string). TOML
+#   whitespace is space and tab; a BOM and CRs are removed, a NUL becomes U+0001 (as in the browser engine)
 pyproject_build_system() {
-  text_lines "$1" | awk '
-    # Scan x from position i outside strings and set inml / mlq when a multi-line string stays open at the end of the line
+  text_lines "$1" | awk "$ZES_AWK_LIB"'
+    # Scan x from position i outside strings: dep (bracket depth), inml / mlq (a multi-line string open at the end of the line)
     function scan(x, i,   n, c, j) {
       n = length(x)
       while (i <= n) {
@@ -3583,17 +3947,20 @@ pyproject_build_system() {
         if (c == "#") return
         if (substr(x, i, 3) == "\"\"\"" || substr(x, i, 3) == "\047\047\047") { mlq = substr(x, i, 3); inml = 1; i += 3; continue }
         if (c == "\"") { for (j = i + 1; j <= n; j++) { if (substr(x, j, 1) == "\\") { j++; continue } if (substr(x, j, 1) == "\"") break } i = j + 1; continue }
-        if (c == "\047") { j = index(substr(x, i + 1), "\047"); if (j == 0) return; i += j + 1; continue }
+        if (c == "\047") { for (j = i + 1; j <= n && substr(x, j, 1) != "\047"; j++) ; if (j > n) return; i = j + 1; continue }
+        if (c == "[" || c == "{") dep++
+        else if ((c == "]" || c == "}") && dep > 0) dep--
         i++ } }
     function key(x, k) { return match(x, "^[ \t]*[\"\047]?" k "[\"\047]?[ \t]*=") }
     function emit(x, k) { if (k == "build-backend") { if (!gotbe) { gotbe = 1; print "B" substr(x, RSTART + RLENGTH) } } else print "P" }
     {
       line = $0; gsub(/\0/, "\001", line)
-      if (inml) { scan(line, 1); next }
+      # a line that continues a multi-line string or a value over several lines
+      if (inml || dep > 0) { scan(line, 1); next }
       if (match(line, /^[ \t]*\[/)) {
-        h = line; sub(/^[ \t]*\[/, "", h)
+        h = substr(line, RLENGTH + 1)
         if (substr(h, 1, 1) == "[") tbl = "other"
-        else { sub(/\].*$/, "", h); gsub(/^[ \t]+|[ \t]+$/, "", h); gsub(/^["\047]|["\047]$/, "", h); tbl = (h == "build-system") ? "bs" : "other" }
+        else { sub(/\].*$/, "", h); sub(/^[ \t]+/, "", h); h = zes_rtrim(h, " \t"); gsub(/^["\047]|["\047]$/, "", h); tbl = (h == "build-system") ? "bs" : "other" }
         next }
       if (tbl == "bs") { if (key(line, "build-backend")) emit(line, "build-backend"); else if (key(line, "backend-path")) emit(line, "backend-path") }
       else if (tbl == "") {
@@ -3670,7 +4037,7 @@ check_s28() {
 k8s_manifests() {
   local f
   files_named '\.ya?ml$' | grep_l '^kind:[[:space:]]*[A-Z]' | while IFS= read -r f; do
-    [ -n "$f" ] && grep -q '^apiVersion:' "$f" 2>/dev/null && printf '%s\n' "$f"
+    [ -n "$f" ] && fgrep_q '^apiVersion:' "$f" && printf '%s\n' "$f"
   done
   return 0
 }
@@ -4143,7 +4510,10 @@ check_s42() {
   local -a known; mapfile -t known < <(if [ "$HAVE_JQ" -eq 1 ]; then jq -r '.browser_extensions.known_campaigns[].name' "$IOC_FILE"; else grep -o -E '"name": "[^"]+"' "$IOC_FILE" | sed -n '/known_campaigns/,$p' | sed -E 's/"name": "//; s/"$//'; fi)
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    name="$(grep -o -E '"name"[[:space:]]*:[[:space:]]*"[^"]+"' "$f" | head -n1 | sed -E 's/.*:[[:space:]]*"//; s/"$//')"
+    # the top-level name as the browser reads it (decoded); without jq, or when it does not parse, the first "name" of the text
+    name=""
+    if [ "$HAVE_JQ" -eq 1 ]; then name="$(jq -r 'if type == "object" then .name | strings else empty end' "$f" 2>/dev/null | head -n1)"; fi
+    [ -n "$name" ] || name="$(json_view "$f" | grep -o -E '"name"[[:space:]]*:[[:space:]]*"[^"]+"' | head -n1 | sed -E 's/.*:[[:space:]]*"//; s/"$//')"
     local k
     for k in "${known[@]}"; do
       [ -n "$name" ] || break
@@ -5013,11 +5383,13 @@ emit_json() {
 }
 
 # Make findings ids unique (ZET rejects input with duplicate ids as a whole).
-# SEEN_IDS in emit() only works inside the per-module subshell, so only the first one is kept here and every dropped one is recorded
-# in errors[] (with the injective id preimage of ENC_ID, the dropped one is the same finding emitted again)
+# SEEN_IDS in emit() only works inside the per-module subshell, so only the first one is kept here. With the injective id
+# preimage of ENC_ID a dropped one is the same finding emitted again (merged silently, as the UI does); only one that
+# differs in level is recorded in errors[] (the level follows the id at a fixed offset: {"id":"sha256:<64>","level":"X")
 dedup_findings() {
   local tmp="$TMP_DIR/findings.dedup" dup="$TMP_DIR/findings.dupids" id
-  LC_ALL=C awk -v dup="$dup" '{ id = substr($0, 8, 71) } seen[id]++ { print id > dup; next } { print }' "$FINDINGS_FILE" >"$tmp" || return 0
+  LC_ALL=C awk -v dup="$dup" '{ id = substr($0, 8, 71); lv = substr($0, 90); lv = substr(lv, 1, index(lv, "\"") - 1) }
+    id in seen { if (seen[id] != lv) print id > dup; next } { seen[id] = lv; print }' "$FINDINGS_FILE" >"$tmp" || return 0
   mv -f "$tmp" "$FINDINGS_FILE"
   [ -s "$dup" ] || return 0
   while IFS= read -r id; do record_error "core" "duplicate_finding_id:$id"; done <"$dup"

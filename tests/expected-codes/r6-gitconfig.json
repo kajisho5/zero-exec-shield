@@ -1,0 +1,58 @@
+[
+  {
+    "campaign": null,
+    "code": "s26.fsmonitor",
+    "level": "CRITICAL",
+    "module": "§26",
+    "params": {},
+    "path": "case/.gitconfig"
+  },
+  {
+    "campaign": null,
+    "code": "s26.fsmonitor",
+    "level": "CRITICAL",
+    "module": "§26",
+    "params": {},
+    "path": "cont/.gitconfig"
+  },
+  {
+    "campaign": null,
+    "code": "s26.fsmonitor",
+    "level": "CRITICAL",
+    "module": "§26",
+    "params": {},
+    "path": "crlf/.gitconfig"
+  },
+  {
+    "campaign": null,
+    "code": "s26.fsmonitor",
+    "level": "CRITICAL",
+    "module": "§26",
+    "params": {},
+    "path": "header/.gitconfig"
+  },
+  {
+    "campaign": null,
+    "code": "s26.fsmonitor",
+    "level": "CRITICAL",
+    "module": "§26",
+    "params": {},
+    "path": "lastwins/.gitconfig"
+  },
+  {
+    "campaign": null,
+    "code": "s26.ssh_command",
+    "level": "HIGH",
+    "module": "§26",
+    "params": {},
+    "path": "headerssh/.gitconfig"
+  },
+  {
+    "campaign": null,
+    "code": "s26.hooks_path",
+    "level": "MEDIUM",
+    "module": "§26",
+    "params": {},
+    "path": "hookspath/.gitconfig"
+  }
+]

@@ -1,0 +1,33 @@
+{
+  "findings": [
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "HIGH",
+      "module": "§27",
+      "path": "inarray/pyproject.toml"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§27",
+      "path": "decoyarray/pyproject.toml"
+    },
+    {
+      "campaign": null,
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§27",
+      "path": "inarray/pyproject.toml"
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

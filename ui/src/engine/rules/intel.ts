@@ -3,10 +3,10 @@
 import { homeLike, push, readable, rootRel, type RuleCtx } from '../context';
 import type { InfraCve } from '../ioc';
 import type { Severity } from '../types';
-import { asciiLower, basename, ere, versionCmp, versionMatches, type FCode } from '../util';
+import { asciiLower, basename, ere, lf, versionCmp, versionMatches, type FCode } from '../util';
 import { hookLocators } from './agentConfig';
 import { workflowText } from './ciAndExtensions';
-import { DOCKERFILE, plistLabel } from './codeAndHost';
+import { DOCKERFILE, dockerfileLines, plistLabel } from './codeAndHost';
 import { collectDeps } from './supplyChain';
 
 const NUM = /^\d+(\.\d+)+$/;
@@ -37,7 +37,8 @@ export function pythonRules(ctx: RuleCtx): void {
     if (f.name === '.python-version') judge((f.text.split('\n')[0] ?? '').replace(/[ \t\n\v\f\r]/g, ''), f.relPath, f.sha256);
     else if (DOCKERFILE.test(f.name)) {
       // grep -i -o 'FROM[[:space:]]+([^ ]*/)?python:3\.[0-9]+(\.[0-9]+)?' | sed 's/.*python://' (the sed is case-sensitive)
-      for (const m of f.text.matchAll(/FROM[ \t\v\f\r]+([^ \n]*\/)?python:3\.[0-9]+(\.[0-9]+)?/gi)) {
+      // on the logical lines (continuations joined), as the CLI's dockerfile_lines
+      for (const m of dockerfileLines(f.text).join('\n').matchAll(/FROM[ \t\v\f\r]+([^ \n]*\/)?python:3\.[0-9]+(\.[0-9]+)?/gi)) {
         const i = m[0].lastIndexOf('python:');
         if (i >= 0) judge(m[0].slice(i + 7), f.relPath, f.sha256);
       }
@@ -131,12 +132,12 @@ export function emudhraRules(ctx: RuleCtx): void {
       // The vendor is determined from the os-release of the same image (the Ubuntu SRU version 20260601~24.04.1 does not contain "ubuntu")
       const base = f.relPath.replace(/(^|\/)var\/lib\/dpkg\/status$/, '$1');
       const osr = ctx.byPath.get(`${base}etc/os-release`) ?? ctx.byPath.get(`${base}usr/lib/os-release`);
-      const osid = /^ID=["']?([^"'\r\n]*)/m.exec(osr?.text ?? '')?.[1] ?? '';
+      const osid = lf(/^ID=["']?([^"'\r\n]*)/m).exec(osr?.text ?? '')?.[1] ?? '';
       const bad = v.includes('ubuntu') || osid === 'ubuntu' ? Number(v.slice(0, 8)) < Number(ubMin) : !debianCaFixed(v);
       const ub = v.includes('ubuntu') || osid === 'ubuntu';
       if (bad) push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, ...(ub ? { code: 's6.ca_ubuntu', params: { min: ubMin, version: v } } as const : { code: 's6.ca_debian', params: { version: v } } as const), ruleId: 's6-emudhra-os:dpkg', evidenceSha: f.sha256, kind: 'runtime.cve' });
     } else if (/(^|\/)lib\/apk\/db\/installed$/.test(f.relPath)) {
-      const v = /^P:ca-certificates\n(?:[^\n]+\n)*?V:([^\t\n\v\f\r ]+)/m.exec(f.text)?.[1];
+      const v = lf(/^P:ca-certificates\n(?:[^\n]+\n)*?V:([^\t\n\v\f\r ]+)/m).exec(f.text)?.[1];
       const min = os.alpine ?? '20261020-r0';
       if (v && (v.split('-r')[0] ?? '') < (min.split('-r')[0] ?? '')) {
         push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, code: 's6.ca_apk', params: { min, version: v }, ruleId: 's6-emudhra-os:apk', evidenceSha: f.sha256, kind: 'runtime.cve' });
@@ -151,8 +152,8 @@ export function emudhraRules(ctx: RuleCtx): void {
   for (const f of readable(ctx)) {
     if (f.name === '.nvmrc' || f.name === '.node-version') judge('Node.js', (f.text.split('\n')[0] ?? '').replace(/[\t\n\v\f\r ]/g, '').replace(/^v/, ''), f.relPath, f.sha256, fx.node); // head -n1 | tr -d '[:space:]' | sed 's/^v//'
     if (f.name === '.tool-versions') {
-      const node = /^nodejs[\t\v\f\r ]+([^\t\n\v\f\r ]+)/m.exec(f.text)?.[1];
-      const deno = /^deno[\t\v\f\r ]+([^\t\n\v\f\r ]+)/m.exec(f.text)?.[1];
+      const node = lf(/^nodejs[\t\v\f\r ]+([^\t\n\v\f\r ]+)/m).exec(f.text)?.[1];
+      const deno = lf(/^deno[\t\v\f\r ]+([^\t\n\v\f\r ]+)/m).exec(f.text)?.[1];
       if (node) judge('Node.js', node, f.relPath, f.sha256, fx.node);
       if (deno) judge('Deno', deno, f.relPath, f.sha256, fx.deno);
     }

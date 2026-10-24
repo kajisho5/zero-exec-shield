@@ -3,7 +3,8 @@
 //   Dockerfile FROM php, php*.ini. The installed php version, RHEL guidance and --url header evaluation need the host/network, so they are CLI only.
 import { push, readable, type RuleCtx } from '../context';
 import type { IocDb } from '../ioc';
-import { textLocators, versionCmp } from '../util';
+import { lf, textLocators, versionCmp } from '../util';
+import { dockerfileLines } from './codeAndHost';
 
 export type PhpStatus = 'fixed' | 'vulnerable' | 'prerelease' | 'unknown_branch' | 'unparsed';
 
@@ -75,6 +76,10 @@ export function dpkgPhpPackages(text: string): { pkg: string; ver: string; src: 
   return out;
 }
 
+// line-based like the CLI's grep (lf: lines end at LF only)
+const PHP_TAG = lf(/(^|[\t\v\f\r /"=])php:[A-Za-z0-9._-]+/gm);
+const AUTO_PREPEND = lf(/^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\t\n\v\f\r ;]/m);
+const DISABLE_EMPTY = lf(/^[ \t]*disable_functions[ \t]*=[ \t]*\r?$/m);
 const IMAGE_FILES = /^(docker-compose.*\.ya?ml|compose.*\.ya?ml|Dockerfile.*|.*\.dockerfile|.*\.ya?ml|.*\.tf|.*\.json)$/;
 
 export function phpRules(ctx: RuleCtx): void {
@@ -95,7 +100,7 @@ export function phpRules(ctx: RuleCtx): void {
 
   // Container image tags (CLI detect_service_version '(^|[[:space:]/"=])php'; floating tags such as latest are handled by the FROM check)
   for (const f of readable(ctx).filter((x) => IMAGE_FILES.test(x.name))) {
-    for (const m of f.text.matchAll(/(^|[\t\v\f\r /"=])php:[A-Za-z0-9._-]+/gm)) {
+    for (const m of f.text.matchAll(PHP_TAG)) {
       const tag = m[0].slice(m[0].lastIndexOf(':') + 1);
       const v = (tag.split('-')[0] ?? '').replace(/^[^0-9]*/, '');
       if (v) judge(v, f.relPath, f.sha256, 'image');
@@ -109,8 +114,9 @@ export function phpRules(ctx: RuleCtx): void {
   }
   // Dockerfile FROM php (floating tags are MEDIUM, otherwise reference INFO)
   for (const f of readable(ctx).filter((x) => /^(Dockerfile.*|.*\.dockerfile)$/.test(x.name))) {
-    for (const m of f.text.matchAll(/^[\t\v\f\r ]*FROM[\t\v\f\r ]+([^ \n]*\/)?php(:[^ \n]+)?/gim)) {
-      const line = m[0].replace(/\r$/, '');
+    // on the logical lines (continuations joined, dockerfileLines), as the CLI's dockerfile_lines
+    for (const m of dockerfileLines(f.text).map((l) => /^[\t\v\f\r ]*FROM[\t\v\f\r ]+([^ ]*\/)?php(:[^ ]+)?/i.exec(l)).filter((x) => x !== null)) {
+      const line = m[0];
       if (/php:.*latest/.test(line) || line.endsWith('php')) {
         push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, code: 's4.php_image_floating', ruleId: 's4-php-image:floating', evidenceSha: f.sha256 });
       } else {
@@ -121,8 +127,8 @@ export function phpRules(ctx: RuleCtx): void {
   }
   // php*.ini
   for (const f of readable(ctx).filter((x) => /^php.*\.ini$/.test(x.name))) {
-    if (/^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\t\n\v\f\r ;]/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§4', campaign: null, path: f.relPath, code: 's4.auto_prepend', ruleId: 's4-php-ini:auto_prepend', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\t\n\v\f\r ;]/) });
-    if (/^[ \t]*disable_functions[ \t]*=[ \t]*\r?$/m.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, code: 's4.disable_functions_empty', ruleId: 's4-php-ini:disable_functions', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*disable_functions[ \t]*=[ \t]*$/) });
+    if (AUTO_PREPEND.test(f.text)) push(ctx, { level: 'HIGH', module: '§4', campaign: null, path: f.relPath, code: 's4.auto_prepend', ruleId: 's4-php-ini:auto_prepend', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*auto_prepend_file[ \t]*=[ \t]*[^\t\n\v\f\r ;]/) });
+    if (DISABLE_EMPTY.test(f.text)) push(ctx, { level: 'MEDIUM', module: '§4', campaign: null, path: f.relPath, code: 's4.disable_functions_empty', ruleId: 's4-php-ini:disable_functions', evidenceSha: f.sha256, locators: textLocators(f.text, /^[ \t]*disable_functions[ \t]*=[ \t]*$/) });
   }
   // The dpkg package DB (vendor fixed-version table; the OS from etc/os-release / usr/lib/os-release in the same root)
   for (const f of readable(ctx).filter((x) => /(^|\/)var\/lib\/dpkg\/status$/.test(x.relPath))) {

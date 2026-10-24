@@ -1,0 +1,1 @@
+[core]sshCommand = touch ssh.ran; false

@@ -5,6 +5,7 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FileInput } from '../../src/engine/types';
+import { pointerHead } from '../../src/fileReader';
 
 export const FIXTURES = fileURLToPath(new URL('../../../tests/fixtures/', import.meta.url));
 
@@ -32,8 +33,9 @@ export function loadFixture(name: string, maxBytes = 2 * 1024 * 1024): FileInput
       }
       const buf = readFileSync(p);
       const sha = createHash('sha256').update(buf).digest('hex');
-      if (buf.length > maxBytes) { out.push({ relPath, name: e, size: buf.length, lastModified: st.mtimeMs, text: null, sha256: null, readState: 'skipped-size' }); continue; }
-      out.push({ relPath, name: e, size: buf.length, lastModified: st.mtimeMs, text: decodeLikeBrowser(buf), sha256: sha, readState: 'read' });
+      if (buf.length > maxBytes) { out.push({ relPath, name: e, size: buf.length, lastModified: st.mtimeMs, text: null, sha256: null, readState: 'skipped-size', blob: new Blob([buf]) }); continue; }
+      const head = pointerHead(e, buf);
+      out.push({ relPath, name: e, size: buf.length, lastModified: st.mtimeMs, text: decodeLikeBrowser(buf), sha256: sha, readState: 'read', ...(head ? { head } : {}) });
     }
   };
   walk(root);
