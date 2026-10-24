@@ -62,6 +62,13 @@ def git_vars(path):
         res.append([n.decode("utf-8", "surrogateescape"), None if v is None else v.decode("utf-8", "surrogateescape")])
     return res
 
+# git 2.55's parse_value keeps whitespace inside an unquoted value as it is (config.c: trim_len); git 2.43 turned each
+#   whitespace character into one space. The checked file was generated with one of them, so the comparison with the
+#   local git maps every isspace() character in a value to a space. A lone CR is whitespace in both (not a line break)
+def git_ws(vs):
+    return None if vs is None else [[n, None if v is None else "".join(" " if ch in " \t\n\v\f\r" else ch for ch in v)] for n, v in vs]
+
+
 CHECK = "--check" in sys.argv[1:]
 HAVE_GIT = subprocess.run(["sh", "-c", "command -v git"], capture_output=True).returncode == 0
 if CHECK:
@@ -73,7 +80,7 @@ if CHECK:
             open(p, "wb").write(bytes.fromhex(c["hex"]))
             if awk_vars(p) != c["vars"]:
                 bad.append(c["name"])
-            if HAVE_GIT and git_vars(p) != c["git"]:
+            if HAVE_GIT and git_ws(git_vars(p)) != git_ws(c["git"]):
                 bad.append(c["name"] + " (git)")
     if len(stored) != len(CASES) or bad:
         sys.exit(f"differs: {bad} ({len(stored)} stored, {len(CASES)} cases)")
