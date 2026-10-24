@@ -116,22 +116,28 @@ HOST_CHECKS="${ZES_HOST_CHECKS:-1}"
 OFFLINE="${ZES_OFFLINE:-0}"
 SKILLPACT_CACHE="${ZES_SKILLPACT_CACHE:-}"
 
-# String encoding (the same normal form is used for JSON, human-readable logs and ID computation)
+# String encoding (one pass gives the forms for JSON, human-readable logs and the id preimage)
 #   zes_enc STR sets the following variables:
 #     ENC_NORM … normal form. Each invalid UTF-8 byte is replaced by "\xHH" (4 characters of text); everything else is kept as is.
-#                findings[].id and the JSON values (after decoding) match this normal form
+#                the JSON values (after decoding) match this normal form
 #     ENC_JSON … JSON string representation of ENC_NORM (without quotes). Escapes " and \, and turns control characters (U+0000-U+001F, U+007F) and
 #                C1 control characters (U+0080-U+009F) into \u00XX (round-trippable)
 #     ENC_TERM … for human-readable logs. Shows control characters as \xHH and C1 control characters as \u00HH (prevents terminal escape injection)
 #     ENC_BAD  … 1 if the string contains invalid UTF-8 bytes
+#     ENC_ID   … the form used in the id preimage (id v2): the original string with \ → \\, | → \|, U+001F → the six
+#                characters \u001f and each invalid UTF-8 byte → the four characters \xHH (lower-case hex). The escaping is
+#                applied to the original bytes, so it is injective: an invalid byte (\xHH) and the text "\xHH" (\\xHH) differ.
+#                ENC_NORM maps both to the same text, which is why the id is not built from it
 #   Strings of printable ASCII only are handled without starting awk
 ZES_ENC_AWK='
   BEGIN {
     for (k = 1; k < 256; k++) ord[sprintf("%c", k)] = k
-    s = ENVIRON["ZES_ENC"]; n = length(s); nb = ""; js = ""; tm = ""; bad = 0; i = 1
+    s = ENVIRON["ZES_ENC"]; n = length(s); nb = ""; js = ""; tm = ""; id = ""; bad = 0; i = 1
     while (i <= n) {
       c = substr(s, i, 1); b = ord[c]
       if (b < 128) {
+        if (b == 31) id = id "\\x5cu001f"; else if (b < 32 || b == 127) id = id sprintf("\\x%02x", b)
+        else if (c == "\\") id = id "\\x5c\\x5c"; else if (c == "|") id = id "\\x5c|"; else id = id c
         if (b < 32 || b == 127) { h = sprintf("%02x", b); nb = nb "\\x" h; js = js "\\u00" h; tm = tm "\\x" h }
         else if (c == "\\") { nb = nb "\\x5c"; js = js "\\\\"; tm = tm c }
         else if (c == "\"") { nb = nb c; js = js "\\\""; tm = tm c }
@@ -142,15 +148,23 @@ ZES_ENC_AWK='
       ok = (L > 0 && i + L - 1 <= n)
       for (k = 1; ok && k < L; k++) { b2 = ord[substr(s, i + k, 1)]; if (b2 < 128 || b2 > 191) ok = 0; else cp = cp * 64 + b2 - 128 }
       if (ok && ((L == 3 && (cp < 2048 || (cp >= 55296 && cp <= 57343))) || (L == 4 && (cp < 65536 || cp > 1114111)))) ok = 0
-      if (!ok) { h = sprintf("%02x", b); nb = nb "\\x5cx" h; js = js "\\\\x" h; tm = tm "\\x" h; bad = 1; i++; continue }
-      q = substr(s, i, L); nb = nb q
+      if (!ok) { h = sprintf("%02x", b); nb = nb "\\x5cx" h; js = js "\\\\x" h; tm = tm "\\x" h; id = id "\\x5cx" h; bad = 1; i++; continue }
+      q = substr(s, i, L); nb = nb q; id = id q
       if (cp >= 128 && cp <= 159) { js = js sprintf("\\u%04x", cp); tm = tm sprintf("\\u%04x", cp) } else { js = js q; tm = tm q }
       i += L }
-    print nb; print js; print tm; print bad }'
+    print nb; print js; print tm; print bad; print id }'
+# zes_id_esc VALUE → ID_ESC: the id escaping of valid UTF-8 text (ENC_ID of zes_enc without the awk run)
+ZES_BS='\'
+US_CHAR=$'\037'
+zes_id_esc() {  # zes_id_esc VALUE → ID_ESC
+  local v="${1//"$ZES_BS"/"$ZES_BS$ZES_BS"}"
+  v="${v//"|"/"$ZES_BS|"}"
+  ID_ESC="${v//"$US_CHAR"/"${ZES_BS}u001f"}"
+}
 zes_enc() {
   local s="$1"
   if [[ "$s" != *[![:print:]]* ]]; then
-    ENC_NORM="$s"; ENC_TERM="$s"; ENC_BAD=0
+    ENC_NORM="$s"; ENC_TERM="$s"; ENC_BAD=0; zes_id_esc "$s"; ENC_ID="$ID_ESC"
     s="${s//\\/\\\\}"; ENC_JSON="${s//\"/\\\"}"
     return 0
   fi
@@ -159,6 +173,8 @@ zes_enc() {
   # Line 1 is in %b form (every backslash is \xHH), passing the normal form, which may contain control characters, without a newline
   printf -v ENC_NORM '%b' "${enc_r[0]-}"
   ENC_JSON="${enc_r[1]-}"; ENC_TERM="${enc_r[2]-}"; ENC_BAD="${enc_r[3]:-0}"
+  # Line 5 (the id form) is in %b form too
+  printf -v ENC_ID '%b' "${enc_r[4]-}"
 }
 json_escape() { zes_enc "$1"; printf '%s' "$ENC_JSON"; }
 json_str_or_null() { if [ -n "$1" ]; then printf '"%s"' "$(json_escape "$1")"; else printf 'null'; fi; }
@@ -414,7 +430,6 @@ zes_load_catalog() {
     | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; } 2>/dev/null)"
   [ "${sum%% *}" = "$ZES_CATALOG_KEYS_SHA256" ] || cli_fail cli.err.catalog path="$en $ja"
 }
-US_CHAR=$'\037'
 zes_load_catalog
 
 # jq / git are resolved to an absolute path once with the sanitized PATH, and are always started by that absolute path afterwards
@@ -634,12 +649,6 @@ default_related() {
 #   EXTRA_JSON holds the kind / subject / locators / related members (built with x_*). It does not affect id or evidence_hash
 #   When a path contains invalid UTF-8 bytes, path becomes the value after "\xHH" replacement, so non_utf8_path is recorded in errors[]
 declare -A SEEN_IDS=()
-ZES_BS='\'
-zes_id_esc() {  # zes_id_esc VALUE → ID_ESC
-  local v="${1//"$ZES_BS"/"$ZES_BS$ZES_BS"}"
-  v="${v//"|"/"$ZES_BS|"}"
-  ID_ESC="${v//"$US_CHAR"/"${ZES_BS}u001f"}"
-}
 emit() {
   local level="$1" campaign="$2" path="$3" code="$4"; shift 4
   local module="$CURRENT_MODULE" sp="" extra="" a k i j
@@ -663,26 +672,25 @@ emit() {
     kv+=("${ks[i]}=${vs[i]}")
     zes_enc "${vs[i]}"
     [ "$i" -gt 0 ] && canon+=$'\037'
-    zes_id_esc "$ENC_NORM"
-    canon+="${ks[i]}=$ID_ESC"
+    canon+="${ks[i]}=$ENC_ID"
     pj+="${pj:+,}\"${ks[i]}\":\"$ENC_JSON\""
   done
-  local id ev evk evh color np jp tp pbad nd jd td nc jc
+  local id ev evk evh color np jp tp pbad nd jd td jc
   zes_render "${MSG_EN["f.$code"]-"f.$code"}" "${kv[@]}"
   zes_enc "$RENDERED"; nd="$ENC_NORM"; jd="$ENC_JSON"; td="$ENC_TERM"
   if [ "$ZES_LANG_RESOLVED" != en ]; then zes_render "${MSG_LANG["f.$code"]-"f.$code"}" "${kv[@]}"; zes_enc "$RENDERED"; td="$ENC_TERM"; fi
-  zes_enc "$path"; np="$ENC_NORM"; jp="$ENC_JSON"; tp="$ENC_TERM"; pbad="$ENC_BAD"
-  zes_enc "$campaign"; nc="$ENC_NORM"; jc="$ENC_JSON"
   local im ic ip
-  zes_id_esc "$module"; im="$ID_ESC"; zes_id_esc "$nc"; ic="$ID_ESC"; zes_id_esc "$np"; ip="$ID_ESC"; zes_id_esc "$code"
+  zes_enc "$path"; np="$ENC_NORM"; jp="$ENC_JSON"; tp="$ENC_TERM"; pbad="$ENC_BAD"; ip="$ENC_ID"
+  zes_enc "$campaign"; jc="$ENC_JSON"; ic="$ENC_ID"
+  zes_id_esc "$module"; im="$ID_ESC"; zes_id_esc "$code"
   id="sha256:$(sha256_str "zes-id-v2|$im|$ic|$ip|$ID_ESC|$canon")"
-  # Each id only once. If the raw paths differ but the normal form is the same (the string "\xHH" vs. the invalid byte 0xHH),
-  #   the dropped duplicate is recorded in errors[] (same handling as dedup_findings; dedup_findings catches those across subshells)
+  # Each id only once. The preimage is injective, so a repeated id is the same finding emitted twice; it is still recorded in
+  #   errors[] every time, never dropped silently (dedup_findings does the same across subshells)
   if [ -n "${SEEN_IDS[$id]+x}" ]; then
-    [ "${SEEN_IDS[$id]}" != "x$path" ] && record_error "core" "duplicate_finding_id:$id"
+    record_error "core" "duplicate_finding_id:$id"
     return 0
   fi
-  SEEN_IDS[$id]="x$path"
+  SEEN_IDS[$id]=1
   ev=""; evk="detail"; evh=""
   if [ -n "$path" ] && [ -L "$path" ]; then
     local lt; lt="$(readlink -- "$path" 2>/dev/null; printf x)"; lt="${lt%x}"; lt="${lt%$'\n'}"
@@ -4794,8 +4802,8 @@ emit_json() {
 }
 
 # Make findings ids unique (ZET rejects input with duplicate ids as a whole).
-# SEEN_IDS in emit() only works inside the per-module subshell, and the normal form (zes_enc) is not injective (a path that is the string "\xHH"
-# and a path with the invalid byte 0xHH get the same value), so only the first one is kept here and the dropped ones are recorded in errors[]
+# SEEN_IDS in emit() only works inside the per-module subshell, so only the first one is kept here and every dropped one is recorded
+# in errors[] (with the injective id preimage of ENC_ID, the dropped one is the same finding emitted again)
 dedup_findings() {
   local tmp="$TMP_DIR/findings.dedup" dup="$TMP_DIR/findings.dupids" id
   LC_ALL=C awk -v dup="$dup" '{ id = substr($0, 8, 71) } seen[id]++ { print id > dup; next } { print }' "$FINDINGS_FILE" >"$tmp" || return 0

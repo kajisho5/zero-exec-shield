@@ -194,7 +194,7 @@
 - GER の隔離ストア（`.ger-quarantine-store` のあるディレクトリ。所有者が実行ユーザーで 0700）は走査しない（`errors[]` に `quarantine_store_skipped`。status は変えない）
 - `skillpact` のキーは `contract_path` / `contract_version` / `level` / `signed` / `author` / `declared_effects` / `observed_effects` / `policy_decision` / `l2_tested` / `divergence` / `diff_anomaly` のみ。効果名は SkillPact 0.8 の `read` / `write` / `network` / `exec` / `spend` / `send` のみ（`secrets` / `persist` / `longrun` は廃止）。`policy_decision` は常に `null`、`l2_tested` は常に `false`（ZES は評価しない）
 - `id` は `sha256:` + 64 桁 16 進で決定的。1 つの findings.json の中で一意（同じ `id` が重なったら 1 件だけ残し、`errors[]` に `duplicate_finding_id` を記録）。`path` は絶対パスまたは `null`
-  - id v2（1.2）: `"zes-id-v2|" + module + "|" + campaign + "|" + path + "|" + code + "|" + params` の SHA-256。`params` は `key=value` をキー順（C ロケール）に並べて U+001F で連結したもの。`campaign` / `path` が `null` なら空文字列。各要素と各 param の値は先にエスケープする（`\` → `\\`、`|` → `\|`、U+001F → 6 文字の `\u001f`。0.5.1 から）。`detail` の言語・文言には依らない
+  - id v2（1.2）: `"zes-id-v2|" + module + "|" + campaign + "|" + path + "|" + code + "|" + params` の SHA-256。`params` は `key=value` をキー順（C ロケール）に並べて U+001F で連結したもの。`campaign` / `path` が `null` なら空文字列。各要素と各 param の値は先にエスケープする（`\` → `\\`、`|` → `\|`、U+001F → 6 文字の `\u001f`。0.5.1 から）。0.5.2 からエスケープは元のバイト列に対して行い、UTF-8 として不正なバイトは 4 文字の `\xHH`（16 進小文字）にするので、前像は単射になる。`detail` の言語・文言には依らない
   - `id` は 0.5.0 で 1 度だけ変わる。0.4.x の findings に対する ZET の判断・GER の承認はそのまま引き継げないため、再走査して判断し直す
 - `evidence_hash` は通常ファイルならその SHA-256（100MB 超はパス・サイズ・mtime の SHA-256）、それ以外は英語の `detail` の SHA-256（1.2 でも作り方は変わらない）
 - ファイル内容・シークレット値を含まない（上の `params` / `detail` の短い値を除く）

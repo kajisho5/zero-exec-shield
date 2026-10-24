@@ -19,13 +19,14 @@ const rows = async (files: FileInput[]) =>
 
 describe('id v2 escaping (CLI-4)', () => {
   const vectors = JSON.parse(readFileSync(new URL('../../../tests/id-cases.json', import.meta.url), 'utf8')) as {
-    cases: { name: string; module: string; campaign: string | null; path: string | null; code: string; params: Record<string, string>; id: string }[];
+    cases: { name: string; module: string; campaign: string | null; path: string | null; code: string; params: Record<string, string>; id: string; cli_only?: string }[];
   };
   it('escapes \\, | and U+001F', () => {
     expect(idEsc('a\\b|c\u001fd')).toBe('a\\\\b\\|c\\u001fd');
     expect(idEsc('plain')).toBe('plain');
   });
-  for (const c of vectors.cases) {
+  // cli_only vectors hold bytes that are not valid UTF-8, which the browser never sees (TextDecoder gives U+FFFD)
+  for (const c of vectors.cases.filter((x) => !x.cli_only)) {
     it(`shared vector: ${c.name}`, async () => {
       expect(await findingId(c.module, c.campaign, c.path, c.code, c.params)).toBe(c.id);
     });

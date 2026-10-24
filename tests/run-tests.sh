@@ -756,18 +756,21 @@ run_scan "$TMP/r4-idc" standard "$FIX/_home" | jq -e '([.findings[] | select(.co
 if out="$(python3 -I - "$REPO" <<'PY' 2>&1
 import hashlib, json, subprocess, sys
 repo = sys.argv[1]
-prog = 'US_CHAR=$(printf "\\037"); eval "$(sed -n "/^ZES_BS=/,/^}/p" "$1")"; shift; for a in "$@"; do zes_id_esc "$a"; printf "%s\\0" "$ID_ESC"; done'
+# ENC_ID of zes_enc (the form emit puts into the preimage); path_hex / params_hex cases carry bytes that are not UTF-8
+prog = 'US_CHAR=$(printf "\\037"); eval "$(sed -n "/^ZES_ENC_AWK=/,/}\x27$/p; /^zes_enc() {/,/^}/p; /^ZES_BS=/,/^}/p" "$1")"; shift; for a in "$@"; do zes_enc "$a"; printf "%s\\0" "$ENC_ID"; done'
 bad = []
 for c in json.load(open(f"{repo}/tests/id-cases.json", encoding="utf-8"))["cases"]:
-    keys = sorted(c["params"], key=lambda k: k.encode())
-    parts = [c["module"], c["campaign"] or "", c["path"] or "", c["code"]] + [c["params"][k] for k in keys]
-    out = subprocess.run(["bash", "-c", prog, "_", f"{repo}/zes-scan.sh"] + parts, capture_output=True).stdout.decode().split("\0")[:-1]
-    canon = "\x1f".join(k + "=" + v for k, v in zip(keys, out[4:]))
-    if "sha256:" + hashlib.sha256("|".join(["zes-id-v2"] + out[:4] + [canon]).encode()).hexdigest() != c["id"]: bad.append(c["name"])
+    params = {k: bytes.fromhex(v) for k, v in c["params_hex"].items()} if "params_hex" in c else {k: v.encode() for k, v in c["params"].items()}
+    path = bytes.fromhex(c["path_hex"]) if "path_hex" in c else (c["path"] or "").encode()
+    keys = sorted(params, key=lambda k: k.encode())
+    parts = [c["module"].encode(), (c["campaign"] or "").encode(), path, c["code"].encode()] + [params[k] for k in keys]
+    out = subprocess.run([b"bash", b"-c", prog.encode(), b"_", f"{repo}/zes-scan.sh".encode()] + parts, capture_output=True).stdout.split(b"\0")[:-1]
+    canon = b"\x1f".join(k.encode() + b"=" + v for k, v in zip(keys, out[4:]))
+    if "sha256:" + hashlib.sha256(b"|".join([b"zes-id-v2"] + out[:4] + [canon])).hexdigest() != c["id"]: bad.append(c["name"])
 print(" ".join(bad) or "ok")
 sys.exit(1 if bad else 0)
 PY
-)"; then ok "tests/id-cases.json の id を zes_id_esc で再現"; else ng "tests/id-cases.json の id が zes_id_esc と不一致" "$out"; fi
+)"; then ok "tests/id-cases.json の id を zes_enc の ENC_ID で再現（不正 UTF-8 のバイトを含む）"; else ng "tests/id-cases.json の id が ENC_ID と不一致" "$out"; fi
 
 # CLI-6: GitLab CVE findings have the same code / params / detail / id without jq (CVSS read from rules/ioc.json by grep)
 nj_ok=1
@@ -897,6 +900,14 @@ n7="$( ( cd "$N7" && ZES_I18N_DIR='x=y' ZES_IOC='x=y/ioc.json' ZES_SKILLPACT_CAC
   tmo 60 "$SCAN" --standard --root 'a=b' --json 2>/dev/null < <(sleep 30) ) | jq -c '[.findings[] | select(.module == "§22") | .code] | sort' 2>/dev/null)"
 p7="$(ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$N7/h=1" "$SCAN" --standard --root "$N7/plain" --json 2>/dev/null </dev/null | jq -c '[.findings[] | select(.module == "§22") | .code] | sort')"
 [ -n "$n7" ] && [ "$n7" = "$p7" ] && ok "x=y・-c・@f のようなパスでも awk 等が代入・オプションと誤読せず、標準入力を待たない" || ng "x=y / -c / @f のパスの扱いが不正: ${n7:-（出力なし）} / $p7"
+
+# CLI-6: an invalid byte and its escaped text "\xff" in the same file are two findings with two ids (the id preimage is the
+#   injective ENC_ID), and no duplicate is dropped without duplicate_finding_id
+W6="$TMP/r5-u8/.github/workflows"; mkdir -p "$W6"
+printf 'jobs:\n  a:\n    steps:\n      - uses: evil/a@v1\377\n      - uses: evil/a@v1\\xff\n' >"$W6/w.yml"
+run_scan "$TMP/r5-u8" standard "$FIX/_home" | jq -e '([.findings[] | select(.code == "s22.unpinned")] | length == 2 and (map(.id) | unique | length == 2))
+    and ([.errors[] | select(.reason | startswith("duplicate_finding_id:"))] | length == 0)' >/dev/null 2>&1 \
+  && ok "不正バイト 0xff と文字列 \\xff の §22 が別 id の 2 件になる" || ng "不正バイトと \\xff の finding が 1 件にまとめられた"
 
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"

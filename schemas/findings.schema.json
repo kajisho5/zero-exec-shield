@@ -26,7 +26,7 @@
       "additionalProperties": false,
       "required": ["id", "level", "module", "campaign", "path", "detail", "evidence_hash"],
       "properties": {
-        "id": { "$ref": "#/$defs/sha256", "description": "id v2 (1.2): sha256 of \"zes-id-v2|\" + module + \"|\" + campaign + \"|\" + path + \"|\" + code + \"|\" + params, where params is key=value in C-locale key order joined by U+001F, and a null campaign or path is the empty string. Every component and every param value is escaped before joining (\\ → \\\\, | → \\|, U+001F → the six characters \\u001f; since 0.5.1). Independent of the language and the wording" },
+        "id": { "$ref": "#/$defs/sha256", "description": "id v2 (1.2): sha256 of \"zes-id-v2|\" + module + \"|\" + campaign + \"|\" + path + \"|\" + code + \"|\" + params, where params is key=value in C-locale key order joined by U+001F, and a null campaign or path is the empty string. Every component and every param value is escaped before joining (\\ → \\\\, | → \\|, U+001F → the six characters \\u001f; since 0.5.1); since 0.5.2 the escaping is applied to the original bytes and a byte that is not valid UTF-8 becomes the four characters \\xHH, so the preimage is injective. Independent of the language and the wording" },
         "level": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] },
         "module": { "type": "string", "pattern": "^§([1-9]|[1-4][0-9])$" },
         "campaign": { "type": ["string", "null"] },
