@@ -597,7 +597,8 @@ default_related() {
 
 # emit LEVEL CAMPAIGN PATH CODE [key=value ...] [--sp=SKILLPACT_JSON] [--x=EXTRA_JSON]
 #   CODE is the message id: detail = render(i18n/en.json "f.CODE", params), always English. The terminal line uses the
-#   selected language. Params are the values of the message (strings), never file contents.
+#   selected language. Params are the values of the message: strings taken from the finding, which can hold text from
+#   scanned files (such as a uses: reference) but never more of a file than that.
 #   id v2: sha256("zes-id-v2|" module "|" campaign "|" path "|" CODE "|" canon), canon = "key=value" in C-locale key
 #   order joined by U+001F, values in the zes_enc normal form (a null campaign / path is the empty string). Every
 #   component and every param value is escaped first (zes_id_esc: \ → \\, | → \|, U+001F → the six characters \u001f),

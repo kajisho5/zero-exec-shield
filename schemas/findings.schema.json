@@ -26,7 +26,7 @@
       "additionalProperties": false,
       "required": ["id", "level", "module", "campaign", "path", "detail", "evidence_hash"],
       "properties": {
-        "id": { "$ref": "#/$defs/sha256", "description": "id v2 (1.2): sha256 of \"zes-id-v2|\" + module + \"|\" + campaign + \"|\" + path + \"|\" + code + \"|\" + params, where params is key=value in C-locale key order joined by U+001F, and a null campaign or path is the empty string. Independent of the language and the wording" },
+        "id": { "$ref": "#/$defs/sha256", "description": "id v2 (1.2): sha256 of \"zes-id-v2|\" + module + \"|\" + campaign + \"|\" + path + \"|\" + code + \"|\" + params, where params is key=value in C-locale key order joined by U+001F, and a null campaign or path is the empty string. Every component and every param value is escaped before joining (\\ → \\\\, | → \\|, U+001F → the six characters \\u001f; since 0.5.1). Independent of the language and the wording" },
         "level": { "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] },
         "module": { "type": "string", "pattern": "^§([1-9]|[1-4][0-9])$" },
         "campaign": { "type": ["string", "null"] },
@@ -34,7 +34,7 @@
         "detail": { "type": "string", "description": "English sentence: the catalog entry f.<code> (i18n/en.json) with params filled in. Never depends on --lang or the locale" },
         "evidence_hash": { "$ref": "#/$defs/sha256" },
         "code": { "type": "string", "pattern": "^[a-z0-9_.]+$", "description": "Message id (1.2): the catalog key f.<code>. Language-neutral" },
-        "params": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Values of the message (1.2): string values, keys matching ^[a-z_]+$ (the catalog placeholders). Never file contents" },
+        "params": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Values of the message (1.2): string values, keys matching ^[a-z_]+$ (the catalog placeholders). Strings taken from the finding: they can include text from scanned files (such as a uses: reference), so consumers must escape them; file contents beyond that are never included" },
         "kind": { "type": "string", "pattern": "^[a-z0-9_.]+$", "description": "機械可読な種別（例 pkg.compromised, pkg.vulnerable, mcp.dangerous_command, gha.unpinned）" },
         "subject": { "type": "object", "additionalProperties": false, "properties": { "ecosystem": { "type": "string" }, "package": { "type": "string" }, "version": { "type": ["string", "null"] }, "safe_version": { "type": ["string", "null"] }, "fixed_versions": { "type": "array", "items": { "type": "string" } } } },
         "locators": { "type": "array", "items": { "type": "object", "additionalProperties": false, "properties": { "format": { "enum": ["json", "jsonc", "toml", "yaml", "ini", "text", "plist"] }, "pointer": { "type": "string" }, "line": { "type": "integer", "minimum": 1 }, "line_sha256": { "$ref": "#/$defs/sha256" } } }, "description": "同じファイルの該当箇所（内容は出さずハッシュだけ）" },

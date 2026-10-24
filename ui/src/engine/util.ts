@@ -92,7 +92,7 @@ export interface FindingSpec {
   path: string | null;
   /** detail = render(en["f." + code], params): always English, like the CLI's findings.json */
   code: FCode;
-  /** values of the message's placeholders (never file contents) */
+  /** values of the message's placeholders (taken from the finding; may hold text from a scanned file such as a uses: reference) */
   params?: Record<string, string | number>;
   ruleId: string;
   evidenceSha?: string | null;
