@@ -37,7 +37,7 @@ function yamlNoComment(x: string): string {
  * The content of block scalars (run: | etc.) are passed through as is.
  */
 export function yamlFlatten(yaml: string): string[] {
-  const src = yaml.replace(/^\uFEFF/, '').split('\n').map((l) => l.replace(/\r$/, ''));
+  const src = yaml.split('\n').map((l) => l.replace(/\r$/, ''));
   if (src.length && src[src.length - 1] === '') src.pop();
   const out: string[] = [];
   let inblk = false; let bind = 0; let acc = ''; let apre = ''; let aind = 0;
@@ -112,16 +112,16 @@ export function workflowText(yaml: string): string[] {
   let pind = 0;
   let blk = false;
   let acc = '';
-  const KEY_ONLY = /^\s*(-\s+)?["']?[A-Za-z0-9_.$-]+["']?:\s*([>|][-+0-9]*)?\s*(#.*)?$/;
-  const NODE = /^\s*(-(\s|$)|["']?[A-Za-z0-9_.$-]+["']?:(\s|$))/;
+  const KEY_ONLY = /^[\t\v\f\r ]*(-[\t\v\f\r ]+)?["']?[A-Za-z0-9_.$-]+["']?:[\t\v\f\r ]*([>|][-+0-9]*)?[\t\v\f\r ]*(#.*)?$/;
+  const NODE = /^[\t\v\f\r ]*(-([\t\v\f\r ]|$)|["']?[A-Za-z0-9_.$-]+["']?:([\t\v\f\r ]|$))/;
   for (const line of src) {
     if (pend !== '') {
-      if (/^\s*$/.test(line) || (!blk && /^\s*#/.test(line))) continue;
-      const lead = (/^\s*/.exec(line)?.[0] ?? '').length;
+      if (/^[\t\v\f\r ]*$/.test(line) || (!blk && /^[\t\v\f\r ]*#/.test(line))) continue;
+      const lead = (/^[\t\v\f\r ]*/.exec(line)?.[0] ?? '').length;
       if (lead > pind && (blk || !NODE.test(line))) {
-        let v = line.replace(/^\s+/, '');
-        if (!blk) v = v.replace(/\s+#.*$/, '');
-        v = v.replace(/\s+$/, '');
+        let v = line.replace(/^[\t\v\f\r ]+/, '');
+        if (!blk) v = v.replace(/[\t\v\f\r ]+#.*$/, '');
+        v = v.replace(/[\t\v\f\r ]+$/, '');
         acc += (acc === '' ? '' : ' ') + v;
         continue;
       }
@@ -129,11 +129,11 @@ export function workflowText(yaml: string): string[] {
       pend = ''; acc = '';
     }
     if (KEY_ONLY.test(line)) {
-      pind = (/^\s*/.exec(line)?.[0] ?? '').length;
-      if (/^\s*-\s/.test(line)) pind = line.length - line.replace(/^\s*-\s+/, '').length - 1;
-      pend = line.replace(/\s*(#.*)?$/, '');
-      blk = /:\s*[>|][-+0-9]*$/.test(pend);
-      pend = pend.replace(/\s*[>|][-+0-9]*$/, '');
+      pind = (/^[\t\v\f\r ]*/.exec(line)?.[0] ?? '').length;
+      if (/^[\t\v\f\r ]*-[\t\v\f\r ]/.test(line)) pind = line.length - line.replace(/^[\t\v\f\r ]*-[\t\v\f\r ]+/, '').length - 1;
+      pend = line.replace(/[\t\v\f\r ]*(#.*)?$/, '');
+      blk = /:[\t\v\f\r ]*[>|][-+0-9]*$/.test(pend);
+      pend = pend.replace(/[\t\v\f\r ]*[>|][-+0-9]*$/, '');
       acc = '';
       continue;
     }
@@ -152,9 +152,9 @@ export function checkoutRefs(yaml: string): ('noref' | 'prhead' | 'otherref' | '
   const flush = () => { if (inChk) out.push(ref === '' ? 'noref' : ref); inChk = false; ref = ''; };
   // ref is looked up both in block mappings (ref: at line start) and flow mappings ({ ref: … } / , ref: …)
   const getRef = (s: string) => {
-    const m = /^\s*ref:/.exec(s) ?? /[{,]\s*ref:/.exec(s);
+    const m = /^[\t\v\f\r ]*ref:/.exec(s) ?? /[{,][\t\v\f\r ]*ref:/.exec(s);
     if (!m) return;
-    let r = s.slice(m.index + m[0].length).replace(/^\s*/, '');
+    let r = s.slice(m.index + m[0].length).replace(/^[\t\v\f\r ]*/, '');
     if (/^["']/.test(r)) {
       const q = r[0]!;
       r = r.slice(1);
@@ -171,16 +171,16 @@ export function checkoutRefs(yaml: string): ('noref' | 'prhead' | 'otherref' | '
     else ref = 'otherref';
   };
   for (const line of workflowText(yaml)) {
-    const lead = (/^\s*/.exec(line)?.[0] ?? '').length;
+    const lead = (/^[\t\v\f\r ]*/.exec(line)?.[0] ?? '').length;
     // Quoted ones (uses: "actions/checkout@v4"), owner names differing in case, and flow-mapping steps are covered too
-    if (/^\s*(-\s+)?(\{([^}#]*,)?\s*)?uses:\s*["']?actions\/checkout@/.test(line.toLowerCase())) {
+    if (/^[\t\v\f\r ]*(-[\t\v\f\r ]+)?(\{([^}#]*,)?[\t\v\f\r ]*)?uses:[\t\v\f\r ]*["']?actions\/checkout@/.test(line.toLowerCase())) {
       flush(); inChk = true; ind = lead;
       const at = line.lastIndexOf('actions/checkout@');
       getRef(at < 0 ? line : line.slice(at + 'actions/checkout@'.length));
       continue;
     }
     if (!inChk) continue;
-    if (/^\s*-\s/.test(line) && lead <= ind) { flush(); continue; }
+    if (/^[\t\v\f\r ]*-[\t\v\f\r ]/.test(line) && lead <= ind) { flush(); continue; }
     getRef(line);
   }
   flush();
@@ -191,9 +191,9 @@ export function checkoutRefs(yaml: string): ('noref' | 'prhead' | 'otherref' | '
 export function usesRefs(yaml: string): string[] {
   const seen = new Set<string>();
   for (const line of workflowText(yaml)) {
-    const m = /^[\s-]*(\{([^}#]*,)?\s*)?uses:\s*["']?[^"'\s#,}]+/.exec(line);
+    const m = /^[\t\v\f\r -]*(\{([^}#]*,)?[\t\v\f\r ]*)?uses:[\t\v\f\r ]*["']?[^"'\t\n\v\f\r #,}]+/.exec(line);
     if (!m) continue;
-    seen.add(m[0].replace(/.*uses:\s*["']?/, ''));
+    seen.add(m[0].replace(/.*uses:[\t\v\f\r ]*["']?/, ''));
   }
   return [...seen];
 }
@@ -209,7 +209,7 @@ export function actionsRules(ctx: RuleCtx): void {
     const isWorkflow = /\.github\/workflows\//.test(f.relPath);
     const prTarget = /(^|[^A-Za-z0-9_])pull_request_target([^A-Za-z0-9_]|$)/.test(y);
     // Expression context names are case-insensitive (${{ SECRETS.X }} / ${{ toJSON(secrets) }} / secrets['X'] are also secrets references)
-    if (isWorkflow && prTarget && /actions\/checkout@/i.test(y) && /\$\{\{([^}\n]*[^A-Za-z0-9_.\n])?secrets([\][.\s)]|$)/im.test(y)) {
+    if (isWorkflow && prTarget && /actions\/checkout@/i.test(y) && /\$\{\{([^}\n]*[^A-Za-z0-9_.\n])?secrets([\][.\t\v\f\r )]|$)/im.test(y)) {
       const refs = checkoutRefs(y);
       if (refs.includes('prhead')) {
         push(ctx, { level: 'CRITICAL', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.pwn_request', ruleId: 's21-prtarget:prhead', evidenceSha: f.sha256, kind: 'gha.pwn_request' });
@@ -224,13 +224,13 @@ export function actionsRules(ctx: RuleCtx): void {
     if (/key:.*github\.event\.pull_request\.number/.test(y)) {
       push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.cache_pr_key', ruleId: 's21-cache', evidenceSha: f.sha256 });
     }
-    if (/^\s*permissions:\s*write-all/m.test(y)) {
+    if (/^[\t\v\f\r ]*permissions:[\t\v\f\r ]*write-all/m.test(y)) {
       push(ctx, { level: 'HIGH', module: '§21', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's21.write_all', ruleId: 's21-writeall', evidenceSha: f.sha256 });
     }
     if (isWorkflow && yamlHasAlias(y)) ctx.errors.push({ module: '§21', reason: `yaml_alias_unresolved:${f.relPath}` });
     const n = new Set([...y.matchAll(/secrets\.([A-Za-z0-9_]+)/gi)].map((m) => m[1]!.toLowerCase())).size;
     if (n > threshold) push(ctx, { level: 'HIGH', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's38.many_secrets', params: { n, threshold }, ruleId: 's38-secrets', evidenceSha: f.sha256 });
-    if (/tojson\(\s*secrets\s*(\.\s*\*\s*)?\)/i.test(y)) push(ctx, { level: 'CRITICAL', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's38.tojson_secrets', ruleId: 's38-tojson', evidenceSha: f.sha256 });
+    if (/tojson\([\t\v\f\r ]*secrets[\t\v\f\r ]*(\.[\t\v\f\r ]*\*[\t\v\f\r ]*)?\)/i.test(y)) push(ctx, { level: 'CRITICAL', module: '§38', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's38.tojson_secrets', ruleId: 's38-tojson', evidenceSha: f.sha256 });
 
     const uses: UsesRef[] = [];
     // uses: on each normalized line (including flow mappings, values on the next line and block scalars; strings inside run: are not counted)
@@ -258,7 +258,7 @@ export function actionsRules(ctx: RuleCtx): void {
         push(ctx, { level: org ? 'CRITICAL' : 'HIGH', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, code: org ? 's22.risky_publisher_tag' : 's22.unpinned', params: { ref }, ruleId: `s22-pinning:${ref}`, evidenceSha: f.sha256, kind: 'gha.unpinned' });
       }
     }
-    if (/(trivy-version|version):\s*["']?v?0\.69\.4["']?\s*$/m.test(y) && /trivy/.test(y)) {
+    if (/(trivy-version|version):[\t\v\f\r ]*["']?v?0\.69\.4["']?[\t\v\f\r ]*$/m.test(y) && /trivy/.test(y)) {
       push(ctx, { level: 'CRITICAL', module: '§22', campaign: 'ghostaction-oct2026', path: f.relPath, code: 's22.trivy_version', ruleId: 's22-trivy-binary', evidenceSha: f.sha256 });
     }
     if (isWorkflow) ctx.viewers.actions.push({ path: f.relPath, uses, prTarget });
@@ -274,7 +274,7 @@ function strings(v: unknown): string[] {
 export function extensionRules(ctx: RuleCtx): void {
   ctx.checks.add('s24-update-url').add('s24-permissions').add('s42-known').add('s42-escalation');
   const be = ctx.ioc.browser_extensions;
-  const manifests = readable(ctx).filter((x) => x.name === 'manifest.json' && (/(^|\/)Extensions\//.test(x.relPath) || /"manifest_version"\s*:/.test(x.text)));
+  const manifests = readable(ctx).filter((x) => x.name === 'manifest.json' && (/(^|\/)Extensions\//.test(x.relPath) || /"manifest_version"[\t\v\f\r ]*:/.test(x.text)));
   const parsed: { path: string; perms: string[] }[] = [];
   for (const f of manifests) {
     let m: Manifest;

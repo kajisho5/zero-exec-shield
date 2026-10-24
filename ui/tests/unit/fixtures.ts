@@ -8,6 +8,15 @@ import type { FileInput } from '../../src/engine/types';
 
 export const FIXTURES = fileURLToPath(new URL('../../../tests/fixtures/', import.meta.url));
 
+/** Decodes file bytes the way the browser does (fileReader.ts): TextDecoder('utf-8'), which removes one leading BOM and turns
+ *  invalid UTF-8 into U+FFFD. Buffer.toString('utf8') kept the BOM, so the parity tests did not see what the browser sees. */
+export function decodeLikeBrowser(buf: Uint8Array): string {
+  return new TextDecoder('utf-8').decode(buf);
+}
+
+/** A text as the engine receives it from the browser (the bytes of s, decoded by decodeLikeBrowser). */
+export const browserText = (s: string): string => decodeLikeBrowser(new TextEncoder().encode(s));
+
 export function loadFixture(name: string, maxBytes = 2 * 1024 * 1024): FileInput[] {
   const root = join(FIXTURES, name);
   const out: FileInput[] = [];
@@ -24,7 +33,7 @@ export function loadFixture(name: string, maxBytes = 2 * 1024 * 1024): FileInput
       const buf = readFileSync(p);
       const sha = createHash('sha256').update(buf).digest('hex');
       if (buf.length > maxBytes) { out.push({ relPath, name: e, size: buf.length, lastModified: st.mtimeMs, text: null, sha256: null, readState: 'skipped-size' }); continue; }
-      out.push({ relPath, name: e, size: buf.length, lastModified: st.mtimeMs, text: buf.toString('utf8'), sha256: sha, readState: 'read' });
+      out.push({ relPath, name: e, size: buf.length, lastModified: st.mtimeMs, text: decodeLikeBrowser(buf), sha256: sha, readState: 'read' });
     }
   };
   walk(root);

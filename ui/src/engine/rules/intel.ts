@@ -136,7 +136,7 @@ export function emudhraRules(ctx: RuleCtx): void {
       const ub = v.includes('ubuntu') || osid === 'ubuntu';
       if (bad) push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, ...(ub ? { code: 's6.ca_ubuntu', params: { min: ubMin, version: v } } as const : { code: 's6.ca_debian', params: { version: v } } as const), ruleId: 's6-emudhra-os:dpkg', evidenceSha: f.sha256, kind: 'runtime.cve' });
     } else if (/(^|\/)lib\/apk\/db\/installed$/.test(f.relPath)) {
-      const v = /^P:ca-certificates\n(?:[^\n]+\n)*?V:(\S+)/m.exec(f.text)?.[1];
+      const v = /^P:ca-certificates\n(?:[^\n]+\n)*?V:([^\t\n\v\f\r ]+)/m.exec(f.text)?.[1];
       const min = os.alpine ?? '20261020-r0';
       if (v && (v.split('-r')[0] ?? '') < (min.split('-r')[0] ?? '')) {
         push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path: f.relPath, code: 's6.ca_apk', params: { min, version: v }, ruleId: 's6-emudhra-os:apk', evidenceSha: f.sha256, kind: 'runtime.cve' });
@@ -149,10 +149,10 @@ export function emudhraRules(ctx: RuleCtx): void {
     push(ctx, { level: 'HIGH', module: '§6', campaign: camp, path, code: 's6.runtime_trusts', params: { fixed: fixed.join(' '), name, version: v }, ruleId: `s6-emudhra-runtime:${name}:${v}`, evidenceSha: sha, kind: 'runtime.cve' });
   };
   for (const f of readable(ctx)) {
-    if (f.name === '.nvmrc' || f.name === '.node-version') judge('Node.js', (f.text.split(/\r?\n/)[0] ?? '').trim().replace(/^v/, ''), f.relPath, f.sha256, fx.node);
+    if (f.name === '.nvmrc' || f.name === '.node-version') judge('Node.js', (f.text.split('\n')[0] ?? '').replace(/[\t\n\v\f\r ]/g, '').replace(/^v/, ''), f.relPath, f.sha256, fx.node); // head -n1 | tr -d '[:space:]' | sed 's/^v//'
     if (f.name === '.tool-versions') {
-      const node = /^nodejs\s+(\S+)/m.exec(f.text)?.[1];
-      const deno = /^deno\s+(\S+)/m.exec(f.text)?.[1];
+      const node = /^nodejs[\t\v\f\r ]+([^\t\n\v\f\r ]+)/m.exec(f.text)?.[1];
+      const deno = /^deno[\t\v\f\r ]+([^\t\n\v\f\r ]+)/m.exec(f.text)?.[1];
       if (node) judge('Node.js', node, f.relPath, f.sha256, fx.node);
       if (deno) judge('Deno', deno, f.relPath, f.sha256, fx.deno);
     }
@@ -206,7 +206,7 @@ export function intelRules(ctx: RuleCtx): void {
   // As in CLI intel_actions, only GitHub Actions workflows and action.yml are looked at, normalized with workflowText
   const ghFiles = wfFiles.filter((f) => /(^|\/)(\.github\/workflows\/[^/]+|action)\.ya?ml$/.test(f.relPath)).map((f) => ({ f, text: workflowText(f.text).join('\n') }));
   for (const a of intel.actions ?? []) {
-    const re = new RegExp(`uses:\\s*["']?${escapeRe(a.action)}@([^"'\\s#,}]+)`, 'gi');
+    const re = new RegExp(`uses:[\\t\\v\\f\\r ]*["']?${escapeRe(a.action)}@([^"'\\t\\n\\v\\f\\r #,}]+)`, 'gi');
     for (const { f, text } of ghFiles) {
       for (const ref of new Set([...text.matchAll(re)].map((m) => m[1] ?? ''))) {
         if ((a.bad_refs ?? []).includes(ref)) {

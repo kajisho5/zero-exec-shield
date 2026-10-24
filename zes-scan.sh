@@ -599,7 +599,7 @@ text_locators() {
     h="$(awk -v n="$n" 'NR == n { sub(/\r$/, ""); if (NR == 1) sub(/^\357\273\277/, ""); printf "%s", $0; exit }' "$f" 2>/dev/null | zes_sha256_cmd | awk '{print $1}')"
     [[ "$h" =~ ^[0-9a-f]{64}$ ]] || continue
     out="${out:+$out,}{\"format\":\"text\",\"line\":$n,\"line_sha256\":\"sha256:$h\"}"
-  done < <(grep -n -a -E "$@" -- "$f" 2>/dev/null | { if [ -n "${TL_EXCLUDE:-}" ]; then grep -v -i -E -- "^[0-9]+:(${TL_EXCLUDE})"; else cat; fi; } | cut -d: -f1 | head -n "$TEXT_LOCATORS_MAX")
+  done < <(zes_src "$f"; grep -n -a -E "$@" -- "$SRC" 2>/dev/null | { if [ -n "${TL_EXCLUDE:-}" ]; then grep -v -i -E -- "^[0-9]+:(${TL_EXCLUDE})"; else cat; fi; } | cut -d: -f1 | head -n "$TEXT_LOCATORS_MAX")
   printf '%s' "$out"
 }
 # x_text_locators FILE [grep-opts...] PATTERN → "locators":[…]
@@ -879,7 +879,7 @@ git_cfg_get() {
   in_root_regular "$cfg" || return 1
   read_capped "$cfg" 1048576 | ZES_S="$1" ZES_SS="$2" ZES_K="$3" awk '
     BEGIN { ws = tolower(ENVIRON["ZES_S"]); wss = ENVIRON["ZES_SS"]; wk = tolower(ENVIRON["ZES_K"]); found = 0 }
-    { line = $0; sub(/\r$/, "", line) }
+    { line = $0; sub(/\r$/, "", line); if (NR == 1) sub(/^\357\273\277/, "", line) }
     line ~ /^[[:space:]]*\[/ {
       h = line; sub(/^[[:space:]]*\[[[:space:]]*/, "", h); sub(/\][^]]*$/, "", h)
       if (match(h, /[[:space:]]+"/)) { sec = tolower(substr(h, 1, RSTART - 1)); ss = substr(h, RSTART + RLENGTH); sub(/"[[:space:]]*$/, "", ss); gsub(/\\\\/, "\001", ss); gsub(/\\/, "", ss); gsub(/\001/, "\\", ss) }
@@ -906,7 +906,7 @@ git_cfg_get() {
 # git_cfg_includes CONFIG … the values of include.path / includeIf "<condition>".path, one per line (conditions are not evaluated; all of them). Does not start git
 git_cfg_includes() {
   read_capped "$1" 1048576 | awk '
-    { line = $0; sub(/\r$/, "", line) }
+    { line = $0; sub(/\r$/, "", line); if (NR == 1) sub(/^\357\273\277/, "", line) }
     line ~ /^[[:space:]]*\[/ {
       h = line; sub(/^[[:space:]]*\[[[:space:]]*/, "", h); sub(/\][^]]*$/, "", h)
       sec = tolower(h); sub(/[[:space:]"].*$/, "", sec); sub(/\..*$/, "", sec); next }
@@ -1246,22 +1246,64 @@ build_inventory() {
 files_named() { ZES_RE="$1" awk '{n=$0; sub(/.*\//,"",n); if (n ~ ENVIRON["ZES_RE"]) print}' "$FILES_LIST"; }
 # files_path REGEX   … files whose full path matches the ERE
 files_path() { grep -E -- "$1" "$FILES_LIST" 2>/dev/null || true; }
+
+# A leading UTF-8 BOM is not part of the text, on both sides: the browser reads files with TextDecoder (which drops one
+#   BOM), and the CLI reads a copy without it for every text check. bom_prepare (after build_inventory) copies each scanned
+#   file that starts with EF BB BF, minus those 3 bytes, to $TMP_DIR/bom/<n>; BOM_SRC maps the path to the copy. zes_src F
+#   sets SRC to the path to read (the copy or F itself); fgrep_q, grep_q, grep_l and text_locators use it. Evidence hashes
+#   and the reported path stay those of the original file
+declare -A BOM_SRC=()
+BOM_MAP=""
+bom_prepare() {
+  local f k=0
+  mkdir -p "$TMP_DIR/bom" || return 0
+  BOM_MAP="$TMP_DIR/bom/map"; : >"$BOM_MAP"
+  while IFS= read -r f; do
+    [ -n "$f" ] && [ "$f" != /dev/null ] && [ -f "$f" ] || continue
+    [ "$(head -c 3 -- "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ] || continue
+    k=$((k + 1))
+    tail -c +4 -- "$f" >"$TMP_DIR/bom/$k" 2>/dev/null || continue
+    BOM_SRC["$f"]="$TMP_DIR/bom/$k"
+    printf '%s\t%s\n' "$TMP_DIR/bom/$k" "$f" >>"$BOM_MAP"
+  done < <(tr '\n' '\0' <"$FILES_LIST" | xargs -0 grep -l -a -E "^$(printf '\357\273\277')" -- /dev/null 2>/dev/null)
+  return 0
+}
+zes_src() { SRC="$1"; if [ "${#BOM_SRC[@]}" -gt 0 ] && [ -n "${BOM_SRC[$1]+x}" ]; then SRC="${BOM_SRC[$1]}"; fi; }
+# bom_split < list … the NUL-separated list for xargs, with BOM files replaced by their copies; bom_unmap maps copies back
+bom_split() {
+  if [ "${#BOM_SRC[@]}" -eq 0 ]; then tr '\n' '\0'; return; fi
+  local f
+  while IFS= read -r f; do zes_src "$f"; printf '%s\0' "$SRC"; done
+}
+bom_unmap() {
+  if [ "${#BOM_SRC[@]}" -eq 0 ]; then cat; return; fi
+  awk -F'\t' 'NR == FNR { m[$1] = $2; next } { print (($0 in m) ? m[$0] : $0) }' "$BOM_MAP" -
+}
 # grep_l PATTERN [grep-opts...] < filelist … returns only the paths of files whose contents match (contents are never output)
+#   A file that starts with a UTF-8 BOM is read without it (BOM_SRC, as the browser's TextDecoder does)
 grep_l() {
   local pat="$1"; shift
-  tr '\n' '\0' | xargs -0 grep -l -a -E "$@" -e "$pat" -- /dev/null 2>/dev/null || true
+  bom_split | xargs -0 grep -l -a -E "$@" -e "$pat" -- /dev/null 2>/dev/null | bom_unmap || true
 }
 grep_lF() {
   local pat="$1"; shift
-  tr '\n' '\0' | xargs -0 grep -l -a -F "$@" -e "$pat" -- /dev/null 2>/dev/null || true
+  bom_split | xargs -0 grep -l -a -F "$@" -e "$pat" -- /dev/null 2>/dev/null | bom_unmap || true
 }
 # Existence check on a single file
-fgrep_q() { grep -q -a -E "$@" 2>/dev/null; }
+fgrep_q() {
+  local n=$#
+  if [ "$n" -gt 0 ] && [ "${#BOM_SRC[@]}" -gt 0 ] && [ -n "${BOM_SRC[${!n}]+x}" ]; then set -- "${@:1:n-1}" "${BOM_SRC[${!n}]}"; fi
+  grep -q -a -E "$@" 2>/dev/null
+}
 # Existence check at the end of a pipe (cmd | grep_q [grep-opts...] PATTERN). Returns the same truth value as grep -q, but reads the input to the end.
 #   grep -q exits on the first match, so if it exits before the upstream (printf, grep, xargs etc.) has finished writing, the upstream fails with
 #   SIGPIPE, and under set -o pipefail the result becomes false although it matched (a false positive with !). A race that only occurs under heavy load,
 #   it made detail (e.g. the list of dangerous permissions in §24) and id change between runs. Do not use grep -q in pipes
-grep_q() { local n; n="$(grep -c "$@" 2>/dev/null)"; [ "${n:-0}" -gt 0 ] 2>/dev/null; }
+grep_q() {
+  local n=$#
+  if [ "$n" -gt 0 ] && [ "${#BOM_SRC[@]}" -gt 0 ] && [ -n "${BOM_SRC[${!n}]+x}" ]; then set -- "${@:1:n-1}" "${BOM_SRC[${!n}]}"; fi
+  n="$(grep -c "$@" 2>/dev/null)"; [ "${n:-0}" -gt 0 ] 2>/dev/null
+}
 # Conversion for reading TSV while keeping empty fields. IFS=$'\t' treats tab as whitespace and collapses consecutive tabs into one separator
 # (empty fields shift the following columns), so tabs are replaced by US (0x1f), which is not whitespace, and read with IFS="$US"
 US=$'\037'
@@ -2169,12 +2211,12 @@ check_s4() {
   done < <(detect_service_version '(^|[[:space:]/"=])php' | awk -F'\t' '{ v = $1; sub(/^[^0-9]*/, "", v); if (v != "") print v "\t" $2 }')  # floating tags such as latest are handled by the FROM check below
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    ver="$(text_lines "$f" | grep -E '^php[[:space:]]+[0-9]' | head -n1 | awk '{print $2}')"
+    ver="$(text_lines "$f" | grep -E '^php[[:space:]]+[0-9]' | head -n1 | awk -F'[ \t\v\f\r]+' '{print $2}')"
     [ -n "$ver" ] && php_judge "$ver" "$f" upstream
   done < <(files_named '^\.tool-versions$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -E -i -o '^[[:space:]]*FROM[[:space:]]+([^ ]*/)?php(:[^ ]+)?' "$f" 2>/dev/null | while IFS= read -r line; do
+    zes_src "$f"; grep -E -i -o '^[[:space:]]*FROM[[:space:]]+([^ ]*/)?php(:[^ ]+)?' "$SRC" 2>/dev/null | while IFS= read -r line; do
       case "$line" in
         *php:*latest*|*php) medium "" "$f" s4.php_image_floating ;;
         *) info "" "$f" s4.php_image image="${line##* }" ;;
@@ -2238,7 +2280,8 @@ check_s5() {
   fi
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    v="$(head -n1 "$f" | tr -d '[:space:]')"; check_py_version "$v" "$f"
+    # text_lines: no BOM, no CR; a NUL stays a character (U+0001), as in the browser, so "3.11<NUL>.1" is no version
+    v="$(text_lines "$f" | head -n1 | tr '\000' '\001' | tr -d '[:space:]')"; check_py_version "$v" "$f"
   done < <(files_named '^\.python-version$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -2296,7 +2339,7 @@ check_s6() {
   fi
   while IFS= read -r d; do
     [ -n "$d" ] || continue
-    v="$(grep -E '^(toolchain go|go )[0-9]' "$d" | tail -n1 | grep -o -E '[0-9]+\.[0-9]+(\.[0-9]+)?')"
+    zes_src "$d"; v="$(grep -E '^(toolchain go|go )[0-9]' "$SRC" | tail -n1 | grep -o -E '[0-9]+\.[0-9]+(\.[0-9]+)?')"
     [ -n "$v" ] || continue
     [[ "$v" =~ ^[0-9]+\.[0-9]+$ ]] && v="$v.0"
     version_branch_vulnerable "$v" "${gmins[@]}" && medium "" "$d" s6.go_mod_old min="${gmins[*]}" version="$v" --x="$(x_kind runtime.cve)"
@@ -2371,13 +2414,13 @@ emudhra_runtimes() {
   }
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    v="$(head -n1 "$f" | tr -d '[:space:]' | sed -E 's/^v//')"; judge "Node.js" "$v" "$f" "${nfix[@]}"
+    v="$(text_lines "$f" | head -n1 | tr '\000' '\001' | tr -d '[:space:]' | sed -E 's/^v//')"; judge "Node.js" "$v" "$f" "${nfix[@]}"
   done < <(files_named '^(\.nvmrc|\.node-version)$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     # Normalize with text_lines so the version can be read from a CRLF .tool-versions as well
-    v="$(text_lines "$f" | grep -E '^nodejs[[:space:]]+' | awk '{print $2}' | head -n1)"; [ -n "$v" ] && judge "Node.js" "$v" "$f" "${nfix[@]}"
-    v="$(text_lines "$f" | grep -E '^deno[[:space:]]+' | awk '{print $2}' | head -n1)"; [ -n "$v" ] && judge "Deno" "$v" "$f" "${dfix[@]}"
+    v="$(text_lines "$f" | grep -E '^nodejs[[:space:]]+' | awk -F'[ \t\v\f\r]+' '{print $2}' | head -n1)"; [ -n "$v" ] && judge "Node.js" "$v" "$f" "${nfix[@]}"
+    v="$(text_lines "$f" | grep -E '^deno[[:space:]]+' | awk -F'[ \t\v\f\r]+' '{print $2}' | head -n1)"; [ -n "$v" ] && judge "Deno" "$v" "$f" "${dfix[@]}"
   done < <(files_named '^\.tool-versions$')
   while IFS=$'\t' read -r v f; do judge "Node.js" "${v#v}" "$f" "${nfix[@]}"; done < <(detect_service_version '(^|[[:space:]/"=])node')
   while IFS=$'\t' read -r v f; do judge "Deno" "${v#v}" "$f" "${dfix[@]}"; done < <(detect_service_version 'denoland/deno')
@@ -2453,9 +2496,9 @@ check_s8() {
   done
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    fgrep_q -i '^[[:space:]]*USER[[:space:]]+(root|0)([[:space:]]|$)' "$f" && medium "" "$f" s8.user_root
-    # sub(): a CRLF Dockerfile must not leave "\r" in the image (it hid ":latest" and went into params)
-    grep -E -i '^[[:space:]]*FROM[[:space:]]+' "$f" 2>/dev/null | awk '{ sub(/\r$/, ""); print $2 }' | while IFS= read -r img; do
+    # USER root, USER 0, USER root:<group>, USER 0:0 (the user is root whatever the group)
+    fgrep_q -i '^[[:space:]]*USER[[:space:]]+(root|0)(:[^[:space:]]*)?([[:space:]]|$)' "$f" && medium "" "$f" s8.user_root
+    dockerfile_images "$f" | while IFS= read -r img; do
       case "$img" in scratch|'$'*|*@sha256:*) continue ;; esac
       if [[ "$img" == *:latest ]] || [[ "${img##*/}" != *:* ]]; then medium "" "$f" s8.floating_image image="$img"; fi
     done
@@ -2464,6 +2507,19 @@ check_s8() {
     [ -n "$f" ] && [ "$f" != /dev/null ] && high "" "$f" s8.docker_sock
   done
   return 0
+}
+
+# dockerfile_images FILE … the image of each FROM line, one per line (the same rule as fromImages of the browser engine):
+#   the line (a leading BOM, a CR before the line break removed) is FROM after optional whitespace, then whitespace; the
+#   words after it are split on [[:space:]] (space, tab, VT, FF, CR; not NBSP or other Unicode spaces), flags such as
+#   --platform=linux/amd64 are skipped and the first other word is the image. A FROM line without one prints nothing
+#   (never an empty image). A NUL becomes U+0001 (a shell variable cannot hold it; the browser engine does the same)
+dockerfile_images() {
+  awk 'NR == 1 { sub(/^\357\273\277/, "") }
+    { sub(/\r$/, ""); gsub(/\0/, "\001"); l = $0
+      if (!match(tolower(l), /^[ \t\v\f\r]*from[ \t\v\f\r]+/)) next
+      n = split(substr(l, RLENGTH + 1), w, /[ \t\v\f\r]+/)
+      for (k = 1; k <= n; k++) { if (w[k] == "" || substr(w[k], 1, 2) == "--") continue; print w[k]; break } }' "$1" 2>/dev/null
 }
 
 # §9 Rust/Go/Node typosquatting and unofficial sources
@@ -2483,8 +2539,9 @@ check_s9() {
   done < <(files_named '^(package-lock\.json|npm-shrinkwrap\.json)$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -q -E '^source = "git\+' "$f" && medium "" "$f" s9.cargo_git_source
-    grep -E '^source = "registry\+' "$f" | grep_q -v 'github.com/rust-lang/crates.io-index\|sparse+https://index.crates.io' && high "" "$f" s9.cargo_registry
+    zes_src "$f"
+    grep -q -E '^source = "git\+' "$SRC" && medium "" "$f" s9.cargo_git_source
+    grep -E '^source = "registry\+' "$SRC" | grep_q -v 'github.com/rust-lang/crates.io-index\|sparse+https://index.crates.io' && high "" "$f" s9.cargo_registry
   done < <(files_named '^Cargo\.lock$')
   return 0
 }
@@ -3420,7 +3477,8 @@ check_s26() {
   local re; re="$(printf '%s|' "${regs[@]}" | sed 's/\./\\./g; s/|$//')"
   while IFS= read -r f; do
     [ -n "$f" ] && [ -f "$f" ] || continue
-    if grep -E -i '^[[:space:]]*(registry|@[^:]+:registry|npmRegistryServer|repository|index-url|index_url|extra-index-url)[[:space:]]*[=:]' "$f" 2>/dev/null \
+    zes_src "$f"
+    if grep -E -i '^[[:space:]]*(registry|@[^:]+:registry|npmRegistryServer|repository|index-url|index_url|extra-index-url)[[:space:]]*[=:]' "$SRC" 2>/dev/null \
        | grep -E -o 'https?://[^/"'"'"'[:space:]]+' | sed -E 's#https?://##' | grep_q -v -E "^($re)$"; then
       medium "" "$f" s26.registry_url
     fi
@@ -3440,6 +3498,49 @@ toml_value_head() {
     \"*|\'*) q="${v:0:1}"; v="${v:1}"; [[ "$v" == *"$q"* ]] && TOML_VALUE="${v%%"$q"*}" ;;
     *) TOML_VALUE="${v%%[$' \t\r#"\'']*}" ;;
   esac
+}
+
+# pyproject_build_system FILE … "B<text after =>" for the first build-backend and "P" for a backend-path of the
+#   [build-system] table (the same rule as buildSystemKeys of the browser engine). Only keys of that table count: lines
+#   under [build-system] (until the next table header), "build-system.build-backend = …" before the first header, and the
+#   keys of "build-system = { … }" on its line. Lines inside multi-line strings (""" / ''') are never keys (a
+#   description can hold a decoy "build-backend = …" line). TOML whitespace is space and tab; a BOM and CRs are removed,
+#   a NUL becomes U+0001 (as in the browser engine)
+pyproject_build_system() {
+  text_lines "$1" | awk '
+    # Scan x from position i outside strings and set inml / mlq when a multi-line string stays open at the end of the line
+    function scan(x, i,   n, c, j) {
+      n = length(x)
+      while (i <= n) {
+        c = substr(x, i, 1)
+        if (inml) {
+          if (mlq == "\"\"\"" && c == "\\") { i += 2; continue }
+          if (substr(x, i, 3) == mlq) { while (substr(x, i + 3, 1) == substr(mlq, 1, 1)) i++; inml = 0; i += 3; continue }
+          i++; continue }
+        if (c == "#") return
+        if (substr(x, i, 3) == "\"\"\"" || substr(x, i, 3) == "\047\047\047") { mlq = substr(x, i, 3); inml = 1; i += 3; continue }
+        if (c == "\"") { for (j = i + 1; j <= n; j++) { if (substr(x, j, 1) == "\\") { j++; continue } if (substr(x, j, 1) == "\"") break } i = j + 1; continue }
+        if (c == "\047") { j = index(substr(x, i + 1), "\047"); if (j == 0) return; i += j + 1; continue }
+        i++ } }
+    function key(x, k) { return match(x, "^[ \t]*[\"\047]?" k "[\"\047]?[ \t]*=") }
+    function emit(x, k) { if (k == "build-backend") { if (!gotbe) { gotbe = 1; print "B" substr(x, RSTART + RLENGTH) } } else print "P" }
+    {
+      line = $0; gsub(/\0/, "\001", line)
+      if (inml) { scan(line, 1); next }
+      if (match(line, /^[ \t]*\[/)) {
+        h = line; sub(/^[ \t]*\[/, "", h)
+        if (substr(h, 1, 1) == "[") tbl = "other"
+        else { sub(/\].*$/, "", h); gsub(/^[ \t]+|[ \t]+$/, "", h); gsub(/^["\047]|["\047]$/, "", h); tbl = (h == "build-system") ? "bs" : "other" }
+        next }
+      if (tbl == "bs") { if (key(line, "build-backend")) emit(line, "build-backend"); else if (key(line, "backend-path")) emit(line, "backend-path") }
+      else if (tbl == "") {
+        if (key(line, "build-system[ \t]*\\.[ \t]*build-backend")) emit(line, "build-backend")
+        else if (key(line, "build-system[ \t]*\\.[ \t]*backend-path")) emit(line, "backend-path")
+        else if (match(line, /^[ \t]*build-system[ \t]*=[ \t]*\{/)) {
+          r = substr(line, RLENGTH + 1)
+          if (match(r, /(^|,)[ \t]*["\047]?build-backend["\047]?[ \t]*=/)) { if (!gotbe) { gotbe = 1; print "B" substr(r, RSTART + RLENGTH) } }
+          if (match(r, /(^|,)[ \t]*["\047]?backend-path["\047]?[ \t]*=/)) print "P" } }
+      scan(line, 1) }'
 }
 
 # §27 Build hooks (build.rs / go:generate / build-backend / cmdclass)
@@ -3462,12 +3563,12 @@ check_s27() {
   local -a safeb; mapfile -t safeb < <(read_ioc '.build_hooks.py_build_backend_safe')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    local be
-    be="$(grep -a -E '^[[:blank:]]*build-backend[[:blank:]]*=' "$f" 2>/dev/null | head -n1)"
-    toml_value_head "${be#*=}"; be="$TOML_VALUE"
-    [ -n "$be" ] || continue
-    printf '%s\n' "${safeb[@]}" | grep_q -x -F -- "$be" || medium "" "$f" s27.build_backend backend="$be"
-    fgrep_q '^[[:space:]]*backend-path[[:space:]]*=' "$f" && high "" "$f" s27.backend_path
+    local be="" bp=0 l
+    while IFS= read -r l; do
+      case "$l" in B*) toml_value_head "${l#B}"; be="$TOML_VALUE" ;; P) bp=1 ;; esac
+    done < <(pyproject_build_system "$f")
+    if [ -n "$be" ]; then printf '%s\n' "${safeb[@]}" | grep_q -x -F -- "$be" || medium "" "$f" s27.build_backend backend="$be"; fi
+    [ "$bp" -eq 1 ] && high "" "$f" s27.backend_path
   done < <(files_named '^pyproject\.toml$')
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -3491,7 +3592,7 @@ check_s28() {
   [ "$builds_images" -eq 1 ] && [ "$verifies" -eq 0 ] && medium "" "$ROOT" s28.no_verify
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -E -i '^[[:space:]]*FROM[[:space:]]+' "$f" 2>/dev/null | awk '{print $2}' | grep -v -E '^(scratch|\$)' | grep_q -v '@sha256:' \
+    dockerfile_images "$f" | grep -v -E '^(scratch|\$)' | grep_q -v '@sha256:' \
       && medium "" "$f" s28.from_digest --x="$(x_kind gha.unpinned)"
   done < <(files_named '^(Dockerfile.*|.*\.dockerfile)$')
   while IFS= read -r f; do [ -n "$f" ] && high "" "$f" s28.cosign_key; done < <(files_named '^cosign\.key$')
@@ -3575,7 +3676,7 @@ check_s31() {
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    [ -s "$f" ] && grep -q -v -E '^[[:space:]]*(#|$)' "$f" && critical "ebpf-rootkit" "$f" s31.ld_so_preload \
+    zes_src "$f"; [ -s "$f" ] && grep -q -v -E '^[[:space:]]*(#|$)' "$SRC" && critical "ebpf-rootkit" "$f" s31.ld_so_preload \
       --x="$(x_text_locators "$f" -v '^[[:space:]]*(#|$)')"
   done < <(files_named '^ld\.so\.preload$'; host_enabled && [ -f /etc/ld.so.preload ] && echo /etc/ld.so.preload)
   while IFS= read -r f; do
@@ -3597,7 +3698,7 @@ check_s31() {
            ls "$HOME_DIR"/.config/systemd/user/*.service "$HOME_DIR"/.config/autostart/*.desktop 2>/dev/null)
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -v '^[[:space:]]*#' "$f" 2>/dev/null | grep_q -E '(curl|wget|base64|/tmp/|/dev/shm/|nc )' && high "ebpf-rootkit" "$f" s31.cron_d \
+    zes_src "$f"; grep -v '^[[:space:]]*#' "$SRC" 2>/dev/null | grep_q -E '(curl|wget|base64|/tmp/|/dev/shm/|nc )' && high "ebpf-rootkit" "$f" s31.cron_d \
       --x="$(TL_EXCLUDE='[[:space:]]*#' x_text_locators "$f" '(curl|wget|base64|/tmp/|/dev/shm/|nc )')"
   done < <(files_path '/cron\.d/[^/]+$'; host_enabled && ls /etc/cron.d/* 2>/dev/null)
   return 0
@@ -3635,7 +3736,7 @@ check_s33() {
   for f in "$HOME_DIR/.bash_logout" "$HOME_DIR/.zlogout"; do
     [ -f "$f" ] || continue
     if fgrep_q '(curl|wget|rm -rf|base64|nc )' "$f"; then high "" "$f" s33.logout_suspicious
-    elif grep -v -E '^[[:space:]]*(#|$|clear|if|fi|then|\[)' "$f" | grep_q .; then medium "" "$f" s33.logout
+    elif zes_src "$f"; grep -v -E '^[[:space:]]*(#|$|clear|if|fi|then|\[)' "$SRC" | grep_q .; then medium "" "$f" s33.logout
     fi
   done
   return 0
@@ -3663,7 +3764,7 @@ check_s34() {
         && high "" "$hostsf" s34.hosts_override host="$h"
     done
     network_iocs | cut -f1 | grep -v -E '^[0-9.]+$' | while IFS= read -r h; do
-      grep -v '^[[:space:]]*#' "$hostsf" | grep_q -i -F -- "$h" && critical "" "$hostsf" s34.hosts_c2 host="$h"
+      zes_src "$hostsf"; grep -v '^[[:space:]]*#' "$SRC" | grep_q -i -F -- "$h" && critical "" "$hostsf" s34.hosts_c2 host="$h"
     done
   done < <(host_enabled && echo /etc/hosts; files_named '^hosts$')
   for f in "$HOME_DIR/.ssh/config"; do
@@ -3788,8 +3889,9 @@ check_s38() {
   done < <(workflow_files)
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    grep -q -E '^[[:space:]]*-?[[:space:]]*remote:[[:space:]]*["'"'"']?https?://' "$f" && high "ghostaction-oct2026" "$f" s38.gitlab_remote_include
-    if grep -q -E '^[[:space:]]*-?[[:space:]]*project:' "$f" && ! grep -q -E 'ref:[[:space:]]*["'"'"']?[0-9a-f]{40}' "$f"; then
+    zes_src "$f"
+    grep -q -E '^[[:space:]]*-?[[:space:]]*remote:[[:space:]]*["'"'"']?https?://' "$SRC" && high "ghostaction-oct2026" "$f" s38.gitlab_remote_include
+    if grep -q -E '^[[:space:]]*-?[[:space:]]*project:' "$SRC" && ! grep -q -E 'ref:[[:space:]]*["'"'"']?[0-9a-f]{40}' "$SRC"; then
       medium "ghostaction-oct2026" "$f" s38.gitlab_project_include
     fi
   done < <(files_named '^\.gitlab-ci\.ya?ml$')
@@ -3880,7 +3982,7 @@ check_s40() {
   for u in /etc/systemd/system/*.service "$HOME_DIR"/.config/systemd/user/*.service; do
     [ -f "$u" ] || continue
     case "${u##*/}" in systemd-*|dbus-*|udev*|journald*|networkd*|resolved*)
-      grep -E '^[[:space:]]*ExecStart=' "$u" | grep_q -v -E '=(/usr)?/lib/systemd/|=/usr/bin/(dbus|udevadm)|=/usr/sbin/' \
+      zes_src "$u"; grep -E '^[[:space:]]*ExecStart=' "$SRC" | grep_q -v -E '=(/usr)?/lib/systemd/|=/usr/bin/(dbus|udevadm)|=/usr/sbin/' \
         && high "ebpf-rootkit" "$u" s40.fake_unit ;;
     esac
   done
@@ -4089,7 +4191,7 @@ check_s46() {
   if in_root_regular "$RP/.gitmodules"; then
     local origin_host
     origin_host="$(git_cfg_get remote origin url | sed -E 's#^[a-z+]+://([^@/]+@)?##; s#^[^@]+@##; s#[:/].*##')"
-    grep -E '^[[:space:]]*url[[:space:]]*=' "$RP/.gitmodules" | sed -E 's/.*=[[:space:]]*//' | while IFS= read -r n; do
+    zes_src "$RP/.gitmodules"; grep -E '^[[:space:]]*url[[:space:]]*=' "$SRC" | sed -E 's/.*=[[:space:]]*//' | while IFS= read -r n; do
       case "$n" in
         http://*|git://*) high "" "$RP/.gitmodules" s46.submodule_plain url="$n" ;;
         ./*|../*) ;;
@@ -4553,7 +4655,7 @@ sp_extract() {
           infence=!infence; next }
         infence { print $0 >> code; next }' "$f"
     elif { [ -n "$must" ] && rel="${f#"$dir"/}" && grep -q -x -F -- "$rel" "$must" 2>/dev/null; } \
-         || [[ "$ext" =~ ^($sre)$ ]] || head -c 2 -- "$f" 2>/dev/null | grep_q '^#!'; then
+         || [[ "$ext" =~ ^($sre)$ ]] || { zes_src "$f"; head -c 2 -- "$SRC" 2>/dev/null | grep_q '^#!'; }; then
       printf '#ZES-SCRIPT %s\n' "$base" >>"$code"
       cat -- "$f" >>"$code"; printf '\n' >>"$code"
     elif [[ "$base" =~ \.(json|ya?ml|toml|ini|cfg)$ ]]; then
@@ -4827,6 +4929,7 @@ main() {
   [ "$ROOT" = "/" ] && log_info log.root_host
   CURRENT_MODULE="core"
   build_inventory
+  bom_prepare
   git_discover
   local n nmod=0 nfail=0
   for n in $(modules_for_mode "$MODE"); do

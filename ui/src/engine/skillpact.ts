@@ -343,7 +343,7 @@ function analyze(c: Obj, R: RuleCtx['ioc']['skillpact'], files: string[], hashes
         const prot = [...R.integrity.protected, ...R.integrity.code_extensions.map((e) => `**/*.${e}`)];
         const toks = [...capsA.flatMap(cliTokens), ...(arr(tests['cases']) as Obj[]).flatMap((t) => (Array.isArray(t['run']) ? strs(t['run']) : strs([t['run']]))),
           ...arr(tests['setup']).flatMap((s) => (Array.isArray(s) ? strs(s) : strs([s])))];
-        const must = toks.flatMap((t) => [...t.matchAll(/\$SKILL_DIR\/([^\s'"]+)/g)].map((m) => m[1]!));
+        const must = toks.flatMap((t) => [...t.matchAll(/\$SKILL_DIR\/([^\t\n\v\f\r '"]+)/g)].map((m) => m[1]!));
         for (const rel of files) {
           if (rel === CONTRACT || rel in F) continue;
           const isProt = prot.some((p) => gmatch(rel, p)) || must.includes(rel);
@@ -382,13 +382,13 @@ function analyze(c: Obj, R: RuleCtx['ioc']['skillpact'], files: string[], hashes
 
 // ---------------------------------------------------------------- static analysis (same as CLI sp_extract / sp_observed)
 function frontmatterName(text: string): string {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/);
-  if (!/^---\s*$/.test(lines[0] ?? '')) return '';
+  const lines = text.split(/\r?\n/);
+  if (!/^---[\t\v\f\r ]*$/.test(lines[0] ?? '')) return '';
   for (let i = 1; i < lines.length; i++) {
     const l = lines[i]!;
-    if (/^---\s*$/.test(l)) return '';
+    if (/^---[\t\v\f\r ]*$/.test(l)) return '';
     if (l.startsWith('name:')) {
-      const v = l.replace(/^name:\s*/, '').replace(/\s+$/, '');
+      const v = l.replace(/^name:[\t\v\f\r ]*/, '').replace(/[\t\v\f\r ]+$/, '');
       return /^".*"$|^'.*'$/.test(v) ? v.slice(1, -1) : v;
     }
   }
@@ -400,14 +400,14 @@ function mustRefs(text: string | null | undefined): Set<string> {
   const out = new Set<string>();
   if (!text) return out;
   let c: unknown;
-  try { c = JSON.parse(text.replace(/^\uFEFF/, '')); } catch { return out; }
+  try { c = JSON.parse(text); } catch { return out; }
   if (!isObj(c)) return out;
   const toks: unknown[] = [];
   for (const cap of arr(c['capabilities'])) { const cli = isObj(cap) && isObj(cap['entry']) ? cap['entry']['cli'] : undefined; if (Array.isArray(cli)) toks.push(...cli); }
   const t = isObj(c['tests']) ? c['tests'] : {};
   for (const tc of arr(t['cases'])) { const r = isObj(tc) ? tc['run'] : undefined; if (Array.isArray(r)) toks.push(...r); else toks.push(r); }
   for (const st of arr(t['setup'])) { if (Array.isArray(st)) toks.push(...st); else toks.push(st); }
-  for (const tok of toks.filter(isStr)) for (const m of tok.matchAll(/\$SKILL_DIR\/([^\s'"]+)/g)) out.add(m[1]!);
+  for (const tok of toks.filter(isStr)) for (const m of tok.matchAll(/\$SKILL_DIR\/([^\t\n\v\f\r '"]+)/g)) out.add(m[1]!);
   return out;
 }
 
@@ -421,16 +421,16 @@ function observe(ctx: RuleCtx, files: FileInput[], policyPaths: Set<string>, pre
     if (f.name.endsWith('.md')) {
       const lines = f.text.split('\n');
       let i = 0;
-      if (/^---\s*$/.test(lines[0] ?? '')) {
+      if (/^---[\t\v\f\r ]*$/.test(lines[0] ?? '')) {
         i = 1;
-        while (i < lines.length && !/^---\s*$/.test(lines[i]!)) { const l = lines[i]!; if (l.startsWith('allowed-tools:')) tools += l + '\n'; code += l + '\n'; i++; }
+        while (i < lines.length && !/^---[\t\v\f\r ]*$/.test(lines[i]!)) { const l = lines[i]!; if (l.startsWith('allowed-tools:')) tools += l + '\n'; code += l + '\n'; i++; }
         i++;
       }
       let infence = false;
       for (; i < lines.length; i++) {
         const l = lines[i]!;
-        if (/^\s*(```|~~~)/.test(l)) {
-          if (!infence) { const lang = l.replace(/^\s*(```|~~~)\s*/, '').replace(/[\s{].*$/, '').toLowerCase(); if (R.shell_fence_langs.includes(lang)) shell = true; }
+        if (/^[\t\v\f\r ]*(```|~~~)/.test(l)) {
+          if (!infence) { const lang = l.replace(/^[\t\v\f\r ]*(```|~~~)[\t\v\f\r ]*/, '').replace(/[\t\v\f\r {].*$/, '').toLowerCase(); if (R.shell_fence_langs.includes(lang)) shell = true; }
           infence = !infence;
           continue;
         }
@@ -451,11 +451,11 @@ function observe(ctx: RuleCtx, files: FileInput[], policyPaths: Set<string>, pre
   const o: Observed = {
     exec: !!pat('exec')?.test(code) || shell || /(^|[^A-Za-z])Bash([^A-Za-z]|$)/m.test(tools),
     network: !!pat('network')?.test(code) || /(WebFetch|WebSearch)/.test(tools),
-    write: !!pat('write')?.test(code.replace(/[0-9&]?>>?\s*\/dev\/null/g, '')) || /(^|[^A-Za-z])(Write|Edit|MultiEdit|NotebookEdit)([^A-Za-z]|$)/m.test(tools),
+    write: !!pat('write')?.test(code.replace(/[0-9&]?>>?[\t\v\f\r ]*\/dev\/null/g, '')) || /(^|[^A-Za-z])(Write|Edit|MultiEdit|NotebookEdit)([^A-Za-z]|$)/m.test(tools),
     spend: !!pat('spend')?.test(code), send: !!pat('send')?.test(code),
     read: !!ere(R.sensitive_read_patterns.join('|'), 'm')?.test(code), durable: false,
   };
-  const persist = R.persistence_markers.map((m) => (m === 'registry run' ? /registry\s+run|CurrentVersion\\Run|reg\s+add[^\n]*\\Run/i : ere(reEsc(m).replace(/ /g, '\\s+'), 'i')));
+  const persist = R.persistence_markers.map((m) => (m === 'registry run' ? /registry[\t\v\f\r ]+run|CurrentVersion\\Run|reg[\t\v\f\r ]+add[^\n]*\\Run/i : ere(reEsc(m).replace(/ /g, '[\\t\\v\\f\\r ]+'), 'i')));
   if (persist.some((r) => r?.test(code))) { o.durable = true; o.write = true; }
   return o;
 }
@@ -513,7 +513,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
   for (const f of ctx.files) {
     if (!f.name.endsWith('.json') || f.name === CONTRACT || f.text == null || !f.text.includes('"policy_version"')) continue;
     let p: unknown;
-    try { p = JSON.parse(f.text.replace(/^﻿/, '')); } catch { continue; }
+    try { p = JSON.parse(f.text); } catch { continue; }
     if (!isObj(p) || !('policy_version' in p) || !('defaults' in p)) continue;
     policyPaths.add(f.relPath);
     const prob = ijsonProblem(f.text);
@@ -571,7 +571,7 @@ export function skillpactRules(ctx: RuleCtx): SkillPactAnalysis[] {
         hits.push({ level: 'MEDIUM', campaign: 'skillpact-invalid', path: cfile.relPath, ruleId: 's49-contract-json', code: 's49.contract_unparseable', params: { problem: prob } });
         ctx.errors.push({ module: '§49', reason: `contract_unparseable:${cfile.relPath}` });
       } else {
-        const c = JSON.parse(cfile.text!.replace(/^﻿/, '')) as Obj;
+        const c = JSON.parse(cfile.text!) as Obj;
         const files = all.map((f) => f.relPath.slice(prefix.length));
         const hashes = new Map(all.map((f) => [f.relPath.slice(prefix.length), f.sha256] as const));
         const md = ctx.byPath.get(prefix + 'SKILL.md');

@@ -54,7 +54,7 @@ export function versionCmp(a: string, b: string): number {
 
 /** Range evaluation of the forms "1.2.3" / "<X" / "<=X" / ">=A <=B". */
 export function versionMatches(v: string, spec: string): boolean {
-  return spec.split(/\s+/).filter(Boolean).every((tok) => {
+  return spec.split(/[\t\v\f\r ]+/).filter(Boolean).every((tok) => {
     const m = /^(>=|<=|>|<|=)?(.+)$/.exec(tok);
     if (!m) return false;
     const op = m[1] ?? '=';
@@ -66,6 +66,12 @@ export function versionMatches(v: string, spec: string): boolean {
 /** The value at the start of text (what follows "key =" on its line): a """...""", '''...''', "..." or '...' string without
  *  its quotes (empty when the closing quotes are not on the line), otherwise the bare word up to a blank, "#", a quote or
  *  CR (the CLI's toml_value_head). */
+/** String.prototype.trim() for the CLI's whitespace: only [[:space:]] of the C locale (trim() also removes NBSP, U+3000,
+ *  U+2028, U+FEFF …). */
+export function asciiTrim(s: string): string {
+  return s.replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, '');
+}
+
 export function tomlValueHead(text: string): string {
   const v = text.replace(/^[ \t]+/, '');
   const q = v.startsWith('"""') || v.startsWith("'''") ? v.slice(0, 3) : v[0] === '"' || v[0] === "'" ? v[0] : '';
@@ -118,7 +124,6 @@ export function textLocators(text: string, re: RegExp, exclude?: RegExp): TextLo
   for (let i = 0; i < lines.length && out.length < 64; i++) {
     let l = lines[i]!;
     if (l.endsWith('\r')) l = l.slice(0, -1);
-    if (i === 0 && l.charCodeAt(0) === 0xfeff) l = l.slice(1);
     if (i === lines.length - 1 && l === '' ) continue;
     if (re.test(l) && !(exclude && exclude.test(l))) out.push({ format: 'text', line: i + 1, text: l });
   }
@@ -194,9 +199,9 @@ export function splitMarkdown(text: string): { code: string; prose: string; fron
   const lines = text.split(/\r?\n/);
   let i = 0;
   const fm: string[] = [];
-  if (lines[0]?.trim() === '---') {
+  if (asciiTrim(lines[0] ?? '') === '---') {
     i = 1;
-    while (i < lines.length && lines[i]?.trim() !== '---') fm.push(lines[i++] ?? '');
+    while (i < lines.length && asciiTrim(lines[i] ?? '') !== '---') fm.push(lines[i++] ?? '');
     i++;
   }
   const code: string[] = [];
@@ -205,7 +210,7 @@ export function splitMarkdown(text: string): { code: string; prose: string; fron
   let infence = false;
   for (; i < lines.length; i++) {
     const l = lines[i] ?? '';
-    const m = /^\s*(```|~~~)\s*([^\s{]*)/.exec(l);
+    const m = /^[\t\v\f\r ]*(```|~~~)[\t\v\f\r ]*([^\t\n\v\f\r {]*)/.exec(l);
     if (m) {
       if (!infence) langs.push((m[2] ?? '').toLowerCase());
       infence = !infence;
@@ -216,11 +221,30 @@ export function splitMarkdown(text: string): { code: string; prose: string; fron
   return { code: code.join('\n'), prose: prose.join('\n'), frontmatter: fm.join('\n'), fenceLangs: langs };
 }
 
-/** A regular expression equivalent to grep -E (POSIX character classes converted to JS). null if invalid. */
+/** A regular expression equivalent to grep -E (POSIX character classes converted to JS). null if invalid.
+ *  [[:space:]] and GNU grep's \s / \S are ASCII in the C locale (space, tab, VT, FF, CR); JS \s would also match NBSP,
+ *  U+3000, U+2028 or U+FEFF. The CLI matches line by line, so the line break is left out of the positive class. */
 export function ere(pattern: string, flags = ''): RegExp | null {
-  const js = pattern
-    .replace(/\[\[:space:\]\]/g, '\\s').replace(/\[:space:\]/g, '\\s')
-    .replace(/\[\[:alnum:\]\]/g, '[A-Za-z0-9]').replace(/\[:alnum:\]/g, 'A-Za-z0-9');
+  let js = '';
+  let cls = false;
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]!;
+    if (c === '\\' && i + 1 < pattern.length) {
+      const d = pattern[i + 1]!;
+      if (d === 's') js += cls ? '\\t\\v\\f\\r ' : '[\\t\\v\\f\\r ]';
+      else if (d === 'S' && !cls) js += '[^\\t\\n\\v\\f\\r ]';
+      else js += c + d;
+      i++;
+      continue;
+    }
+    if (!cls && pattern.startsWith('[[:space:]]', i)) { js += '[\\t\\v\\f\\r ]'; i += 10; continue; }
+    if (!cls && pattern.startsWith('[[:alnum:]]', i)) { js += '[A-Za-z0-9]'; i += 10; continue; }
+    if (cls && pattern.startsWith('[:space:]', i)) { js += '\\t\\v\\f\\r '; i += 8; continue; }
+    if (cls && pattern.startsWith('[:alnum:]', i)) { js += 'A-Za-z0-9'; i += 8; continue; }
+    if (c === '[' && !cls) { cls = true; js += c; if (pattern[i + 1] === '^') { js += '^'; i++; } if (pattern[i + 1] === ']') { js += '\\]'; i++; } continue; }
+    if (c === ']' && cls) { cls = false; js += c; continue; }
+    js += c;
+  }
   try {
     return new RegExp(js, flags);
   } catch {
@@ -230,7 +254,7 @@ export function ere(pattern: string, flags = ''): RegExp | null {
 
 /** Parses JSONC (JSON with comments and trailing commas, such as the mcp.json of VS Code). The inside of strings is not changed. Throws if invalid. */
 export function parseJsonc(text: string): unknown {
-  const s = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const s = text;
   let out = '';
   for (let i = 0; i < s.length; i++) {
     const c = s[i]!;
@@ -251,7 +275,8 @@ export function parseJsonc(text: string): unknown {
       // If what follows (ignoring whitespace and comments) is } / ], drop it as a trailing comma
       let j = i + 1;
       for (;;) {
-        while (j < s.length && /\s/.test(s[j]!)) j++;
+        // the whitespace of jsonc_to_json in the CLI (space, tab, CR, LF)
+        while (j < s.length && /[ \t\r\n]/.test(s[j]!)) j++;
         if (s[j] === '/' && s[j + 1] === '/') { while (j < s.length && s[j] !== '\n') j++; continue; }
         if (s[j] === '/' && s[j + 1] === '*') { const e = s.indexOf('*/', j + 2); if (e < 0) break; j = e + 2; continue; }
         break;

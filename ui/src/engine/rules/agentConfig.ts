@@ -11,19 +11,19 @@ export { parseCodexToml };
 const MCP_CONFIG = /(^|\/)(\.mcp\.json|mcp\.json|\.cursor\/mcp\.json|\.vscode\/mcp\.json|\.claude\/settings(\.local)?\.json|\.gemini\/settings\.json|claude_desktop_config\.json|\.claude\.json|\.codeium\/windsurf\/mcp_config\.json|\.codex\/config\.toml)$/;
 // Same as CLI MCP_DANGER_RE (case-insensitive): curl / wget / base64, -c of shells (leading options such as -xc, --norc allowed),
 // -e, --eval, -p, --print of node / bun, deno eval, python -c, perl / ruby -e, php -r, osascript / lua -e, pwsh -Command etc., cmd /c
-const OPTS = String.raw`(\s+-\S*)*\s+`;
-const B = String.raw`(^|[\s"/])`;
+const OPTS = String.raw`([\t\v\f\r ]+-[^\t\n\v\f\r ]*)*[\t\v\f\r ]+`;
+const B = String.raw`(^|[\t\v\f\r "/])`;
 const HIGH_CMD = new RegExp([
-  String.raw`${B}(curl|wget)([\s"]|$)|base64`,
-  String.raw`${B}(ba|z|da|k|a|fi)?sh(\.exe)?${OPTS}-[a-z]*c[a-z]*(\s|$)`,
-  String.raw`${B}(node|nodejs|bun)(\.exe)?${OPTS}(-e|--eval|-p|--print)([\s=]|$)|${B}deno(\.exe)?\s+ev[a]l(\s|$)`,
-  String.raw`${B}python[0-9.]*(\.exe)?${OPTS}-[a-z]*c(\s|$)`,
-  String.raw`${B}(perl|ruby)[0-9.]*(\.exe)?${OPTS}-[a-z]*e(\s|$)`,
-  String.raw`${B}php[0-9.]*(\.exe)?${OPTS}-r(\s|$)|${B}(osascript|lua[0-9.]*)${OPTS}-e(\s|$)`,
-  String.raw`${B}(pwsh|powershell)(\.exe)?(\s+\S+)*\s+[-/](c|command|e|ec|enc|encodedcommand)(\s|$)`,
-  String.raw`${B}cmd(\.exe)?\s+/[ck](\s|$)`,
+  String.raw`${B}(curl|wget)([\t\v\f\r "]|$)|base64`,
+  String.raw`${B}(ba|z|da|k|a|fi)?sh(\.exe)?${OPTS}-[a-z]*c[a-z]*([\t\v\f\r ]|$)`,
+  String.raw`${B}(node|nodejs|bun)(\.exe)?${OPTS}(-e|--eval|-p|--print)([\t\v\f\r =]|$)|${B}deno(\.exe)?[\t\v\f\r ]+ev[a]l([\t\v\f\r ]|$)`,
+  String.raw`${B}python[0-9.]*(\.exe)?${OPTS}-[a-z]*c([\t\v\f\r ]|$)`,
+  String.raw`${B}(perl|ruby)[0-9.]*(\.exe)?${OPTS}-[a-z]*e([\t\v\f\r ]|$)`,
+  String.raw`${B}php[0-9.]*(\.exe)?${OPTS}-r([\t\v\f\r ]|$)|${B}(osascript|lua[0-9.]*)${OPTS}-e([\t\v\f\r ]|$)`,
+  String.raw`${B}(pwsh|powershell)(\.exe)?([\t\v\f\r ]+[^\t\n\v\f\r ]+)*[\t\v\f\r ]+[-/](c|command|e|ec|enc|encodedcommand)([\t\v\f\r ]|$)`,
+  String.raw`${B}cmd(\.exe)?[\t\v\f\r ]+/[ck]([\t\v\f\r ]|$)`,
 ].join('|'), 'i');
-const MED_CMD = /(^|[\s"/])(npx|uvx|bunx|pnpm dlx)([\s"]|$)/;
+const MED_CMD = /(^|[\t\v\f\r "/])(npx|uvx|bunx|pnpm dlx)([\t\v\f\r "]|$)/;
 
 type Server = { name: string; command: string; args: string[]; path: (string | number)[] };
 function collectServers(obj: unknown, out: Server[], name = '', path: (string | number)[] = []): void {
@@ -40,8 +40,6 @@ function collectServers(obj: unknown, out: Server[], name = '', path: (string | 
   for (const [k, v] of Object.entries(o)) if (v && typeof v === 'object') collectServers(v, out, k, [...path, k]);
 }
 
-/** Like jq, a leading BOM is accepted as strict JSON (keeps the locators format consistent with the CLI) */
-const stripBom = (t: string) => (t.charCodeAt(0) === 0xfeff ? t.slice(1) : t);
 
 function riskOf(s: { command: string; args: string[] }): 'high' | 'medium' | 'none' {
   const line = `${s.command} ${s.args.join(' ')}`;
@@ -52,7 +50,7 @@ function riskOf(s: { command: string; args: string[] }): 'high' | 'medium' | 'no
 function runOnLocators(text: string): LocatorSpec[] {
   let fmt: 'json' | 'jsonc' = 'json';
   let j: unknown;
-  try { j = JSON.parse(stripBom(text)); } catch { fmt = 'jsonc'; try { j = parseJsonc(text); } catch { return []; } }
+  try { j = JSON.parse(text); } catch { fmt = 'jsonc'; try { j = parseJsonc(text); } catch { return []; } }
   const tasks = j && typeof j === 'object' && !Array.isArray(j) ? (j as Record<string, unknown>)['tasks'] : undefined;
   if (!Array.isArray(tasks)) return [];
   const out: LocatorSpec[] = [];
@@ -67,7 +65,7 @@ function runOnLocators(text: string): LocatorSpec[] {
 export function hookLocators(text: string, pred: (cmd: string) => boolean): LocatorSpec[] {
   let fmt: 'json' | 'jsonc' = 'json';
   let j: unknown;
-  try { j = JSON.parse(stripBom(text)); } catch { fmt = 'jsonc'; try { j = parseJsonc(text); } catch { return []; } }
+  try { j = JSON.parse(text); } catch { fmt = 'jsonc'; try { j = parseJsonc(text); } catch { return []; } }
   const hooks = j && typeof j === 'object' && !Array.isArray(j) ? (j as Record<string, unknown>)['hooks'] : undefined;
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return [];
   const cmds = (v: unknown, acc: string[] = []): string[] => {
@@ -101,7 +99,7 @@ export function mcpRules(ctx: RuleCtx): void {
       for (const p of r.problems) ctx.errors.push({ module: '§17', reason: `codex_toml_unparsed:${p}:${f.relPath}` });
     } else {
       // VS Code etc. allow comments and trailing commas, so read as JSONC
-      try { JSON.parse(stripBom(f.text)); } catch { fmt = 'jsonc'; }
+      try { JSON.parse(f.text); } catch { fmt = 'jsonc'; }
       try { collectServers(parseJsonc(f.text), servers); } catch { parseError = true; }
     }
     if (parseError) {
@@ -146,16 +144,16 @@ export function mcpRules(ctx: RuleCtx): void {
     }
   }
   for (const f of readable(ctx).filter((x) => /(^|\/)\.(vscode|claude|cursor)\/tasks\.json$/.test(x.relPath))) {
-    if (/"runOn"\s*:\s*"folderOpen"/.test(f.text)) {
+    if (/"runOn"[\t\v\f\r ]*:[\t\v\f\r ]*"folderOpen"/.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§7', campaign: 'mcp-poisoning', path: f.relPath, code: 's7.folder_open', ruleId: 's7-folderopen', evidenceSha: f.sha256, locators: runOnLocators(f.text) });
     }
   }
-  const mcpSrc = readable(ctx).filter((x) => /\.(json|js|mjs|cjs|ts|py)$/.test(x.name) && /(inputSchema|mcpServers|@modelcontextprotocol|FastMCP|mcp\.server|"tools"\s*:)/.test(x.text));
+  const mcpSrc = readable(ctx).filter((x) => /\.(json|js|mjs|cjs|ts|py)$/.test(x.name) && /(inputSchema|mcpServers|@modelcontextprotocol|FastMCP|mcp\.server|"tools"[\t\v\f\r ]*:)/.test(x.text));
   for (const f of mcpSrc) {
     if (/(ignore (all |any )?(the )?previous instructions|do not tell the user|don't tell the user|without (telling|informing) the user)/i.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§20', campaign: 'mcp-poisoning', path: f.relPath, code: 's20.prompt_injection', ruleId: 's20-injection', evidenceSha: f.sha256 });
     }
-    if (/(callCount|invocations?|callCounter|numCalls|count)\s*(>|>=)\s*[0-9]+/.test(f.text)) {
+    if (/(callCount|invocations?|callCounter|numCalls|count)[\t\v\f\r ]*(>|>=)[\t\v\f\r ]*[0-9]+/.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§20', campaign: 'mcp-poisoning', path: f.relPath, code: 's20.deadbugz', ruleId: 's20-runtime-gate', evidenceSha: f.sha256 });
     }
   }

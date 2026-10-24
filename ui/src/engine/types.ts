@@ -19,6 +19,8 @@ export interface FileInput {
   size: number;
   lastModified: number;
   /** Contents read as UTF-8. null when over the size limit, binary or unreadable */
+  /** The decoded text, as fileReader.ts gives it: TextDecoder('utf-8') has removed one leading BOM and turned invalid UTF-8
+   *  into U+FFFD. The rules remove no further BOM (the CLI ignores exactly one leading BOM per file as well). */
   text: string | null;
   /** SHA-256 of the content (hex without "sha256:"). null if it could not be read */
   sha256: string | null;

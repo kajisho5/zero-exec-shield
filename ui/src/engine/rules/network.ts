@@ -28,7 +28,7 @@ export function networkIocs(ioc: IocDb): NetIoc[] {
 
 /** The last n commands of a shell history. zsh extended history (": <start time>:<elapsed seconds>;<command>") merges multi-line entries into one and strips the prefix. */
 export function lastHistoryEntries(text: string, n: number): string[] {
-  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+  const lines = text.split(/\r?\n/);
   while (lines.length && lines[lines.length - 1] === '') lines.pop();
   const ext = /^: \d+:\d+;/;
   const zsh = lines.some((x) => ext.test(x));
@@ -62,7 +62,7 @@ export function networkRules(ctx: RuleCtx): void {
   ctx.checks.add('s18-netioc').add('s18-history-curlsh');
   // CLI check_s18: execution in curl|sh form among the last 5 shell history entries
   for (const f of readable(ctx).filter((x) => HISTORY.test(x.relPath))) {
-    if (lastHistoryEntries(f.text, 5).some((e) => /(curl|wget)[^|]*\|\s*(ba|z)?sh/.test(e))) {
+    if (lastHistoryEntries(f.text, 5).some((e) => /(curl|wget)[^|]*\|[\t\v\f\r ]*(ba|z)?sh/.test(e))) {
       push(ctx, { level: 'HIGH', module: '§18', campaign: null, path: f.relPath, code: 's18.history_curl_sh', ruleId: 's18-history-curlsh', evidenceSha: f.sha256 });
     }
   }
@@ -71,7 +71,7 @@ export function networkRules(ctx: RuleCtx): void {
   ctx.checks.add('s34-hosts');
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   for (const f of readable(ctx).filter((x) => x.name === 'hosts')) {
-    const body = f.text.split(/\r?\n/).filter((l) => !/^\s*#/.test(l)).join('\n');
+    const body = f.text.split(/\r?\n/).filter((l) => !/^[\t\v\f\r ]*#/.test(l)).join('\n');
     for (const h of ctx.ioc.protected_hosts ?? []) {
       if (new RegExp(`[ \\t]${esc(h)}([ \\t]|$)`, 'im').test(body)) push(ctx, { level: 'HIGH', module: '§34', campaign: null, path: f.relPath, code: 's34.hosts_override', params: { host: h }, ruleId: `s34-hosts:${h}`, evidenceSha: f.sha256 });
     }
@@ -97,10 +97,10 @@ export function networkRules(ctx: RuleCtx): void {
 
 /** Rule definitions for paste evaluation. Only rules and counts are displayed (the pasted content is never redisplayed). */
 export const PASTE_RULES: { id: string; code: FCode; re: RegExp }[] = [
-  { id: 'paste-base64', code: 'paste.base64', re: /[A-Za-z0-9+/]{40,}={0,2}|base64\s+(-d|--decode)/g },
-  { id: 'paste-exec', code: 'paste.exec', re: /\b(exec|eval)\s*\(/g },
+  { id: 'paste-base64', code: 'paste.base64', re: /[A-Za-z0-9+/]{40,}={0,2}|base64[\t\v\f\r ]+(-d|--decode)/g },
+  { id: 'paste-exec', code: 'paste.exec', re: /\b(exec|eval)[\t\v\f\r ]*\(/g },
   { id: 'paste-curl', code: 'paste.curl', re: /\b(curl|wget)\b/g },
-  { id: 'paste-pipe-shell', code: 'paste.pipe_shell', re: /\|\s*(ba|z)?sh\b/g },
+  { id: 'paste-pipe-shell', code: 'paste.pipe_shell', re: /\|[\t\v\f\r ]*(ba|z)?sh\b/g },
 ];
 
 export interface PasteHit { ruleId: string; code: FCode; params: Record<string, string | number>; level: 'CRITICAL' | 'HIGH' | 'MEDIUM'; campaign: string | null }

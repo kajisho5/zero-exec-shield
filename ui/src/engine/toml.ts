@@ -24,7 +24,7 @@ export const TOML_MAX_DEPTH = 80;
 
 function tokenize(src: string, recs: Rec[]): void {
   // Equivalent of text_lines: drop a leading BOM and the CR at the end of each line
-  const S = src.replace(/^﻿/, '').replace(/\r(?=\n|$)/g, '');
+  const S = src.replace(/\r(?=\n|$)/g, '');
   const n = S.length;
   let i = 0;
   let line = 1;

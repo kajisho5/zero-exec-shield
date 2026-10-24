@@ -2,9 +2,11 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeFiles } from '../../src/engine';
 import type { FileInput } from '../../src/engine/types';
+import { browserText } from './fixtures';
 
 const BOM = '﻿';
-const file = (relPath: string, text: string): FileInput => ({ relPath, name: relPath.split('/').pop()!, size: text.length, lastModified: 0, text, sha256: null, readState: 'read' });
+// The text goes through the browser's decoding (TextDecoder drops the leading BOM, as fileReader.ts does in the browser)
+const file = (relPath: string, text: string): FileInput => ({ relPath, name: relPath.split('/').pop()!, size: text.length, lastModified: 0, text: browserText(text), sha256: null, readState: 'read' });
 const keys = async (fs: FileInput[]) => (await analyzeFiles(fs)).findings.map((f) => `${f.level} ${f.module} ${f.path ?? ''}`).sort();
 
 describe('ロックファイル（CLI build_deps と同じ対象）', () => {
