@@ -86,7 +86,7 @@ export function hookLocators(text: string, pred: (cmd: string) => boolean): Loca
 }
 
 export function mcpRules(ctx: RuleCtx): void {
-  ctx.checks.add('s17-mcp-command').add('s17-symjack').add('s17-setup-mjs').add('s7-folderopen').add('s20-injection').add('s20-runtime-gate').add('s37-host-docker');
+  ctx.checks.add('s17-mcp-command').add('s17-agent-hook').add('s17-symjack').add('s17-setup-mjs').add('s7-folderopen').add('s20-injection').add('s20-runtime-gate').add('s37-host-docker');
   for (const f of readable(ctx).filter((x) => MCP_CONFIG.test(x.relPath))) {
     let servers: Server[] = [];
     let parseError = false;
@@ -127,6 +127,18 @@ export function mcpRules(ctx: RuleCtx): void {
     if (/64:ff9b(:1)?::/.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§37', campaign: 'mcp-poisoning', path: f.relPath, code: 's37.nat64', ruleId: 's37-nat64', evidenceSha: f.sha256 });
     }
+  }
+  // Agent hooks (the CLI's check_s17): a .claude / .cursor / .gemini settings or hooks file with "hooks" and a command with
+  //   network access or obfuscation preselects; when it parses as JSON / JSONC, a hook entry /hooks/<Event>/<i> whose
+  //   command matches is required (a curl in mcpServers is not a hook); when it does not parse, the preselection decides
+  const HOOK_RE = /(curl|wget|base64|nc |\/dev\/tcp)/;
+  for (const f of readable(ctx).filter((x) => /(^|\/)\.(claude|cursor|gemini)\/(settings(\.local)?|hooks)\.json$/.test(x.relPath))) {
+    if (!/"hooks"[\t\v\f\r ]*:/.test(f.text) || !/"command"[\t\v\f\r ]*:[\t\v\f\r ]*"[^"\n]*(curl|wget|base64|nc |\/dev\/tcp)/.test(f.text)) continue;
+    const locators = hookLocators(f.text, (c) => HOOK_RE.test(c));
+    let parses = true;
+    try { JSON.parse(f.text); } catch { try { parseJsonc(f.text); } catch { parses = false; } }
+    if (parses && !locators.length) continue;
+    push(ctx, { level: 'HIGH', module: '§17', campaign: 'mcp-poisoning', path: f.relPath, code: 's17.agent_hook', ruleId: 's17-agent-hook', evidenceSha: f.sha256, locators });
   }
   // SymJack: the browser cannot fetch the link target, so a decoy name with 0 bytes is "needs manual review" (§8.3)
   const decoys = ctx.ioc.mcp_poisoning.symjack.decoy_name_patterns;

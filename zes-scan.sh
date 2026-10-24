@@ -3034,12 +3034,16 @@ check_s17() {
       high "mcp-poisoning" "$l" s17.symjack_decoy target="$t"
     fi
   done <"$LINKS_LIST"
-  # Agent hooks (network access/obfuscation in the hooks of .claude/settings.json)
+  # Agent hooks (network access/obfuscation in the hooks of .claude/settings.json). The file-wide grep only preselects:
+  #   when the file can be read as JSON / JSONC, the finding needs a hook entry (/hooks/<Event>/<i>) whose command matches,
+  #   so a curl in mcpServers is not an agent hook. Without jq, or when the file cannot be parsed, the grep decides (fail-closed)
+  local hl
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     if fgrep_q '"hooks"[[:space:]]*:' "$f" && fgrep_q '"command"[[:space:]]*:[[:space:]]*"[^"]*(curl|wget|base64|nc |/dev/tcp)' "$f"; then
-      high "mcp-poisoning" "$f" s17.agent_hook \
-        --x="$(x_locators "$(json_ptr_locators "$f" "$HOOK_PATHS_RE" --arg re '(curl|wget|base64|nc |/dev/tcp)')")"
+      hl="$(json_ptr_locators "$f" "$HOOK_PATHS_RE" --arg re '(curl|wget|base64|nc |/dev/tcp)')"
+      if [ -z "$hl" ] && [ "$HAVE_JQ" -eq 1 ] && { jq empty "$f" >/dev/null 2>&1 || jsonc_to_json "$f" | jq empty >/dev/null 2>&1; }; then continue; fi
+      high "mcp-poisoning" "$f" s17.agent_hook --x="$(x_locators "$hl")"
     fi
   done < <(files_path '/\.(claude|cursor|gemini)/(settings(\.local)?|hooks)\.json$')
   # References to .claude/.vscode/.cursor in setup.mjs
