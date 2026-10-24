@@ -1,0 +1,42 @@
+[
+  {
+    "campaign": "macsync-icloud-calendar-finder-backdoor",
+    "code": "intel.launchd",
+    "level": "CRITICAL",
+    "module": "§30",
+    "params": {
+      "label": "com.apple.finder.agent"
+    },
+    "path": "LaunchDaemons/intel.plist"
+  },
+  {
+    "campaign": "pamstealer-wavel-wallet",
+    "code": "intel.launchd",
+    "level": "CRITICAL",
+    "module": "§30",
+    "params": {
+      "label": "com.apple.finder.agent"
+    },
+    "path": "LaunchDaemons/intel.plist"
+  },
+  {
+    "campaign": null,
+    "code": "s30.random_label",
+    "level": "HIGH",
+    "module": "§30",
+    "params": {
+      "label": "nodot"
+    },
+    "path": "LaunchAgents/blank.plist"
+  },
+  {
+    "campaign": null,
+    "code": "s30.random_label",
+    "level": "HIGH",
+    "module": "§30",
+    "params": {
+      "label": "x\ny"
+    },
+    "path": "LaunchAgents/split.plist"
+  }
+]

@@ -1,0 +1,52 @@
+[
+  {
+    "campaign": null,
+    "code": "s27.build_backend",
+    "level": "MEDIUM",
+    "module": "§27",
+    "params": {
+      "backend": "evil.backend"
+    },
+    "path": "bare/pyproject.toml"
+  },
+  {
+    "campaign": null,
+    "code": "s27.build_backend",
+    "level": "MEDIUM",
+    "module": "§27",
+    "params": {
+      "backend": "evil.hash"
+    },
+    "path": "hash/pyproject.toml"
+  },
+  {
+    "campaign": null,
+    "code": "s27.build_backend",
+    "level": "MEDIUM",
+    "module": "§27",
+    "params": {
+      "backend": "evil.quoted"
+    },
+    "path": "quoted/pyproject.toml"
+  },
+  {
+    "campaign": null,
+    "code": "s27.build_backend",
+    "level": "MEDIUM",
+    "module": "§27",
+    "params": {
+      "backend": "evil.single"
+    },
+    "path": "single/pyproject.toml"
+  },
+  {
+    "campaign": null,
+    "code": "s27.build_backend",
+    "level": "MEDIUM",
+    "module": "§27",
+    "params": {
+      "backend": "evil.triple"
+    },
+    "path": "triple/pyproject.toml"
+  }
+]

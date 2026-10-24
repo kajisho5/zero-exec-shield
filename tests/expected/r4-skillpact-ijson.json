@@ -1,0 +1,81 @@
+{
+  "findings": [
+    {
+      "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skills/a/skill.contract.json",
+      "related": [
+        {
+          "path": "skills/a",
+          "relation": "skill_dir"
+        }
+      ]
+    },
+    {
+      "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skills/b/skill.contract.json",
+      "related": [
+        {
+          "path": "skills/b",
+          "relation": "skill_dir"
+        }
+      ]
+    },
+    {
+      "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skills/c/skill.contract.json",
+      "related": [
+        {
+          "path": "skills/c",
+          "relation": "skill_dir"
+        }
+      ]
+    },
+    {
+      "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skills/d/skill.contract.json",
+      "related": [
+        {
+          "path": "skills/d",
+          "relation": "skill_dir"
+        }
+      ]
+    },
+    {
+      "campaign": "skillpact-invalid",
+      "evidence": {
+        "kind": "file"
+      },
+      "level": "MEDIUM",
+      "module": "§49",
+      "path": "skills/e/skill.contract.json",
+      "related": [
+        {
+          "path": "skills/e",
+          "relation": "skill_dir"
+        }
+      ]
+    }
+  ],
+  "home": "_home",
+  "mode": "full"
+}

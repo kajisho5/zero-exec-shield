@@ -1,0 +1,52 @@
+[
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.contract_unparseable",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "problem": "not valid JSON (or lone surrogate)"
+    },
+    "path": "skills/a/skill.contract.json"
+  },
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.contract_unparseable",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "problem": "duplicate member name"
+    },
+    "path": "skills/b/skill.contract.json"
+  },
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.contract_unparseable",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "problem": "number outside ±(2^53-1)"
+    },
+    "path": "skills/c/skill.contract.json"
+  },
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.contract_unparseable",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "problem": "number outside ±(2^53-1)"
+    },
+    "path": "skills/d/skill.contract.json"
+  },
+  {
+    "campaign": "skillpact-invalid",
+    "code": "s49.contract_unparseable",
+    "level": "MEDIUM",
+    "module": "§49",
+    "params": {
+      "problem": "not valid JSON (or lone surrogate)"
+    },
+    "path": "skills/e/skill.contract.json"
+  }
+]

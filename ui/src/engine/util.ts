@@ -63,6 +63,19 @@ export function versionMatches(v: string, spec: string): boolean {
   });
 }
 
+/** The value at the start of text (what follows "key =" on its line): a """...""", '''...''', "..." or '...' string without
+ *  its quotes (empty when the closing quotes are not on the line), otherwise the bare word up to a blank, "#", a quote or
+ *  CR (the CLI's toml_value_head). */
+export function tomlValueHead(text: string): string {
+  const v = text.replace(/^[ \t]+/, '');
+  const q = v.startsWith('"""') || v.startsWith("'''") ? v.slice(0, 3) : v[0] === '"' || v[0] === "'" ? v[0] : '';
+  if (q) {
+    const end = v.indexOf(q, q.length);
+    return end < 0 ? '' : v.slice(q.length, end);
+  }
+  return /^[^ \t\r#"']*/.exec(v)![0];
+}
+
 /** Length limit of config values allowed for display (§13-4). */
 export function clip(s: string, max = 120): string {
   return s.length > max ? s.slice(0, max - 1) + '…' : s;

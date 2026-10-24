@@ -1,7 +1,7 @@
 // §10 / §26 / §27 / §28 / §30 / §31 / §32 / §33 / §35 / §36 / §40 / §43 / §48
 // The browser can evaluate only up to "the content of the loaded files". Host state is referred to the CLI with CliOnlyNotice.
 import { HOME_RC_FILES, homeLike, named, push, readable, rootRel, type RuleCtx } from '../context';
-import { extname, textLocators } from '../util';
+import { extname, textLocators, tomlValueHead } from '../util';
 import { collectDeps } from './supplyChain';
 
 const RC = /(^|\/)(\.bashrc|\.bash_profile|\.profile|\.zshrc|\.zprofile|\.zshenv|\.zlogin|\.bash_login)$/;
@@ -18,7 +18,9 @@ export function buildHookRules(ctx: RuleCtx): void {
     } else if (f.name.endsWith('.go') && /^\/\/go:generate\s+(curl|wget|bash|sh\s+-c)/m.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§27', campaign: null, path: f.relPath, code: 's27.go_generate', ruleId: 's27-gogenerate', evidenceSha: f.sha256 });
     } else if (f.name === 'pyproject.toml') {
-      const be = /^\s*build-backend\s*=\s*["']([^"']+)["']/m.exec(f.text)?.[1];
+      // the first build-backend line, value parsed like the CLI (quoted or bare; never the raw line)
+      const line = f.text.split('\n').find((l) => /^[ \t]*build-backend[ \t]*=/.test(l));
+      const be = line === undefined ? '' : tomlValueHead(line.slice(line.indexOf('=') + 1));
       if (be && !safe.includes(be)) push(ctx, { level: 'MEDIUM', module: '§27', campaign: null, path: f.relPath, code: 's27.build_backend', params: { backend: be }, ruleId: 's27-backend', evidenceSha: f.sha256 });
       if (/^\s*backend-path\s*=/m.test(f.text)) push(ctx, { level: 'HIGH', module: '§27', campaign: null, path: f.relPath, code: 's27.backend_path', ruleId: 's27-backend-path', evidenceSha: f.sha256 });
     } else if (f.name === 'setup.py' && /cmdclass/.test(f.text)) {
@@ -32,7 +34,8 @@ export function modelSupplyRules(ctx: RuleCtx): void {
   ctx.checks.add('s32-pickle-ext').add('s32-weights-only').add('s32-extra-index').add('s36-trust-remote').add('s36-dataset-exec').add('s36-pickle-load').add('s36-lerobot');
   for (const f of ctx.files) {
     const e = extname(f.name);
-    if (f.relPath.includes('node_modules/')) continue;
+    // path segments, as the CLI's */node_modules/* and */.git/* (x_node_modules/ is not skipped); extname is lower case
+    if (/(^|\/)(node_modules|\.git)\//.test(f.relPath)) continue;
     if (['pkl', 'pickle', 'pt'].includes(e) || (e === 'bin' && /\/(models?|checkpoints?|weights)\/|pytorch_model[^/]*\.bin$/.test('/' + f.relPath))) {
       push(ctx, { level: 'MEDIUM', module: '§32', campaign: 'hf-supply-chain', path: f.relPath, code: 's32.pickle_model', params: { format: f.name.slice(f.name.lastIndexOf('.') + 1) }, ruleId: 's32-pickle-ext', evidenceSha: f.sha256 });
     }
@@ -81,7 +84,7 @@ export function persistenceRules(ctx: RuleCtx): void {
       push(ctx, { level: 'HIGH', module: '§26', campaign: null, path: p, code: 's26.envrc_remote', ruleId: 's26-envrc', evidenceSha: f.sha256, locators: textLocators(f.text, /(curl|wget)[^|#]*\|\s*(ba|z)?sh|eval\s+\"?\$\((curl|wget)/) });
     }
     if (/(^|\/)LaunchAgents\/[^/]+\.plist$|(^|\/)LaunchDaemons\/[^/]+\.plist$/.test(p)) {
-      const label = /<key>Label<\/key>\s*<string>([^<]*)<\/string>/.exec(f.text)?.[1];
+      const label = plistLabel(f.text);
       if (label && !label.includes('.')) push(ctx, { level: 'HIGH', module: '§30', campaign: null, path: p, code: 's30.random_label', params: { label }, ruleId: 's30-launchagent:label', evidenceSha: f.sha256 });
       if (/<string>(\/tmp\/|\/private\/tmp\/|\/Users\/Shared\/|\/var\/tmp\/)|<string>[^<]*\/\.[^/<]+\/[^<]*<\/string>/.test(f.text)) push(ctx, { level: 'HIGH', module: '§30', campaign: null, path: p, code: 's30.tmp_program', ruleId: 's30-launchagent:path', evidenceSha: f.sha256 });
     }
@@ -208,7 +211,13 @@ export function containerRules(ctx: RuleCtx): void {
   }
 }
 
-const DOCKERFILE = /^(Dockerfile.*|.*\.dockerfile)$/;
+export const DOCKERFILE = /^(Dockerfile.*|.*\.dockerfile)$/;
+
+/** The <string> right after <key>Label</key> of a launchd plist, with any XML whitespace (blank lines, line breaks)
+ *  between them and line breaks inside the value kept (the CLI's plist_label). */
+export function plistLabel(text: string): string | undefined {
+  return /<key>Label<\/key>[ \t\r\n]*<string>([^<]*)<\/string>/.exec(text)?.[1];
+}
 
 /** The 2nd field of FROM lines in a Dockerfile (same as grep -i '^FROM' | awk '{print $2}' in the CLI; empty fields are excluded). */
 function fromImages(text: string): string[] {

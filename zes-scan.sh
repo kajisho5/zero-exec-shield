@@ -2421,7 +2421,8 @@ check_s8() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     fgrep_q -i '^[[:space:]]*USER[[:space:]]+(root|0)([[:space:]]|$)' "$f" && medium "" "$f" s8.user_root
-    grep -E -i '^[[:space:]]*FROM[[:space:]]+' "$f" 2>/dev/null | awk '{print $2}' | while IFS= read -r img; do
+    # sub(): a CRLF Dockerfile must not leave "\r" in the image (it hid ":latest" and went into params)
+    grep -E -i '^[[:space:]]*FROM[[:space:]]+' "$f" 2>/dev/null | awk '{ sub(/\r$/, ""); print $2 }' | while IFS= read -r img; do
       case "$img" in scratch|'$'*|*@sha256:*) continue ;; esac
       if [[ "$img" == *:latest ]] || [[ "${img##*/}" != *:* ]]; then medium "" "$f" s8.floating_image image="$img"; fi
     done
@@ -3339,6 +3340,20 @@ check_s26() {
   return 0
 }
 
+# toml_value_head TEXT → TOML_VALUE: the value at the start of TEXT (what follows "key =" on its line): a """...""",
+#   '''...''', "..." or '...' string without its quotes (empty when the closing quotes are not on the line), otherwise the bare
+#   word up to a blank, "#", a quote or CR. Same rule as tomlValueHead of the browser engine
+toml_value_head() {
+  local v="$1" q
+  v="${v#"${v%%[!$' \t']*}"}"
+  TOML_VALUE=""
+  case "$v" in
+    \"\"\"*|\'\'\'*) q="${v:0:3}"; v="${v:3}"; [[ "$v" == *"$q"* ]] && TOML_VALUE="${v%%"$q"*}" ;;
+    \"*|\'*) q="${v:0:1}"; v="${v:1}"; [[ "$v" == *"$q"* ]] && TOML_VALUE="${v%%"$q"*}" ;;
+    *) TOML_VALUE="${v%%[$' \t\r#"\'']*}" ;;
+  esac
+}
+
 # §27 Build hooks (build.rs / go:generate / build-backend / cmdclass)
 check_s27() {
   log_section "§27"
@@ -3360,7 +3375,8 @@ check_s27() {
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     local be
-    be="$(grep -E '^[[:space:]]*build-backend[[:space:]]*=' "$f" 2>/dev/null | head -n1 | sed -E 's/.*=[[:space:]]*["'"'"']([^"'"'"']+)["'"'"'].*/\1/')"
+    be="$(grep -a -E '^[[:blank:]]*build-backend[[:blank:]]*=' "$f" 2>/dev/null | head -n1)"
+    toml_value_head "${be#*=}"; be="$TOML_VALUE"
     [ -n "$be" ] || continue
     printf '%s\n' "${safeb[@]}" | grep_q -x -F -- "$be" || medium "" "$f" s27.build_backend backend="$be"
     fgrep_q '^[[:space:]]*backend-path[[:space:]]*=' "$f" && high "" "$f" s27.backend_path
@@ -3422,7 +3438,15 @@ check_s29() {
 }
 
 # §30 macOS persistence
-plist_label() { grep -A1 -E '<key>Label</key>' "$1" 2>/dev/null | grep -o -E '<string>[^<]*</string>' | head -n1 | sed -E 's#</?string>##g'; }
+# plist_label FILE … the <string> right after <key>Label</key>, with any XML whitespace (blank lines, line breaks) between
+#   them and line breaks inside the value kept, like a plist parser (the browser engine uses the same rule)
+plist_label() {
+  local v
+  v="$(awk '{ s = s $0 "\n" } END {
+      if (match(s, /<key>Label<\/key>[ \t\r\n]*<string>[^<]*<\/string>/)) {
+        m = substr(s, RSTART, RLENGTH); sub(/^<key>Label<\/key>[ \t\r\n]*<string>/, "", m); sub(/<\/string>$/, "", m); printf "%s", m } }' "$1" 2>/dev/null; printf x)"
+  printf '%s' "${v%x}"
+}
 check_s30() {
   log_section "§30"
   local f lb
@@ -3498,7 +3522,8 @@ check_s32() {
     [ -n "$f" ] || continue
     case "$f" in */node_modules/*|*/.git/*) continue ;; esac
     medium "hf-supply-chain" "$f" s32.pickle_model format="${f##*.}"
-  done < <(files_named '\.(pkl|pickle|pt|pth)$' | grep -v -E '\.pth$' ; files_named '\.bin$' | grep -E '/(models?|checkpoints?|weights)/|pytorch_model[^/]*\.bin$')
+  done < <(awk '{ n = $0; sub(/.*\//, "", n); n = tolower(n)
+                  if (n ~ /\.(pkl|pickle|pt)$/ || (n ~ /\.bin$/ && $0 ~ /\/(models?|checkpoints?|weights)\/|pytorch_model[^\/]*\.bin$/)) print }' "$FILES_LIST")
   files_path '\.(py|ipynb)$' | grep_l 'weights_only[[:space:]]*=[[:space:]]*False' | while IFS= read -r f; do
     [ -n "$f" ] && high "hf-supply-chain" "$f" s32.torch_load
   done
