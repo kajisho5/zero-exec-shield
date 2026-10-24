@@ -1,4 +1,4 @@
-// E2E for the 0.5.2 / round-5 UI fixes on file://: Git pointers that leave the dropped folder get a visible CLI-only note
+// E2E for the 0.5.3 (round-5) UI fixes on file://: Git pointers that leave the dropped folder get a visible CLI-only note
 // (UI 1), and a hook the browser cannot read is HIGH and counted as not scanned (UI 3). The folder is built at run time
 // and has a visible file next to the .git entries. WebKit leaves hidden entries (.git) out of a folder given to
 // setInputFiles, so the test does not run there; isMobile / hasTouch are not used.

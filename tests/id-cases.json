@@ -1,5 +1,5 @@
 {
-  "description": "id v2 vectors (findings 1.2): sha256 of \"zes-id-v2|\" module \"|\" campaign \"|\" path \"|\" code \"|\" canon, each component and param value escaped on its original bytes (\\\\ -> \\\\\\\\, | -> \\\\|, U+001F -> \\\\u001f, since 0.5.2 a byte that is not valid UTF-8 -> \\\\xHH), canon = key=value in C-locale key order joined by U+001F. Cases with path_hex / params_hex give the bytes in hex (cli_only: they cannot occur in the browser). Checked by tests/run-tests.sh and ui/tests/unit/r4.test.ts.",
+  "description": "id v2 vectors (findings 1.2): sha256 of \"zes-id-v2|\" module \"|\" campaign \"|\" path \"|\" code \"|\" canon, each component and param value escaped on its original bytes (\\\\ -> \\\\\\\\, | -> \\\\|, U+001F -> \\\\u001f, since 0.5.3 a byte that is not valid UTF-8 -> \\\\xHH), canon = key=value in C-locale key order joined by U+001F. Cases with path_hex / params_hex give the bytes in hex (cli_only: they cannot occur in the browser). Checked by tests/run-tests.sh and ui/tests/unit/r4.test.ts.",
   "cases": [
     {
       "name": "plain",

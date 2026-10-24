@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.5.3 — 2026-10-24
+
+Fixes from the fifth bug hunt. Adversarial files can no longer stall or crash the CLI's readers, the §49 contract check accepts exactly RFC 8259 JSON on both sides, the browser now reads the Git files the CLI reads, and the CLI and the UI agree on whitespace, the BOM, NUL, Dockerfile `FROM` lines, `pyproject.toml`, launchd plists, hidden characters and directory skips. The findings.json format stays 1.2.
+
+**Ids change only for findings whose path, campaign or a param value contains bytes that are not valid UTF-8** (see the id preimage below).
+
+### CLI
+
+- The YAML, TOML and JSONC readers are linear: an unclosed flow sequence (`steps: [`) over many lines, a long block scalar, long runs of blanks, 1 MB TOML strings or 250 000 `args`, or JSONC with many comments took minutes to hours (a 230 KB workflow kept a `--standard` scan busy for over 10 minutes). Text is collected in pieces and joined once, the bracket depth is tracked incrementally, and the patterns mawk matches in quadratic time on long blank runs are loops. The output is unchanged.
+- `.codex/config.toml`: arrays and inline tables nested deeper than 80 (the limit of the TOML parser Codex CLI uses, toml 0.9 / `toml_parser` `RecursionGuard`) are `parse_error:nesting_too_deep` in `errors[]` (status partial). At about 140 levels mawk used to crash and every `[mcp_servers.*]` after the deep value was dropped without an error, which hid a HIGH `bash -c` server.
+- Every catalog text printed to the terminal (banner, section titles, the result line, the catalog and IoC error messages with their paths) is encoded like other untrusted text. The catalog check also requires the same placeholders in `en` and `ja`, and `ZES_CATALOG_KEYS_SHA256` now covers the placeholder names, so a catalog cannot drop the `{ref}` of a detail (exit 64).
+- A relative `ZES_I18N_DIR` / `ZES_IOC` gets a `./` prefix and the `--skillpact-cache` directory is used by its real path: `x=y` was read by awk as an assignment and the scan waited on stdin.
+- §17 `s17.agent_hook` needs a hook entry whose command matches when the file parses as JSON / JSONC; a `curl` in `mcpServers` of `.claude/settings.json` gave a HIGH agent hook with no locators.
+- §49: a contract without a string `skill.name` / `skill.version` gives `s49.partial_check_errors` (SCHEMA) like the UI instead of `s49.analysis_failed`.
+- Directory skips (`node_modules`, `.git`, `site-packages`, the installed-package detection, MCP sources) test the path inside the scan root: a scan root under `node_modules/` reported nothing for §2, §32 and §36.
+
+### Both sides (CLI and browser UI)
+
+- §49 accepts exactly one RFC 8259 JSON document, checked in one pass with the same rules on both sides (no jq: jq 1.7 accepts `NaN`, `Infinity`, `01`, `+1`, `.5`, `1.` and several documents, and a two-document contract passed with status ok and lost its HIGH divergence finding). Numbers are compared by their exact decimal value (`9007199254740991.4` and `1e400` are outside ±(2^53−1), `1e-400` is not), the UI no longer reads only 400 characters of a number literal, and invalid UTF-8 in member names is replaced like the WHATWG decoder before duplicates are compared. `tests/ijson-cases.json` holds 74 shared vectors.
+- id preimage: the escaping is applied to the original bytes and a byte that is not valid UTF-8 becomes `\xHH`, so it no longer shares an id with the text `\xHH` (in findings.json both still read `\xHH`). A repeated id is always recorded as `duplicate_finding_id`; the second of two distinct §22 findings in one file was dropped silently. `tests/id-cases.json` gains byte vectors.
+- Whitespace is POSIX `[[:space:]]` in the C locale (space, tab, VT, FF, CR); the UI's `\s` and `trim()` also matched NBSP, U+3000, U+2028 and U+FEFF. Case folding in the UI is ASCII only, as `tolower` / `grep -i` (the Kelvin sign made `a.p<K>l` a pickle file).
+- One leading UTF-8 BOM is ignored for every text check: the browser's TextDecoder drops it, so the CLI now reads a copy without it (a BOM before `FROM`, `build-backend` or a `.python-version` gave UI-only findings). A NUL in a value read into a shell variable becomes U+0001 instead of disappearing (`3.11<NUL>.1` was version 3.11.1 in the CLI only).
+- §8 / §28 Dockerfile `FROM`: flags such as `--platform=` are skipped, so `FROM --platform=… node:latest` is floating and `FROM --platform=… alpine@sha256:…` is pinned (the flag was taken as the image); a `FROM` line without an image gives nothing (no empty `image`). `USER root:<group>` and `USER 0:0` are root.
+- §27 reads `build-backend` and `backend-path` only from the `[build-system]` table (also `build-system.*` keys and `build-system = { … }`), never from inside a multi-line string (a decoy line in `description` hid the real backend), and reports `s27.backend_path` without a `build-backend`.
+- §30 / `intel.launchd` read launchd plists as an XML parser does: comments are removed, CDATA is text and character references are decoded (a commented-out `com.apple.decoy` label hid `s30.random_label`). The UI now reports `s30.program_arguments`, and the CLI reads plists under any `LaunchAgents` / `LaunchDaemons` directory.
+- §7 hidden characters: every Default_Ignorable_Code_Point (U+00AD, U+034F, the Hangul fillers, U+180B–180F, U+2060–206F, U+FE00–FE0F, U+1D173–1D17A, U+E0000–E0FFF …), one list (`tests/hidden-chars.json`) for the CLI's check, the UI's check and the UI's `⟨U+XXXX⟩` markers.
+- §32: a file named only `.pkl` / `.PT` is flagged on both sides.
+
+### Browser UI
+
+- Git: the UI reads the Git files the CLI reads when they are inside the dropped folder: `config.worktree`, `include.path` / `includeIf` targets, a submodule's `.git/modules/<name>/config` and hooks, `gitdir:` files and `commondir`. Pointers that leave the folder are recorded in `errors[]` and listed in a new note, "Git files outside the folder (CLI only)".
+- §41 `s41.instructions_and_hooks` (AI instruction files together with a Git hook or an agent hook config) is checked.
+- §17 `s17.agent_hook` is checked, with the CLI's rule above.
+- A Git hook the browser cannot read (over 2 MiB, read error) is HIGH `s7.git_hook_unread` instead of MEDIUM, and it counts as not scanned.
+- The U+200D exception of the markers needs real emoji (Emoji_Presentation, or a pictograph with U+FE0F): a ZWJ between `↔`, `©` or `®` is marked, and U+FE0E / U+FE0F are kept only after a character with an emoji form.
+
+### Tests
+
+- New fixtures pinned on both sides by `tests/expected-codes/`: `r5-dockerfile`, `r5-pyproject`, `r5-bom`, `r5-plist`, `r5-agent-hook`, `r5-hidden`, `r5-pickle`, `r5-skillpact`. The unit-test fixture loader decodes files like the browser (TextDecoder), so the parity layer sees what the browser sees.
+- `tests/run-tests.sh` (round 5): the readers on 1 MB adversarial inputs (timed), the TOML nesting limit, the shared I-JSON vectors, the catalog encoding and placeholder check, `x=y` / `-c` / `@f` paths with stdin open, the invalid-byte id pair, every hidden character, the Git tree and the `node_modules/` scan root of `ui/tests/unit/r5.test.ts`. `ui/tests/e2e/r5.spec.ts` checks the Git note and an unreadable hook.
+
+### 日本語
+
+5 回目のバグ探しの修正です。細工したファイルで CLI の読み取りが止まったり落ちたりしなくなり、§49 の契約は CLI と UI のどちらも RFC 8259 の JSON だけを受け付けます。ブラウザは CLI が読む Git のファイルを読み、空白・BOM・NUL・Dockerfile の `FROM`・`pyproject.toml`・launchd の plist・隠し文字・ディレクトリの除外で CLI と UI の結果が揃いました。findings.json の形式は 1.2 のままです。
+
+**id が変わるのは、path・campaign・param の値に UTF-8 として不正なバイトを含む finding だけです**（下の id の元の文字列）。
+
+- **CLI の読み取り**: YAML・TOML・JSONC の読み取りを線形時間にしました。閉じていない flow シーケンス（`steps: [`）が長く続く、長いブロックスカラー、長い空白の連続、1 MB の TOML 文字列や 25 万個の `args`、コメントの多い JSONC で数分〜数時間かかっていました（230 KB のワークフローで `--standard` が 10 分以上）。出力は変わりません
+- **`.codex/config.toml`**: 80 段（Codex CLI が使う TOML パーサ toml 0.9 / `toml_parser` の `RecursionGuard` の上限）を超える配列・インラインテーブルの入れ子は `errors[]` の `parse_error:nesting_too_deep`（status partial）にします。140 段ほどで mawk が落ち、後ろの `[mcp_servers.*]` がエラーなしに消えて HIGH の `bash -c` サーバーが見えなくなっていました
+- **カタログ**: 端末に出すカタログの文（バナー・見出し・結果行・パスを含むカタログ / IoC のエラー）をほかの信頼できない文字列と同じく符号化します。`en` と `ja` でプレースホルダが同じことも確かめ、`ZES_CATALOG_KEYS_SHA256` はプレースホルダ名も含めるので、detail の `{ref}` を消したカタログは exit 64 です
+- **パス**: 相対の `ZES_I18N_DIR` / `ZES_IOC` には `./` を付け、`--skillpact-cache` は実パスで使います（`x=y` を awk が代入と読み、標準入力を待っていた）
+- **§17**: `s17.agent_hook` は、JSON / JSONC として読めるファイルでは命令が一致するフックがあるときだけ報告します（`.claude/settings.json` の `mcpServers` の `curl` で、locators のない HIGH になっていた）。UI にも同じ検査を入れました
+- **§49**: 文字列の `skill.name` / `skill.version` のない契約は UI と同じく `s49.partial_check_errors`（SCHEMA）にします（`s49.analysis_failed` だった）。契約は両側で同じ規則の 1 回の走査で、RFC 8259 の JSON 1 つだけを受け付けます（jq 1.7 は `NaN`・`Infinity`・`01`・`+1`・`.5`・`1.`・複数の文書を通し、2 つの文書をつないだ契約が status ok で HIGH の乖離を失っていた）。数値は厳密な 10 進の値で比べ（`9007199254740991.4` と `1e400` は ±(2^53−1) の外、`1e-400` は内）、UI は数値の先頭 400 文字だけを見ることがなくなりました。共通のテストベクタ 74 件を `tests/ijson-cases.json` に置きました
+- **id の元の文字列**: エスケープは元のバイト列に対して行い、UTF-8 として不正なバイトは `\xHH` にします。文字列 `\xHH` と id が重ならなくなりました（findings.json ではどちらも従来どおり `\xHH`）。id の重複は必ず `duplicate_finding_id` として記録します（同じファイルの別の §22 が黙って消えていた）
+- **CLI と UI の差**: 空白は C ロケールの `[[:space:]]`（空白・タブ・VT・FF・CR）で、UI の大文字小文字の同一視は ASCII だけです。先頭の UTF-8 BOM は両側で 1 つだけ無視し（ブラウザの TextDecoder と同じ。CLI は BOM を除いた写しを読む）、シェル変数に読む値の NUL は消さずに U+0001 にします。§8 / §28 は `FROM` の `--platform=` などを飛ばし、ダイジェスト固定のイメージは固定とし、イメージのない `FROM` 行は報告せず、`USER root:<グループ>` / `USER 0:0` も root とします。§27 は `[build-system]` の表（と `build-system.*`、`build-system = { … }`）だけから読み、複数行文字列の中は読まず、`build-backend` がなくても `s27.backend_path` を報告します。§30 / `intel.launchd` は plist を XML として読みます（コメントを除き、CDATA は文字、文字参照は展開）。UI は `s30.program_arguments` を報告し、CLI はどの `LaunchAgents` / `LaunchDaemons` の下の plist も読みます。§7 の隠し文字は Default_Ignorable_Code_Point すべてで、CLI の検査・UI の検査・UI の `⟨U+XXXX⟩` が 1 つの一覧（`tests/hidden-chars.json`）を使います。§32 は名前が `.pkl` / `.PT` だけのファイルも報告します。CLI のディレクトリの除外（`node_modules` など）は検査ルートからの相対パスで判定します
+- **ブラウザ UI**: 読み込んだフォルダ内にある `config.worktree`、`include.path` / `includeIf` の参照先、サブモジュールの `.git/modules/<name>/config` とフック、`gitdir:` ファイルと `commondir` を CLI と同じく読みます。フォルダの外を指すものは `errors[]` に記録し、新しい注記「フォルダ外の Git ファイル（CLI のみ）」に並べます。§41 `s41.instructions_and_hooks` を検査します。読めない Git フック（2 MiB 超・読み取りエラー）は MEDIUM ではなく HIGH の `s7.git_hook_unread` にし、未検査として数えます。目印の U+200D の例外は本当の絵文字どうしのときだけです（`↔`・`©`・`®` の間の ZWJ は目印にする）
+- **テスト**: CLI と UI の両方を `tests/expected-codes/` で固定するフィクスチャ `r5-dockerfile`・`r5-pyproject`・`r5-bom`・`r5-plist`・`r5-agent-hook`・`r5-hidden`・`r5-pickle`・`r5-skillpact` を追加し、単体テストのフィクスチャはブラウザと同じく TextDecoder で読みます。`tests/run-tests.sh` に round 5 の確認（1 MB の敵対的な入力の時間、TOML の入れ子、I-JSON のベクタ、カタログの符号化とプレースホルダ、`x=y` などのパス、不正バイトの id、隠し文字、Git の木と `node_modules/` の下の検査ルート）を、UI に `ui/tests/unit/r5.test.ts` と `ui/tests/e2e/r5.spec.ts` を追加しました
+
 ## 0.5.2 — 2026-10-24
 
 Intelligence update for CVE-2026-111497 ("Node2Shell", renamed "HTTP2Shell" by Aikido on 2026-10-23): an out-of-bounds write in the Brotli decoder (CVSS 4.0 9.2, CNA Google) that can lead to remote code execution where Brotli from an untrusted peer is decoded. ZES already reported vulnerable Node.js runtimes; it now also reports the Python packages that bundle the decoder.

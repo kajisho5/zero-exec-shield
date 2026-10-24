@@ -1,4 +1,4 @@
-// Unit tests for the 0.5.2 fixes (bug hunt round 5). Vectors shared with the CLI live in tests/*.json at the repository
+// Unit tests for the 0.5.3 fixes (bug hunt round 5). Vectors shared with the CLI live in tests/*.json at the repository
 // root and are checked against zes-scan.sh by tests/run-tests.sh; the fixtures under tests/fixtures/r5-* are compared with
 // the CLI by cli-parity.test.ts / parity.test.ts.
 import { readFileSync } from 'node:fs';

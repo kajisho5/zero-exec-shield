@@ -319,7 +319,7 @@ import hashlib, json, sys
 raw = open(sys.argv[1], "rb").read()
 d = json.loads(raw.decode("utf-8"))  # strict UTF-8
 esc = lambda s: s.replace("\\", "\\\\").replace("|", "\\|").replace("\x1f", "\\u001f")
-# Since 0.5.2 an invalid byte is \xHH in the id preimage, while findings.json shows it as the text "\xHH" (escaped to
+# Since 0.5.3 an invalid byte is \xHH in the id preimage, while findings.json shows it as the text "\xHH" (escaped to
 #   \\xHH): for the paths in non_utf8_path (no literal backslash here) the \xHH of the path are bytes
 nonutf8 = {e["reason"][len("non_utf8_path:"):] for e in d["errors"] if e["reason"].startswith("non_utf8_path:")}
 def v2(f):
@@ -339,7 +339,7 @@ else
   printf '  SKIP 不正 UTF-8 パスの JSON 検証（python3 が無い）\n'
 fi
 # Normal-form collision: a name made of the 4 characters "\xfe" and a name with the invalid byte 0xFE get the same path in
-# findings.json. Since 0.5.2 the id preimage is injective (ENC_ID), so both findings are kept with distinct ids and no
+# findings.json. Since 0.5.3 the id preimage is injective (ENC_ID), so both findings are kept with distinct ids and no
 # duplicate_finding_id (before, the second one was dropped)
 mkdir -p "$TMP/collide/a"$'\xfe' "$TMP/collide/a\xfe"
 for d in "$TMP/collide/a"$'\xfe' "$TMP/collide/a\xfe"; do cp "$FIX/mcp/.mcp.json" "$d/"; done
@@ -809,7 +809,7 @@ got2="$(git_rows vcs2)"; got1="$(git_rows vcs)"
   || ng "Git フック / ルートの VCS ディレクトリの結果が UI と異なる" "$got2"$'\n'"$got1"
 
 # ---------------------------------------------------------------------------
-echo "== round 5（0.5.2） =="
+echo "== round 5（0.5.3） =="
 # CLI-1: the YAML / TOML / JSONC readers are linear. Each 1 MB adversarial input (unclosed flow sequence over 20000 lines, a
 #   1 MB one-line flow element, a long block scalar, 1 MB of indentation or of blanks inside a line, node properties, 1 MB TOML
 #   strings and escapes, 250000 args, JSONC with 250000 comments) must be read in a few seconds (it took minutes to hours)
