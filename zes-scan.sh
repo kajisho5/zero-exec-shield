@@ -1941,14 +1941,19 @@ check_s2() {
 check_s3() {
   log_section "§3"
   local ver f found=0
-  # The CVEs evaluated are infrastructures[gitlab].cves in ioc (those with a fixed version). Without jq, the 3 known ones
+  # The CVEs evaluated are infrastructures[gitlab].cves in ioc (those with a fixed version). Without jq, the 3 known ones,
+  #   with the CVSS literal read from the same ioc.json line as infra_fixed does (code, params and id must not depend on jq)
   local -a gcves; local -A gcvss=()
+  local c v
   if [ "$HAVE_JQ" -eq 1 ]; then
-    local c v
     while IFS=$'\t' read -r c v; do gcves+=("$c"); [ -n "$v" ] && gcvss[$c]="$v"; done \
       < <(jq -r '.infrastructures[] | select(.id=="gitlab") | .cves[] | select((.fixed // []) | length > 0) | [.id, ((.cvss // "") | tostring)] | @tsv' "$IOC_FILE")
   else
     gcves=(CVE-2026-110264 CVE-2026-85706 CVE-2026-19478)
+    for c in "${gcves[@]}"; do
+      v="$(grep -o "\"$c\".*" "$IOC_FILE" | head -n1 | grep -o '"cvss": *[0-9][0-9.]*' | grep -o '[0-9][0-9.]*$')"
+      [ -n "$v" ] && gcvss[$c]="$v"
+    done
   fi
   while IFS=$'\t' read -r ver f; do
     [ -n "$ver" ] || continue
