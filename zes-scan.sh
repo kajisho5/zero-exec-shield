@@ -615,11 +615,10 @@ json_ptr_locators() {
   jq -r --arg fmt json "$@" "$prog" "$f" 2>/dev/null || jsonc_to_json "$f" | jq -r --arg fmt jsonc "$@" "$prog" 2>/dev/null || true
 }
 # Agent hooks (hooks.<Event>[i] of .claude/settings.json) whose command contains $s (case-insensitive)
-#   / matches $re (the unit /hooks/<Event>/<i> that claude.hook in GER removes)
+#   (the unit /hooks/<Event>/<i> that claude.hook in GER removes)
 HOOK_PATHS_STR='path(.hooks? | objects | .[]? | arrays | .[] | select([.. | objects | .command? | strings] | any(ascii_downcase | contains($s | ascii_downcase))))'
-HOOK_PATHS_RE='path(.hooks? | objects | .[]? | arrays | .[] | select([.. | objects | .command? | strings] | any(test($re))))'
 # Agent hook entries (/hooks/<Event>/<i>) in document order, one record per line: pointer US H US cmdline. H is 1 when a
-#   .command string inside the entry matches $re (as HOOK_PATHS_RE). Each entry gives one record with an empty cmdline,
+#   .command string inside the entry matches $re. Each entry gives one record with an empty cmdline,
 #   then one record per line of command + args of every object inside it that has command (as mcpq of check_s17)
 HOOK_ENTRY_CMDS='path(.hooks? | objects | .[]? | arrays | .[]) as $p | getpath($p) as $e
   | ("/" + ($p | map(tostring | gsub("~"; "~0") | gsub("/"; "~1")) | join("/"))) as $ptr

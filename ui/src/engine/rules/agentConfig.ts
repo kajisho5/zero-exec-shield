@@ -98,7 +98,7 @@ function runOnLocators(text: string): LocatorSpec[] {
   return out;
 }
 
-/** Same as HOOK_PATHS_STR / HOOK_PATHS_RE of the CLI: entries of hooks.<Event>[i] whose command inside matches pred (/hooks/<Event>/<i>) */
+/** Same as HOOK_PATHS_STR / HOOK_ENTRY_CMDS of the CLI: entries of hooks.<Event>[i] whose command inside matches pred (/hooks/<Event>/<i>) */
 export function hookLocators(text: string, pred: (cmd: string) => boolean): LocatorSpec[] {
   let fmt: 'json' | 'jsonc' = 'json';
   let j: unknown;
