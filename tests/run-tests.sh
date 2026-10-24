@@ -884,6 +884,20 @@ ZES_IOC="$C5/i$(printf '\033')c.json" run_scan "$TMP/r5-t1" quick "$FIX/_home" >
 [ "$c5_ok" -eq 1 ] && ok "カタログ由来の端末出力（バナー・見出し・結果行・エラーのパス）は符号化、プレースホルダの違うカタログは exit 64" \
   || ng "カタログの端末出力の符号化 / プレースホルダ検査が不十分"
 
+# CLI-7: relative ZES_I18N_DIR / ZES_IOC / ZES_SKILLPACT_CACHE / --root / ZES_HOME that awk could read as an assignment
+#   ("x=y") or other tools as an option ("-c"), and scanned names such as "x=y.yml", "-n" or "@f", are passed safely: the
+#   scan does not wait on stdin (here a pipe that stays open) and finds the same as with plain names
+N7="$TMP/r5-names"; mkdir -p "$N7/x=y" "$N7/-c" "$N7/h=1" "$N7/a=b/.github/workflows" "$N7/a=b/-n/.github/workflows" "$N7/plain/.github/workflows"
+cp "$REPO/i18n/en.json" "$REPO/i18n/ja.json" "$IOC" "$N7/x=y/"
+for d in "a=b/.github/workflows/x=y.yml" "a=b/-n/.github/workflows/@f.yml" "plain/.github/workflows/w.yml"; do
+  printf 'jobs:\n  a:\n    steps:\n      - uses: evil/a@v1\n' >"$N7/$d"
+done
+cp "$N7/plain/.github/workflows/w.yml" "$N7/plain/.github/workflows/v.yml"
+n7="$( ( cd "$N7" && ZES_I18N_DIR='x=y' ZES_IOC='x=y/ioc.json' ZES_SKILLPACT_CACHE='-c' ZES_HOME='h=1' ZES_HOST_CHECKS=0 ZES_OFFLINE=1 \
+  tmo 60 "$SCAN" --standard --root 'a=b' --json 2>/dev/null < <(sleep 30) ) | jq -c '[.findings[] | select(.module == "§22") | .code] | sort' 2>/dev/null)"
+p7="$(ZES_HOST_CHECKS=0 ZES_OFFLINE=1 ZES_HOME="$N7/h=1" "$SCAN" --standard --root "$N7/plain" --json 2>/dev/null </dev/null | jq -c '[.findings[] | select(.module == "§22") | .code] | sort')"
+[ -n "$n7" ] && [ "$n7" = "$p7" ] && ok "x=y・-c・@f のようなパスでも awk 等が代入・オプションと誤読せず、標準入力を待たない" || ng "x=y / -c / @f のパスの扱いが不正: ${n7:-（出力なし）} / $p7"
+
 echo
 echo "結果: PASS=$PASS FAIL=$FAIL"
 [ "$FAIL" -eq 0 ]

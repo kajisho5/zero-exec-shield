@@ -108,6 +108,9 @@ case "$_zes_src" in */*) _zes_src="${_zes_src%/*}" ;; *) _zes_src="." ;; esac
 SCRIPT_DIR="$(cd -- "${_zes_src:-/}" && pwd -P)"
 unset _zes_src
 IOC_FILE="${ZES_IOC:-$SCRIPT_DIR/rules/ioc.json}"
+# A relative path from the environment gets a "./" prefix: awk would read "x=y/ioc.json" as a variable assignment (and then
+#   read stdin), and grep / sed / jq would read "-x…" as an option. Paths of scanned files are always absolute (ROOT, HOME_DIR)
+case "$IOC_FILE" in /*) ;; *) IOC_FILE="./$IOC_FILE" ;; esac
 HOME_DIR="${ZES_HOME:-${HOME:-}}"
 HOST_CHECKS="${ZES_HOST_CHECKS:-1}"
 OFFLINE="${ZES_OFFLINE:-0}"
@@ -323,6 +326,11 @@ OS_NAME="$(uname -s 2>/dev/null || echo unknown)"
 case "$HOME_DIR" in -*) HOME_DIR="./$HOME_DIR" ;; esac
 HOME_DIR="$(cd -- "$HOME_DIR" 2>/dev/null && pwd -P)"
 { [ -n "$HOME_DIR" ] && [ -d "$HOME_DIR" ]; } || arg_error cli.arg.home_unresolved
+# The §49 cache is used by its real path too (find / jq / awk never see a relative "-x" or "x=y" operand)
+if [ -n "$SKILLPACT_CACHE" ] && [ -d "$SKILLPACT_CACHE" ]; then
+  case "$SKILLPACT_CACHE" in /*) ;; *) SKILLPACT_CACHE="./$SKILLPACT_CACHE" ;; esac
+  SKILLPACT_CACHE="$(cd -- "$SKILLPACT_CACHE" 2>/dev/null && pwd -P)"
+fi
 
 if [ -n "$TARGET_URL" ]; then
   case "$TARGET_URL" in
@@ -346,6 +354,7 @@ fi
 #   A file is told apart by its name (an empty file has no line 1, so counting files by FNR would be wrong)
 ZES_CATALOG_KEYS_SHA256="c2d43bd0032b08715c2a787f3cfdaa17bac827ffc97b4f5ae69843ca23e3471b"
 I18N_DIR="${ZES_I18N_DIR:-$SCRIPT_DIR/i18n}"
+case "$I18N_DIR" in /*) ;; *) I18N_DIR="./$I18N_DIR" ;; esac  # see IOC_FILE
 declare -A MSG_EN=() MSG_LANG=()
 ZES_CATALOG_AWK='
   function fail() { bad = 1; exit }
