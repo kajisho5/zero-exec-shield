@@ -1,5 +1,6 @@
 // E2E for the layout fixes of 0.5.1 (bug hunt round 4): the mobile detail sheet wraps a long unbroken message (UI 9),
 // and the SkillPact result column fits the longest label in both languages (UI 10). Opens index.html on file://.
+// The layout depends on the width only; isMobile / hasTouch are not set (setInputFiles on a directory hangs with them in Firefox and WebKit).
 import { expect, test } from '@playwright/test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +22,7 @@ function longRef(): string {
 for (const lang of ['en', 'ja'] as const) {
   for (const width of [320, 360]) {
     test(`${lang} ${width}px: the detail sheet wraps a long unbroken message`, async ({ browser }) => {
-      const ctx = await browser.newContext({ viewport: { width, height: 800 }, isMobile: true, hasTouch: true, locale: lang === 'ja' ? 'ja-JP' : 'en-US' });
+      const ctx = await browser.newContext({ viewport: { width, height: 800 }, locale: lang === 'ja' ? 'ja-JP' : 'en-US' });
       const page = await ctx.newPage();
       await page.goto(`${INDEX}?lang=${lang}`);
       await pickDir(page, longRef());
@@ -35,7 +36,7 @@ for (const lang of ['en', 'ja'] as const) {
   }
   for (const width of [320, 360, 768, 1280, 1440]) {
     test(`${lang} ${width}px: SkillPact rule results stay inside their column and row`, async ({ browser }) => {
-      const ctx = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 640, hasTouch: width < 640, locale: lang === 'ja' ? 'ja-JP' : 'en-US' });
+      const ctx = await browser.newContext({ viewport: { width, height: 900 }, locale: lang === 'ja' ? 'ja-JP' : 'en-US' });
       const page = await ctx.newPage();
       await page.goto(`${INDEX}?lang=${lang}`);
       await pickDir(page, FIX + 'skillpact-signed-divergence');
