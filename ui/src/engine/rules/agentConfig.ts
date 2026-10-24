@@ -3,6 +3,7 @@ import { push, readable, type RuleCtx } from '../context';
 import type { McpServerView } from '../types';
 import { parseCodexToml } from '../toml';
 import { clip, jsonPointer, parseJsonc, versionCmp, type LocatorSpec } from '../util';
+import { INVISIBLE_CLASS } from '../hiddenChars';
 import { collectDeps } from './supplyChain';
 
 export { parseCodexToml };
@@ -165,6 +166,8 @@ export const isAiInstruction = (f: { name: string; relPath: string }) =>
   /^(\.cursorrules|CLAUDE\.md|CLAUDE\.local\.md|AGENTS\.md|GEMINI\.md|copilot-instructions\.md|\.windsurfrules|\.clinerules)$/.test(f.name)
   || /(^|\/)\.cursor\/rules\/[^/]+$|(^|\/)\.clinerules\/.+|(^|\/)\.github\/instructions\/.+|(^|\/)\.claude\/(.+\/)?[^/]+\.md$/.test(f.relPath);
 
+const INVISIBLE_7 = new RegExp(`[${INVISIBLE_CLASS}]|[\\u{FE00}-\\u{FE0F}]{2}`, 'u');
+
 /** §7 Invisible characters, BiDi control characters and homoglyphs in AI instruction files; Git hooks. */
 export function aiAssistantRules(ctx: RuleCtx): void {
   ctx.checks.add('s7-invisible').add('s7-homoglyph').add('s7-git-hook');
@@ -178,7 +181,7 @@ export function aiAssistantRules(ctx: RuleCtx): void {
   const targets = readable(ctx).filter(isAiInstruction);
   for (const f of targets) {
     // Embedding with variation selectors (U+FE00–FE0D, U+E0100–E01EF, 2 or more consecutive U+FE00–FE0F) is covered too (same as CLI §7)
-    if (/[​-‏‪-‮⁠-⁤⁦-⁩]|[\u{E0000}-\u{E007F}]|[\u{FE00}-\u{FE0D}]|[\u{E0100}-\u{E01EF}]|[\u{FE00}-\u{FE0F}]{2}/u.test(f.text)) {
+    if (INVISIBLE_7.test(f.text)) {
       push(ctx, { level: 'HIGH', module: '§7', campaign: null, path: f.relPath, code: 's7.invisible_chars', ruleId: 's7-invisible', evidenceSha: f.sha256 });
     }
     if (/[A-Za-z][Ͱ-ϿЀ-ӿ]|[Ͱ-ϿЀ-ӿ][A-Za-z]/u.test(f.text)) {

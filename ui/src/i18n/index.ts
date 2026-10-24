@@ -47,11 +47,15 @@ export function translate(lang: Lang, key: MsgKey, params?: Params): string {
   return render(CATALOG[lang][key] ?? CATALOG.en[key] ?? key, params);
 }
 
-/** A finding's message in the given language: f.<code> with its params when the catalog has the code, otherwise detail
- *  as is (findings imported from findings 1.0 / 1.1, or a code from a newer CLI). */
+/** A finding's message in the given language: f.<code> with its params when the catalog has the code and the params
+ *  fill every placeholder of it, otherwise detail as is (findings imported from findings 1.0 / 1.1, a code from a newer
+ *  CLI, or a finding from another version whose message has a placeholder its params do not have). */
 export function findingText(lang: Lang, f: { code?: string; params?: Record<string, string>; detail: string }): string {
   const key = f.code ? `f.${f.code}` : '';
-  return key && Object.hasOwn(CATALOG.en, key) ? translate(lang, key as MsgKey, f.params) : f.detail;
+  if (!key || !Object.hasOwn(CATALOG.en, key)) return f.detail;
+  const params = f.params ?? {};
+  const holes = [...CATALOG.en[key as MsgKey].matchAll(/\{([a-z_]+)\}/g)].map((m) => m[1]!);
+  return holes.every((h) => Object.hasOwn(params, h)) ? translate(lang, key as MsgKey, params) : f.detail;
 }
 
 export const getLang = () => current;
