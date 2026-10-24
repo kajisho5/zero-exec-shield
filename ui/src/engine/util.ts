@@ -128,16 +128,23 @@ export function findingDetail(code: FCode, params: Record<string, string>): stri
   return translate('en', `f.${code}`, params);
 }
 
-/** Values in C-locale key order joined by U+001F as key=value (the canon of the CLI's id v2). */
-export function idCanon(params: Record<string, string>): string {
-  const keys = Object.keys(params).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  return keys.map((k) => `${k}=${params[k]}`).join('\u001f');
+/** Escaping of one id v2 component or param value (the CLI's zes_id_esc): \ → \\, | → \|, U+001F → the six characters
+ *  \u001f. Without it a "|" or U+001F inside a path or value could make two findings share a preimage. */
+export function idEsc(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\u001f/g, '\\u001f');
 }
 
-/** id v2 (the CLI's emit): sha256("zes-id-v2|" module "|" campaign "|" path "|" code "|" canon). The UI path is relative
- *  to the dropped folder, so a UI id differs from the CLI id of the same file. */
+/** Values in C-locale key order joined by U+001F as key=value, each value escaped (the canon of the CLI's id v2). */
+export function idCanon(params: Record<string, string>): string {
+  const keys = Object.keys(params).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return keys.map((k) => `${k}=${idEsc(params[k]!)}`).join('\u001f');
+}
+
+/** id v2 (the CLI's emit): sha256("zes-id-v2|" module "|" campaign "|" path "|" code "|" canon), every component
+ *  escaped with idEsc. The UI path is relative to the dropped folder, so a UI id differs from the CLI id of the same file. */
 export async function findingId(module: string, campaign: string | null, path: string | null, code: string, params: Record<string, string>): Promise<string> {
-  return 'sha256:' + (await sha256Hex(`zes-id-v2|${module}|${campaign ?? ''}|${path ?? ''}|${code}|${idCanon(params)}`));
+  const c = [module, campaign ?? '', path ?? '', code].map(idEsc);
+  return 'sha256:' + (await sha256Hex(`zes-id-v2|${c.join('|')}|${idCanon(params)}`));
 }
 
 export async function makeFinding(s: FindingSpec): Promise<Finding> {

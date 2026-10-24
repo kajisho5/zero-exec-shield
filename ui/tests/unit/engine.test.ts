@@ -250,8 +250,9 @@ describe('findings 1.2: code, params, English detail, id v2 (the CLI emit)', () 
         expect(Object.keys(p).sort(), f.code).toEqual([...new Set([...t!.matchAll(/\{([a-z_]+)\}/g)].map((m) => m[1]))].sort());
         expect(Object.values(p).every((v) => typeof v === 'string'), f.code).toBe(true);
         expect(f.detail).toBe(render(t!, p));
-        const canon = Object.keys(p).sort().map((k) => `${k}=${p[k]}`).join('\u001f');
-        expect(f.id).toBe('sha256:' + (await sha(['zes-id-v2', f.module, f.campaign ?? '', f.path ?? '', f.code, canon].join('|'))));
+        const esc = (x: string) => x.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\u001f/g, '\\u001f');
+        const canon = Object.keys(p).sort().map((k) => `${k}=${esc(p[k]!)}`).join('\u001f');
+        expect(f.id).toBe('sha256:' + (await sha(['zes-id-v2', ...[f.module, f.campaign ?? '', f.path ?? '', f.code].map(esc), canon].join('|'))));
         expect(f.detail).not.toMatch(/[\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]/);
       }
     }

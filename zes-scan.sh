@@ -599,7 +599,9 @@ default_related() {
 #   CODE is the message id: detail = render(i18n/en.json "f.CODE", params), always English. The terminal line uses the
 #   selected language. Params are the values of the message (strings), never file contents.
 #   id v2: sha256("zes-id-v2|" module "|" campaign "|" path "|" CODE "|" canon), canon = "key=value" in C-locale key
-#   order joined by U+001F, values in the zes_enc normal form (a null campaign / path is the empty string)
+#   order joined by U+001F, values in the zes_enc normal form (a null campaign / path is the empty string). Every
+#   component and every param value is escaped first (zes_id_esc: \ → \\, | → \|, U+001F → the six characters \u001f),
+#   so that a "|" or U+001F inside a path or value cannot make two findings share a preimage
 #   evidence_hash is the SHA-256 of the file for a regular file, otherwise the SHA-256 of the (English) detail (same as findings 1.0; do not change)
 #   evidence (findings 1.1) is typed evidence: file for a regular file (large_file over 100MB; same value as evidence_hash),
 #   symlink for a symbolic link (SHA-256 of the bytes of the readlink value), tree for a directory (ger-tree-v1),
@@ -607,6 +609,12 @@ default_related() {
 #   EXTRA_JSON holds the kind / subject / locators / related members (built with x_*). It does not affect id or evidence_hash
 #   When a path contains invalid UTF-8 bytes, path becomes the value after "\xHH" replacement, so non_utf8_path is recorded in errors[]
 declare -A SEEN_IDS=()
+ZES_BS='\'
+zes_id_esc() {  # zes_id_esc VALUE → ID_ESC
+  local v="${1//"$ZES_BS"/"$ZES_BS$ZES_BS"}"
+  v="${v//"|"/"$ZES_BS|"}"
+  ID_ESC="${v//"$US_CHAR"/"${ZES_BS}u001f"}"
+}
 emit() {
   local level="$1" campaign="$2" path="$3" code="$4"; shift 4
   local module="$CURRENT_MODULE" sp="" extra="" a k i j
@@ -630,7 +638,8 @@ emit() {
     kv+=("${ks[i]}=${vs[i]}")
     zes_enc "${vs[i]}"
     [ "$i" -gt 0 ] && canon+=$'\037'
-    canon+="${ks[i]}=$ENC_NORM"
+    zes_id_esc "$ENC_NORM"
+    canon+="${ks[i]}=$ID_ESC"
     pj+="${pj:+,}\"${ks[i]}\":\"$ENC_JSON\""
   done
   local id ev evk evh color np jp tp pbad nd jd td nc jc
@@ -639,7 +648,9 @@ emit() {
   if [ "$ZES_LANG_RESOLVED" != en ]; then zes_render "${MSG_LANG["f.$code"]-"f.$code"}" "${kv[@]}"; zes_enc "$RENDERED"; td="$ENC_TERM"; fi
   zes_enc "$path"; np="$ENC_NORM"; jp="$ENC_JSON"; tp="$ENC_TERM"; pbad="$ENC_BAD"
   zes_enc "$campaign"; nc="$ENC_NORM"; jc="$ENC_JSON"
-  id="sha256:$(sha256_str "zes-id-v2|$module|$nc|$np|$code|$canon")"
+  local im ic ip
+  zes_id_esc "$module"; im="$ID_ESC"; zes_id_esc "$nc"; ic="$ID_ESC"; zes_id_esc "$np"; ip="$ID_ESC"; zes_id_esc "$code"
+  id="sha256:$(sha256_str "zes-id-v2|$im|$ic|$ip|$ID_ESC|$canon")"
   # Each id only once. If the raw paths differ but the normal form is the same (the string "\xHH" vs. the invalid byte 0xHH),
   #   the dropped duplicate is recorded in errors[] (same handling as dedup_findings; dedup_findings catches those across subshells)
   if [ -n "${SEEN_IDS[$id]+x}" ]; then

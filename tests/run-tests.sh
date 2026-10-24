@@ -318,9 +318,10 @@ if python3 -I -c 'pass' 2>/dev/null; then
 import hashlib, json, sys
 raw = open(sys.argv[1], "rb").read()
 d = json.loads(raw.decode("utf-8"))  # strict UTF-8
+esc = lambda s: s.replace("\\", "\\\\").replace("|", "\\|").replace("\x1f", "\\u001f")
 def v2(f):
-    canon = "\x1f".join(k + "=" + f["params"][k] for k in sorted(f["params"], key=lambda k: k.encode()))
-    return "sha256:" + hashlib.sha256("|".join(["zes-id-v2", f["module"], f["campaign"] or "", f["path"] or "", f["code"], canon]).encode()).hexdigest()
+    canon = "\x1f".join(k + "=" + esc(f["params"][k]) for k in sorted(f["params"], key=lambda k: k.encode()))
+    return "sha256:" + hashlib.sha256("|".join(["zes-id-v2"] + [esc(x) for x in (f["module"], f["campaign"] or "", f["path"] or "", f["code"])] + [canon]).encode()).hexdigest()
 bad = [f["path"] for f in d["findings"] if f["id"] != v2(f)]
 n = len([f for f in d["findings"] if f["module"] == "§17"])
 nu = len([e for e in d["errors"] if e["module"] == "core" and e["reason"].startswith("non_utf8_path:") and "\\xff\\xfe" in e["reason"]])
@@ -521,8 +522,9 @@ for f in sys.argv[2:]:
         if t is None: bad.append(f"unknown code {x['code']}"); continue
         if sorted(x["params"]) != sorted(set(re.findall(r"\{([a-z_]+)\}", t))): bad.append(f"params {x['code']}: {sorted(x['params'])}")
         if x["detail"] != render(t, x["params"]): bad.append(f"detail {x['code']}: {x['detail'][:80]}")
-        canon = "\x1f".join(k + "=" + x["params"][k] for k in sorted(x["params"], key=lambda k: k.encode()))
-        if x["id"] != "sha256:" + hashlib.sha256("|".join(["zes-id-v2", x["module"], x["campaign"] or "", x["path"] or "", x["code"], canon]).encode()).hexdigest():
+        esc = lambda s: s.replace("\\", "\\\\").replace("|", "\\|").replace("\x1f", "\\u001f")
+        canon = "\x1f".join(k + "=" + esc(x["params"][k]) for k in sorted(x["params"], key=lambda k: k.encode()))
+        if x["id"] != "sha256:" + hashlib.sha256("|".join(["zes-id-v2"] + [esc(y) for y in (x["module"], x["campaign"] or "", x["path"] or "", x["code"])] + [canon]).encode()).hexdigest():
             bad.append(f"id {x['code']} {x['path']}")
 print("\n".join(bad[:20]) or f"{n} findings, {len(codes)} codes")
 sys.exit(1 if bad or n == 0 else 0)

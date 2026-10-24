@@ -1,0 +1,89 @@
+{
+  "description": "id v2 vectors (findings 1.2, ZES 0.5.1): sha256 of \"zes-id-v2|\" module \"|\" campaign \"|\" path \"|\" code \"|\" canon, each component and param value escaped (\\\\ -> \\\\\\\\, | -> \\\\|, U+001F -> \\\\u001f), canon = key=value in C-locale key order joined by U+001F. Checked by tests/run-tests.sh and ui/tests/unit/r4.test.ts.",
+  "cases": [
+    {
+      "name": "plain",
+      "module": "§22",
+      "campaign": null,
+      "path": "/r/.github/workflows/w.yml",
+      "code": "s22.unpinned",
+      "params": {
+        "ref": "evil/b@v1"
+      },
+      "id": "sha256:85cdc6c0e761cbbfcd5fb5a7e01ee195fea5b98934680350a69f8998c9808e1b"
+    },
+    {
+      "name": "collision-a (a | in a param)",
+      "module": "§22",
+      "campaign": null,
+      "path": "/r/.github/workflows/w.yml",
+      "code": "s22.unpinned",
+      "params": {
+        "ref": "x.yml|s22.unpinned|ref=evil/b@v1"
+      },
+      "id": "sha256:25ad98b0248fba3f1108fcf26356433d84c0b915b6a1bf54a2b33d6f6a04b74c"
+    },
+    {
+      "name": "collision-b (the same | in the path)",
+      "module": "§22",
+      "campaign": null,
+      "path": "/r/.github/workflows/w.yml|s22.unpinned|ref=x.yml",
+      "code": "s22.unpinned",
+      "params": {
+        "ref": "evil/b@v1"
+      },
+      "id": "sha256:2b0899d55f44c9577211c89d579629c508cb86272f21dfe2bdf2b8b2f7a08ef3"
+    },
+    {
+      "name": "U+001F in a value",
+      "module": "§48",
+      "campaign": null,
+      "path": "/r/sbom.json",
+      "code": "s48.sbom_mismatch",
+      "params": {
+        "mismatched": "1\u001fmissing=2",
+        "missing": "0"
+      },
+      "id": "sha256:7604c1bed5c3f907b4ed1378290330213c8372305a1a316f986bce0656c2a307"
+    },
+    {
+      "name": "U+001F as the separator",
+      "module": "§48",
+      "campaign": null,
+      "path": "/r/sbom.json",
+      "code": "s48.sbom_mismatch",
+      "params": {
+        "mismatched": "1",
+        "missing": "2"
+      },
+      "id": "sha256:b6b32e6c82ceaf1020fa8ee96b0d1df4ee93747993e3a10d60d763c9f4c6b104"
+    },
+    {
+      "name": "backslash",
+      "module": "§17",
+      "campaign": "chaindrop-keyv",
+      "path": "/r/back\\x41slash/setup.mjs",
+      "code": "s17.setup_mjs",
+      "params": {},
+      "id": "sha256:638adf9626cf793cb7240489d710008b28f5fe03c357351b251e55c23389d1a2"
+    },
+    {
+      "name": "escaped characters literally",
+      "module": "§17",
+      "campaign": null,
+      "path": "/r/a\\|b\\u001f",
+      "code": "s17.setup_mjs",
+      "params": {},
+      "id": "sha256:a7063cff175a7b8ecfcb2592da8e016b2e4b8b68759704de73c346853e20709d"
+    },
+    {
+      "name": "null campaign and path",
+      "module": "§12",
+      "campaign": null,
+      "path": null,
+      "code": "s12.pythonnousersite",
+      "params": {},
+      "id": "sha256:179fc032eae75aa95693a1a77d93198dcd6457bbc7890cfc171def763576853d"
+    }
+  ]
+}
