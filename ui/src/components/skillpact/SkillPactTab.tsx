@@ -5,7 +5,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { CircleDashed, GitCompare, Search } from 'lucide-react';
 import { EFFECTS, IOC, type Severity, type SkillPactAnalysis } from '@/engine';
-import { t as tNow, textLang, useLang, type MsgKey } from '@/i18n';
+import { t as tNow, textLang, useLang, type Lang, type MsgKey } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { visibleOpt, visiblePath } from '@/lib/visiblePath';
 import { SEV } from '@/components/severity/severity';
@@ -167,6 +167,13 @@ function EffectMatrix({ a }: { a: SkillPactAnalysis }) {
   );
 }
 
+// From 640 px the result column has one width per language (every row the same, so the column lines up): the longest
+// English label ("Not applicable") needs about 87 px, the Japanese ones 50 px. Below 640 px the level and the result
+// go on a second line under the title, which keeps the full width
+const RESULT_COLS: Record<Lang, string> = {
+  en: 'grid-cols-[22px_minmax(0,1fr)_auto] sm:grid-cols-[22px_minmax(0,1fr)_auto_88px]',
+  ja: 'grid-cols-[22px_minmax(0,1fr)_auto] sm:grid-cols-[22px_minmax(0,1fr)_auto_56px]',
+};
 const RESULT: Record<SkillPactAnalysis['results'][number]['status'], MsgKey> = { hit: 'ui.sp.result.hit', clear: 'ui.sp.result.clear', 'n/a': 'ui.sp.result.na', undetermined: 'ui.sp.result.undetermined' };
 
 function SevIcon({ level }: { level: Severity }) {
@@ -193,7 +200,7 @@ function Remark({ level, title, children, testid }: { level: Severity | null; ti
 function Report({ a }: { a: SkillPactAnalysis }) {
   const hits = a.results.filter((r) => r.status === 'hit').length;
   const und = a.results.filter((r) => r.status === 'undetermined').length;
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const ident = a.diffAnomaly ? t(({ same: 'ui.sp.author.same', changed: 'ui.sp.author.changed', unsigned: 'ui.sp.author.unsigned' } as const)[a.diffAnomaly.identity]) : '';
   const compareUndetermined = !a.diffAnomaly && a.results.some((r) => r.ruleNo === 9 && r.status === 'undetermined');
   const contract = contractValue(a, t);
@@ -252,11 +259,11 @@ function Report({ a }: { a: SkillPactAnalysis }) {
             const hit = r.status === 'hit';
             return (
               <li key={r.ruleNo} data-testid="rule-row" data-status={r.status}
-                className={cn('relative grid min-h-8 grid-cols-[22px_minmax(0,1fr)_auto_56px] items-center gap-x-2.5 rounded-sm px-2.5 py-1 text-[13px]', hit && SEV[r.level].tint)}>
+                className={cn('relative grid min-h-8 items-center gap-x-2.5 rounded-sm px-2.5 py-1 text-[13px]', RESULT_COLS[lang], hit && SEV[r.level].tint)}>
                 {hit && <span aria-hidden="true" className={cn('absolute inset-y-0 left-0 w-[3px]', SEV[r.level].bar)} />}
                 <span className="text-right text-[12.5px] font-medium text-muted-foreground tabular-nums">{r.ruleNo}</span>
-                <span className="min-w-0 break-words">{t(r.title)}</span>
-                <span className={cn('text-xs font-medium', hit ? SEV[r.level].fg : 'text-muted-foreground')}>{r.level}</span>
+                <span className="col-span-2 min-w-0 break-words sm:col-span-1">{t(r.title)}</span>
+                <span className={cn('col-start-2 text-xs font-medium sm:col-start-3', hit ? SEV[r.level].fg : 'text-muted-foreground')}>{r.level}</span>
                 <span className={cn('text-right text-[12.5px]', hit ? cn('font-semibold', SEV[r.level].fg) : 'text-muted-foreground')}>{t(RESULT[r.status])}</span>
               </li>
             );
